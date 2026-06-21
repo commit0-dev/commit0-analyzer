@@ -1,0 +1,30 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+
+linters-settings:
+  govet:
+    enable-all: false
+    enable:
+      - shadow
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+
+issues:
+  exclude-rules:
+    # Generated protobuf files are not subject to linting.
+    - path: "pkg/contract/anstv1/.*\\.go"
+      linters:
+        - all
+  max-issues-per-linter: 50
+  max-same-issues: 10
+
+run:
+  timeout: 5m

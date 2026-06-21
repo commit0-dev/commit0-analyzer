@@ -1,0 +1,89 @@
+[
+  {
+    "advisory": {
+      "id": "GO-2024-0001",
+      "url": "https://pkg.go.dev/vuln/GO-2024-0001",
+      "aliases": [
+        "CVE-2024-12345"
+      ]
+    },
+    "module": "golang.org/x/net",
+    "confidence": "CONFIDENCE_SYMBOL_REACHABLE",
+    "severity": "SEVERITY_HIGH",
+    "path": {
+      "steps": [
+        {
+          "location": {
+            "file": "cmd/main.go",
+            "line": 42,
+            "column": 5
+          },
+          "symbol": "main.main"
+        },
+        {
+          "location": {
+            "file": "internal/client/client.go",
+            "line": 17,
+            "column": 3
+          },
+          "symbol": "internal/client.Client.Do"
+        },
+        {
+          "location": {
+            "file": "vendor/golang.org/x/net/http2/transport.go",
+            "line": 99,
+            "column": 12
+          },
+          "symbol": "golang.org/x/net/http2.(*Transport).RoundTrip"
+        }
+      ]
+    },
+    "properties": {
+      "algorithm": "vta",
+      "goarch": "amd64",
+      "goos": "linux",
+      "snapshot_digest": "sha256:abc123"
+    },
+    "pillar": "sca",
+    "language": "go"
+  },
+  {
+    "advisory": {
+      "id": "GO-2024-0002",
+      "url": "https://pkg.go.dev/vuln/GO-2024-0002"
+    },
+    "module": "github.com/example/lib",
+    "confidence": "CONFIDENCE_NOT_REACHABLE",
+    "severity": "SEVERITY_MEDIUM",
+    "properties": {
+      "algorithm": "vta",
+      "goos": "linux"
+    }
+  },
+  {
+    "advisory": {
+      "id": "GO-2024-0003",
+      "url": "https://pkg.go.dev/vuln/GO-2024-0003"
+    },
+    "module": "github.com/example/reflection",
+    "confidence": "CONFIDENCE_UNKNOWN",
+    "severity": "SEVERITY_HIGH",
+    "properties": {
+      "algorithm": "vta",
+      "goos": "linux"
+    }
+  },
+  {
+    "advisory": {
+      "id": "GO-2024-0004",
+      "url": "https://pkg.go.dev/vuln/GO-2024-0004"
+    },
+    "module": "github.com/example/pkg",
+    "confidence": "CONFIDENCE_PACKAGE_REACHABLE",
+    "severity": "SEVERITY_CRITICAL",
+    "properties": {
+      "algorithm": "vta",
+      "goos": "linux"
+    }
+  }
+]

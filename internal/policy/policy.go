@@ -1,0 +1,206 @@
+// Package policy implements the policy-as-code gate for anst-analyzer.
+//
+// Responsibilities:
+//   - Evaluate a set of findings against a user-supplied policy configuration.
+//   - Determine the process exit code: 0 (pass), 1 (policy violation), 3
+//     (operational error / incomplete scan — never exits 0 on partial results).
+//   - Enforce the suppression invariant: only CONFIDENCE_NOT_REACHABLE findings
+//     may be excluded from threshold counts; UNKNOWN findings are always counted.
+//   - Handle ignore-list scoping (per advisory ID, module, or path) without
+//     silently broadening scope.
+//
+// Policy tiers (reachable-only gate example):
+//   - "reachable-only": threshold applies to SYMBOL_REACHABLE + PACKAGE_REACHABLE
+//     + UNKNOWN (any finding that could be reachable); NOT_REACHABLE excluded.
+//   - Custom severity thresholds: exit non-zero when HIGH+ count exceeds limit.
+//
+// A crashed or incomplete scan MUST exit 3, never 0.
+package policy
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+
+	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/ducthinh993/anst-analyzer/pkg/contract"
+)
+
+// severityRank maps Severity enum values to comparable integers.
+// Higher number = higher severity.
+var severityRank = map[anstv1.Severity]int{
+	anstv1.Severity_SEVERITY_UNSPECIFIED: 0,
+	anstv1.Severity_SEVERITY_LOW:         1,
+	anstv1.Severity_SEVERITY_MEDIUM:      2,
+	anstv1.Severity_SEVERITY_HIGH:        3,
+	anstv1.Severity_SEVERITY_CRITICAL:    4,
+}
+
+// parseSeverity converts a threshold string (e.g. "high") to a Severity enum.
+func parseSeverity(s string) (anstv1.Severity, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "low":
+		return anstv1.Severity_SEVERITY_LOW, nil
+	case "medium":
+		return anstv1.Severity_SEVERITY_MEDIUM, nil
+	case "high":
+		return anstv1.Severity_SEVERITY_HIGH, nil
+	case "critical":
+		return anstv1.Severity_SEVERITY_CRITICAL, nil
+	case "":
+		return anstv1.Severity_SEVERITY_UNSPECIFIED, nil
+	default:
+		return anstv1.Severity_SEVERITY_UNSPECIFIED,
+			fmt.Errorf("unknown severity threshold %q: must be low|medium|high|critical", s)
+	}
+}
+
+// EvalFlags carries scan-level metadata that modifies gate behaviour.
+type EvalFlags struct {
+	// Incomplete signals that the scan did not fully complete (e.g. a plugin
+	// crashed, a build target failed, or the host reported an error).
+	// An incomplete scan MUST exit ExitOperationalError, never ExitPass.
+	Incomplete bool
+}
+
+// policyYAML is the raw YAML structure for unmarshalling.
+type policyYAML struct {
+	FailOn        string          `yaml:"fail-on"`
+	ReachableOnly bool            `yaml:"reachable-only"`
+	Ignores       []ignoreYAML    `yaml:"ignores"`
+}
+
+// ignoreYAML is the raw YAML structure for an ignore entry.
+type ignoreYAML struct {
+	AdvisoryID     string `yaml:"advisory-id"`
+	Module         string `yaml:"module"`
+	Symbol         string `yaml:"symbol,omitempty"`
+	Reason         string `yaml:"reason"`
+	ExpiresAt      string `yaml:"expires-at"`
+	ElevatedIgnore bool   `yaml:"elevated-ignore,omitempty"`
+}
+
+// Policy holds the parsed and validated policy configuration.
+type Policy struct {
+	// FailOn is the minimum severity that triggers a gate failure (e.g. "high").
+	FailOn string
+	// ReachableOnly restricts gating to findings that are not proven safe:
+	// SYMBOL_REACHABLE, PACKAGE_REACHABLE, and UNKNOWN. Only NOT_REACHABLE
+	// is excluded. See Red Team #15c.
+	ReachableOnly bool
+	// Ignores is the list of active ignore entries.
+	Ignores []IgnoreEntry
+}
+
+// LoadPolicy parses and validates a policy from YAML bytes.
+// Returns an error if any ignore entry has an empty reason, a wildcard, or an
+// invalid expiry date.
+func LoadPolicy(data []byte) (*Policy, error) {
+	var raw policyYAML
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("policy: YAML parse error: %w", err)
+	}
+
+	p := &Policy{
+		FailOn:        raw.FailOn,
+		ReachableOnly: raw.ReachableOnly,
+	}
+
+	for i, ig := range raw.Ignores {
+		entry := IgnoreEntry{
+			AdvisoryID:     ig.AdvisoryID,
+			Module:         ig.Module,
+			Symbol:         ig.Symbol,
+			Reason:         ig.Reason,
+			ElevatedIgnore: ig.ElevatedIgnore,
+		}
+		if ig.ExpiresAt != "" {
+			t, err := time.Parse("2006-01-02", ig.ExpiresAt)
+			if err != nil {
+				return nil, fmt.Errorf("policy: ignore[%d]: invalid expires-at %q: %w", i, ig.ExpiresAt, err)
+			}
+			// Treat the expiry as end-of-day UTC.
+			entry.ExpiresAt = t.Add(24*time.Hour - time.Second)
+		}
+		if err := entry.Validate(); err != nil {
+			return nil, fmt.Errorf("policy: ignore[%d]: %w", i, err)
+		}
+		p.Ignores = append(p.Ignores, entry)
+	}
+	return p, nil
+}
+
+// isGateEligible reports whether a finding is eligible to trigger a gate failure
+// under the current policy settings.
+//
+// Under reachable-only mode (Red Team #15c):
+//   - SYMBOL_REACHABLE → eligible (definitely reachable)
+//   - PACKAGE_REACHABLE → eligible (not proven safe)
+//   - UNKNOWN → eligible (unknown ≠ safe)
+//   - NOT_REACHABLE → NOT eligible (only excludable tier)
+//
+// Without reachable-only: all findings are eligible regardless of confidence.
+func (p *Policy) isGateEligible(f *anstv1.Finding) bool {
+	if p.ReachableOnly {
+		// Use the contract wrapper to enforce the suppression invariant.
+		// IsSuppressible() is true ONLY for NOT_REACHABLE.
+		return !contract.WrapFinding(f).IsSuppressible()
+	}
+	return true
+}
+
+// isIgnored reports whether f is suppressed by an active (non-expired, matching)
+// ignore entry.
+func (p *Policy) isIgnored(f *anstv1.Finding) bool {
+	for _, ig := range p.Ignores {
+		if isActiveIgnore(ig, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// meetsThreshold reports whether f's severity meets or exceeds the configured
+// fail-on threshold.
+func (p *Policy) meetsThreshold(f *anstv1.Finding) bool {
+	threshold, err := parseSeverity(p.FailOn)
+	if err != nil {
+		// Unknown threshold: fail closed — treat everything as above threshold.
+		return true
+	}
+	if threshold == anstv1.Severity_SEVERITY_UNSPECIFIED {
+		// No threshold configured: nothing triggers a failure.
+		return false
+	}
+	return severityRank[f.GetSeverity()] >= severityRank[threshold]
+}
+
+// Evaluate runs the gate against findings using default (complete scan) flags.
+// Returns ExitPass, ExitGateFailure, or ExitOperationalError.
+func (p *Policy) Evaluate(findings []*anstv1.Finding) int {
+	return p.EvaluateWithFlags(findings, EvalFlags{})
+}
+
+// EvaluateWithFlags runs the gate with explicit scan-state flags.
+// If flags.Incomplete is true, returns ExitOperationalError regardless of findings
+// (fail-closed: an incomplete scan must never read as a pass).
+func (p *Policy) EvaluateWithFlags(findings []*anstv1.Finding, flags EvalFlags) int {
+	if flags.Incomplete {
+		return ExitOperationalError
+	}
+
+	for _, f := range findings {
+		if !p.isGateEligible(f) {
+			continue
+		}
+		if p.isIgnored(f) {
+			continue
+		}
+		if p.meetsThreshold(f) {
+			return ExitGateFailure
+		}
+	}
+	return ExitPass
+}

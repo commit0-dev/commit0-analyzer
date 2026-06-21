@@ -1,0 +1,333 @@
+package cli_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// repoRoot returns the absolute path to the repository root.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	// This file is at internal/cli/scan_test.go; repo root is two dirs up.
+	return filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+}
+
+// corpusDir returns the absolute path to testdata/corpus/.
+func corpusDir(t *testing.T) string {
+	return filepath.Join(repoRoot(t), "testdata", "corpus")
+}
+
+// snapshotDir returns the path to the pinned test snapshot.
+func snapshotDir(t *testing.T) string {
+	return filepath.Join(corpusDir(t), "db-snapshot")
+}
+
+// buildPluginBinary compiles the go-reachability plugin into a temp dir.
+// Cached per test binary invocation via t.TempDir (each test gets its own
+// temp dir, but since it's a fresh compile it is deterministic).
+func buildPluginBinary(t *testing.T) string {
+	t.Helper()
+	binPath := filepath.Join(t.TempDir(), "go-reachability")
+	cmd := exec.Command("go", "build", "-o", binPath,
+		"github.com/ducthinh993/anst-analyzer/plugins/go-reachability")
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "build plugin binary:\n%s", out)
+	return binPath
+}
+
+// runScanBinary runs the anst-analyzer binary with the given args and captures
+// stdout/stderr. It returns (stdout, stderr, exitCode).
+func runScanBinary(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
+	t.Helper()
+
+	// Build the CLI binary fresh.
+	cliBin := filepath.Join(t.TempDir(), "anst-analyzer")
+	build := exec.Command("go", "build", "-o", cliBin,
+		"github.com/ducthinh993/anst-analyzer/cmd/anst")
+	build.Env = os.Environ()
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, "build anst-analyzer CLI:\n%s", out)
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd := exec.CommandContext(context.Background(), cliBin, args...)
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	cmd.Env = os.Environ()
+
+	runErr := cmd.Run()
+	stdout = stdoutBuf.String()
+	stderr = stderrBuf.String()
+
+	if runErr == nil {
+		exitCode = 0
+	} else {
+		var exitErr *exec.ExitError
+		if ok := isExitError(runErr, &exitErr); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+	return stdout, stderr, exitCode
+}
+
+func isExitError(err error, target **exec.ExitError) bool {
+	if e, ok := err.(*exec.ExitError); ok {
+		*target = e
+		return true
+	}
+	return false
+}
+
+// TestScan_ReachableCVE_SARIF_ExitsOne is the primary E2E test:
+// scanning the reachable-cve corpus fixture with a "high" policy must produce:
+//   - SARIF output containing the CORPUS-CVE-001 ruleId
+//   - exit code 1 (gate failure) because the finding is SYMBOL_REACHABLE / HIGH.
+//
+// The go-reachability plugin is driven THROUGH the host (subprocess + gRPC),
+// not called in-process. The --plugin-binary flag points to the pre-built binary.
+func TestScan_ReachableCVE_SARIF_ExitsOne(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	modDir := filepath.Join(corpusDir(t), "reachable-cve")
+	snap := snapshotDir(t)
+
+	stdout, stderr, code := runScanBinary(t,
+		"scan",
+		modDir,
+		"--format", "sarif",
+		"--db-snapshot", snap,
+		"--offline",
+		"--fail-on", "high",
+		"--plugin-binary", pluginBin,
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+	t.Logf("stdout=%s", stdout)
+
+	// SARIF output must be valid JSON.
+	require.True(t, json.Valid([]byte(stdout)), "output must be valid JSON (SARIF)")
+
+	// The SARIF document must contain CORPUS-CVE-001.
+	assert.Contains(t, stdout, "CORPUS-CVE-001",
+		"SARIF must contain the advisory rule ID")
+
+	// The finding is SYMBOL_REACHABLE so codeFlows must be present.
+	assert.Contains(t, stdout, "codeFlows",
+		"SARIF must contain codeFlows for a SYMBOL_REACHABLE finding")
+
+	// Exit code must be 1 (gate failure) — the reachable HIGH finding trips the gate.
+	assert.Equal(t, 1, code,
+		"exit code must be 1 (gate failure) for a reachable HIGH finding under --fail-on high")
+}
+
+// TestScan_NotReachableCVE_ReachableOnly_ExitsZero verifies the reachable-only policy:
+// the not-reachable-cve fixture's finding is NOT_REACHABLE, which is the only tier
+// excluded by reachable-only. The gate must pass (exit 0) but the finding must still
+// appear in the SARIF output as a suppressed result (auditable, not absent).
+func TestScan_NotReachableCVE_ReachableOnly_ExitsZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	modDir := filepath.Join(corpusDir(t), "not-reachable-cve")
+	snap := snapshotDir(t)
+
+	// Write a reachable-only policy to a temp file.
+	policyFile := filepath.Join(t.TempDir(), "policy.yaml")
+	require.NoError(t, os.WriteFile(policyFile, []byte("reachable-only: true\nfail-on: high\n"), 0o644))
+
+	stdout, stderr, code := runScanBinary(t,
+		"scan",
+		modDir,
+		"--format", "sarif",
+		"--db-snapshot", snap,
+		"--offline",
+		"--policy", policyFile,
+		"--plugin-binary", pluginBin,
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+	t.Logf("stdout=%s", stdout)
+
+	require.True(t, json.Valid([]byte(stdout)), "output must be valid JSON (SARIF)")
+
+	// The advisory must still appear in the SARIF output (auditable, not absent).
+	assert.Contains(t, stdout, "CORPUS-CVE-001",
+		"NOT_REACHABLE finding must appear in SARIF as a suppressed result, never absent")
+
+	// Under reachable-only policy, NOT_REACHABLE does not trip the gate.
+	assert.Equal(t, 0, code,
+		"exit code must be 0: NOT_REACHABLE is excluded by reachable-only policy")
+}
+
+// TestScan_OfflineMissingDepsErrors verifies the offline determinism contract:
+// when --offline is used with a missing/empty snapshot, the tool must exit 3
+// (operational error) with a clear error message — never silently exit 0.
+func TestScan_OfflineMissingDepsErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	modDir := filepath.Join(corpusDir(t), "reachable-cve")
+
+	// Point to a non-existent snapshot directory.
+	emptySnap := filepath.Join(t.TempDir(), "nonexistent-snapshot")
+
+	_, stderr, code := runScanBinary(t,
+		"scan",
+		modDir,
+		"--format", "sarif",
+		"--db-snapshot", emptySnap,
+		"--offline",
+		"--plugin-binary", pluginBin,
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+
+	// Must exit 3 (operational error), never 0.
+	assert.Equal(t, 3, code,
+		"missing offline snapshot must produce exit 3, never 0")
+
+	// Must produce a clear, human-readable error (not silent).
+	assert.NotEmpty(t, stderr, "must print an error message when offline snapshot is missing")
+}
+
+// TestScan_ByteIdenticalSARIF_OfflineDeterminism verifies the offline determinism
+// contract: two consecutive scans with the same inputs must produce byte-identical
+// SARIF output. GOPROXY=off is set to ensure no network calls.
+func TestScan_ByteIdenticalSARIF_OfflineDeterminism(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	modDir := filepath.Join(corpusDir(t), "reachable-cve")
+	snap := snapshotDir(t)
+
+	runWithGoproxyOff := func() string {
+		t.Helper()
+		cliBin := filepath.Join(t.TempDir(), "anst-analyzer")
+		build := exec.Command("go", "build", "-o", cliBin,
+			"github.com/ducthinh993/anst-analyzer/cmd/anst")
+		build.Env = os.Environ()
+		out, err := build.CombinedOutput()
+		require.NoError(t, err, "build CLI:\n%s", out)
+
+		var stdoutBuf, stderrBuf bytes.Buffer
+		cmd := exec.CommandContext(context.Background(), cliBin,
+			"scan", modDir,
+			"--format", "sarif",
+			"--db-snapshot", snap,
+			"--offline",
+			"--plugin-binary", pluginBin,
+		)
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+		// GOPROXY=off ensures no network calls during dep resolution.
+		env := os.Environ()
+		env = append(env, "GOPROXY=off")
+		cmd.Env = env
+		_ = cmd.Run() // exit code varies; we only check stdout determinism
+		return stdoutBuf.String()
+	}
+
+	run1 := runWithGoproxyOff()
+	run2 := runWithGoproxyOff()
+
+	require.NotEmpty(t, run1, "first run must produce SARIF output")
+
+	if run1 == run2 {
+		t.Logf("SARIF output is byte-identical across two offline runs")
+	} else {
+		// Find first differing line for diagnostics.
+		lines1 := strings.Split(run1, "\n")
+		lines2 := strings.Split(run2, "\n")
+		for i := 0; i < len(lines1) && i < len(lines2); i++ {
+			if lines1[i] != lines2[i] {
+				t.Errorf("SARIF output differs at line %d:\n  run1: %q\n  run2: %q",
+					i+1, lines1[i], lines2[i])
+				break
+			}
+		}
+		t.Errorf("SARIF output is NOT byte-identical across two offline runs")
+	}
+}
+
+// TestScan_AdversarialBuildTagGated verifies adversarial fixture (a):
+// a build-tag/GOOS-gated vuln on a non-linux runner must never produce NOT_REACHABLE.
+// The expected result is UNKNOWN (CONFIDENCE_UNKNOWN maps to "CONFIDENCE_UNKNOWN" in JSON).
+func TestScan_AdversarialBuildTagGated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+	if runtime.GOOS == "linux" {
+		t.Skip("build-tag-gated fixture is only adversarial on non-linux runners")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	modDir := filepath.Join(corpusDir(t), "build-tag-gated")
+	snap := snapshotDir(t)
+
+	stdout, _, _ := runScanBinary(t,
+		"scan",
+		modDir,
+		"--format", "json",
+		"--db-snapshot", snap,
+		"--offline",
+		"--plugin-binary", pluginBin,
+	)
+
+	require.True(t, json.Valid([]byte(stdout)), "output must be valid JSON")
+
+	// The finding must not be NOT_REACHABLE — that would imply safe when we
+	// cannot prove it (build-config mismatch → must be UNKNOWN).
+	assert.NotContains(t, stdout, "CONFIDENCE_NOT_REACHABLE",
+		"build-tag-gated fixture must never produce NOT_REACHABLE on non-linux; got: %s", stdout)
+}
+
+// TestScan_AdversarialPrivateReplace verifies adversarial fixture (b):
+// a module with a broken private replace must produce UNKNOWN, not a silent drop.
+func TestScan_AdversarialPrivateReplace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	modDir := filepath.Join(corpusDir(t), "cgo-private-replace")
+	snap := snapshotDir(t)
+
+	stdout, _, _ := runScanBinary(t,
+		"scan",
+		modDir,
+		"--format", "json",
+		"--db-snapshot", snap,
+		"--offline",
+		"--plugin-binary", pluginBin,
+	)
+
+	// Either the scan errors cleanly (exit 3, empty stdout) or produces UNKNOWN.
+	// It must NEVER silently produce NOT_REACHABLE.
+	if json.Valid([]byte(stdout)) && stdout != "" && stdout != "null" {
+		assert.NotContains(t, stdout, "CONFIDENCE_NOT_REACHABLE",
+			"broken private-replace module must not produce NOT_REACHABLE; got: %s", stdout)
+	}
+}

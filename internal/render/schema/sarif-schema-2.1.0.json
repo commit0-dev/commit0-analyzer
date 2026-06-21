@@ -1,0 +1,872 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "$id": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "title": "Static Analysis Results Format (SARIF) Version 2.1.0 JSON Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "The SARIF format version of this log file.",
+      "type": "string",
+      "enum": [ "2.1.0" ]
+    },
+    "$schema": {
+      "description": "The URI of the JSON schema corresponding to the version.",
+      "type": "string",
+      "format": "uri"
+    },
+    "runs": {
+      "description": "The set of runs contained in this log file.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/run"
+      }
+    },
+    "inlineExternalProperties": {
+      "description": "References to external property files that share data between runs.",
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/externalProperties"
+      }
+    },
+    "properties": {
+      "$ref": "#/definitions/propertyBag"
+    }
+  },
+  "required": [ "version", "runs" ],
+  "definitions": {
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "absoluteAddress": { "type": "integer", "default": -1 },
+        "relativeAddress": { "type": "integer" },
+        "length": { "type": "integer" },
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "fullyQualifiedName": { "type": "string" },
+        "offsetFromParent": { "type": "integer" },
+        "index": { "type": "integer", "default": -1 },
+        "parentIndex": { "type": "integer", "default": -1 },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "$ref": "#/definitions/message" },
+        "location": { "$ref": "#/definitions/artifactLocation" },
+        "parentIndex": { "type": "integer", "default": -1 },
+        "offset": { "type": "integer" },
+        "length": { "type": "integer", "default": -1 },
+        "roles": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "analysisTarget", "attachment", "responseFile", "resultFile",
+              "standardStream", "tracedFile", "unmodified", "modified",
+              "added", "deleted", "renamed", "uncontrolled", "driver",
+              "extension", "translation", "taxonomyFile", "policy",
+              "referencedOnCommandLine", "memoryContents", "directory",
+              "userSpecifiedConfiguration", "toolSpecifiedConfiguration",
+              "debugOutputFile"
+            ]
+          }
+        },
+        "mimeType": { "type": "string", "pattern": "[^/]+/.+" },
+        "contents": { "$ref": "#/definitions/artifactContent" },
+        "encoding": { "type": "string" },
+        "sourceLanguage": { "type": "string" },
+        "hashes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "lastModifiedTimeUtc": { "type": "string", "format": "date-time" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "artifactChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifactLocation": { "$ref": "#/definitions/artifactLocation" },
+        "replacements": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/replacement" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "artifactLocation", "replacements" ]
+    },
+    "artifactContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "binary": { "type": "string" },
+        "rendered": { "$ref": "#/definitions/multiformatMessageString" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "artifactLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": { "type": "string" },
+        "uriBaseId": { "type": "string" },
+        "index": { "type": "integer", "default": -1 },
+        "description": { "$ref": "#/definitions/message" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "$ref": "#/definitions/message" },
+        "artifactLocation": { "$ref": "#/definitions/artifactLocation" },
+        "regions": {
+          "type": "array",
+          "minItems": 0,
+          "items": { "$ref": "#/definitions/region" }
+        },
+        "rectangles": {
+          "type": "array",
+          "minItems": 0,
+          "items": { "$ref": "#/definitions/rectangle" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "artifactLocation" ]
+    },
+    "codeFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": { "$ref": "#/definitions/message" },
+        "threadFlows": {
+          "description": "An array of one or more unique threadFlow objects, each of which describes the progress of a program through a thread of execution.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/threadFlow" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "threadFlows" ]
+    },
+    "configurationOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "configuration": { "$ref": "#/definitions/reportingConfiguration" },
+        "descriptor": { "$ref": "#/definitions/reportingDescriptorReference" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "configuration", "descriptor" ]
+    },
+    "conversion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "$ref": "#/definitions/tool" },
+        "invocation": { "$ref": "#/definitions/invocation" },
+        "analysisToolLogFiles": {
+          "type": "array",
+          "minItems": 0,
+          "items": { "$ref": "#/definitions/artifactLocation" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "tool" ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "$ref": "#/definitions/message" },
+        "sourceNodeId": { "type": "string" },
+        "targetNodeId": { "type": "string" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "id", "sourceNodeId", "targetNodeId" ]
+    },
+    "edgeTraversal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "edgeId": { "type": "string" },
+        "message": { "$ref": "#/definitions/message" },
+        "finalState": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" }
+        },
+        "stepOverEdgeCount": { "type": "integer" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "edgeId" ]
+    },
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string" },
+        "message": { "type": "string" },
+        "stack": { "$ref": "#/definitions/stack" },
+        "innerExceptions": {
+          "type": "array",
+          "minItems": 0,
+          "items": { "$ref": "#/definitions/exception" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "externalProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "type": "string", "format": "uri" },
+        "version": { "type": "string", "enum": [ "2.1.0" ] },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "runGuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "conversion": { "$ref": "#/definitions/conversion" },
+        "graphs": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/graph" } },
+        "externalizedProperties": { "$ref": "#/definitions/propertyBag" },
+        "artifacts": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/artifact" } },
+        "invocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/invocation" } },
+        "logicalLocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/logicalLocation" } },
+        "threadFlowLocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/threadFlowLocation" } },
+        "results": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/result" } },
+        "taxonomies": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "addresses": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/address" } },
+        "driver": { "$ref": "#/definitions/toolComponent" },
+        "extensions": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "policies": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "translations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "webRequests": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/webRequest" } },
+        "webResponses": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/webResponse" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "fix": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "$ref": "#/definitions/message" },
+        "artifactChanges": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/artifactChange" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "artifactChanges" ]
+    },
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "$ref": "#/definitions/message" },
+        "nodes": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/node" } },
+        "edges": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/edge" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "graphTraversal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runGraphIndex": { "type": "integer", "default": -1 },
+        "resultGraphIndex": { "type": "integer", "default": -1 },
+        "description": { "$ref": "#/definitions/message" },
+        "initialState": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" }
+        },
+        "immutableState": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" }
+        },
+        "edgeTraversals": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/edgeTraversal" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commandLine": { "type": "string" },
+        "arguments": { "type": "array", "minItems": 0, "items": { "type": "string" } },
+        "responseFiles": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/artifactLocation" } },
+        "startTimeUtc": { "type": "string", "format": "date-time" },
+        "endTimeUtc": { "type": "string", "format": "date-time" },
+        "exitCode": { "type": "integer" },
+        "ruleConfigurationOverrides": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/configurationOverride" } },
+        "notificationConfigurationOverrides": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/configurationOverride" } },
+        "toolExecutionNotifications": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/notification" } },
+        "toolConfigurationNotifications": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/notification" } },
+        "exitCodeDescription": { "type": "string" },
+        "exitSignalName": { "type": "string" },
+        "exitSignalNumber": { "type": "integer" },
+        "processStartFailureMessage": { "type": "string" },
+        "executionSuccessful": { "type": "boolean" },
+        "machine": { "type": "string" },
+        "account": { "type": "string" },
+        "processId": { "type": "integer" },
+        "executableLocation": { "$ref": "#/definitions/artifactLocation" },
+        "workingDirectory": { "$ref": "#/definitions/artifactLocation" },
+        "environmentVariables": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "stdin": { "$ref": "#/definitions/artifactLocation" },
+        "stdout": { "$ref": "#/definitions/artifactLocation" },
+        "stderr": { "$ref": "#/definitions/artifactLocation" },
+        "stdoutStderr": { "$ref": "#/definitions/artifactLocation" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "executionSuccessful" ]
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer", "default": -1 },
+        "physicalLocation": { "$ref": "#/definitions/physicalLocation" },
+        "logicalLocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/logicalLocation" } },
+        "message": { "$ref": "#/definitions/message" },
+        "annotations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/region" } },
+        "relationships": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/locationRelationship" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "locationRelationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": { "type": "integer" },
+        "kinds": { "type": "array", "uniqueItems": true, "default": [ "relevant" ], "items": { "type": "string" } },
+        "description": { "$ref": "#/definitions/message" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "target" ]
+    },
+    "logicalLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "index": { "type": "integer", "default": -1 },
+        "fullyQualifiedName": { "type": "string" },
+        "decoratedName": { "type": "string" },
+        "parentIndex": { "type": "integer", "default": -1 },
+        "kind": { "type": "string" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "markdown": { "type": "string" },
+        "id": { "type": "string" },
+        "arguments": { "type": "array", "minItems": 0, "items": { "type": "string" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "multiformatMessageString": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "markdown": { "type": "string" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "text" ]
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "$ref": "#/definitions/message" },
+        "location": { "$ref": "#/definitions/location" },
+        "children": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/node" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "id" ]
+    },
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "locations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/location" } },
+        "message": { "$ref": "#/definitions/message" },
+        "level": { "type": "string", "default": "warning", "enum": [ "none", "note", "warning", "error" ] },
+        "threadId": { "type": "integer" },
+        "timeUtc": { "type": "string", "format": "date-time" },
+        "exception": { "$ref": "#/definitions/exception" },
+        "descriptor": { "$ref": "#/definitions/reportingDescriptorReference" },
+        "associatedRule": { "$ref": "#/definitions/reportingDescriptorReference" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "message" ]
+    },
+    "physicalLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "address": { "$ref": "#/definitions/address" },
+        "artifactLocation": { "$ref": "#/definitions/artifactLocation" },
+        "region": { "$ref": "#/definitions/region" },
+        "contextRegion": { "$ref": "#/definitions/region" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "propertyBag": {
+      "type": "object",
+      "properties": {
+        "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "rectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "top": { "type": "number" },
+        "left": { "type": "number" },
+        "bottom": { "type": "number" },
+        "right": { "type": "number" },
+        "message": { "$ref": "#/definitions/message" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "startLine": { "type": "integer", "minimum": 1 },
+        "startColumn": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "endColumn": { "type": "integer", "minimum": 1 },
+        "charOffset": { "type": "integer", "default": -1 },
+        "charLength": { "type": "integer" },
+        "byteOffset": { "type": "integer", "default": -1 },
+        "byteLength": { "type": "integer" },
+        "snippet": { "$ref": "#/definitions/artifactContent" },
+        "message": { "$ref": "#/definitions/message" },
+        "sourceLanguage": { "type": "string" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "replacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deletedRegion": { "$ref": "#/definitions/region" },
+        "insertedContent": { "$ref": "#/definitions/artifactContent" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "deletedRegion" ]
+    },
+    "reportingConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "level": { "type": "string", "default": "warning", "enum": [ "none", "note", "warning", "error" ] },
+        "rank": { "type": "number", "default": -1.0 },
+        "parameters": { "$ref": "#/definitions/propertyBag" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "reportingDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "deprecatedIds": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "deprecatedGuids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" } },
+        "name": { "type": "string" },
+        "deprecatedNames": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "shortDescription": { "$ref": "#/definitions/multiformatMessageString" },
+        "fullDescription": { "$ref": "#/definitions/multiformatMessageString" },
+        "messageStrings": { "type": "object", "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" } },
+        "defaultConfiguration": { "$ref": "#/definitions/reportingConfiguration" },
+        "helpUri": { "type": "string", "format": "uri" },
+        "help": { "$ref": "#/definitions/multiformatMessageString" },
+        "relationships": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/reportingDescriptorRelationship" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "id" ]
+    },
+    "reportingDescriptorReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "index": { "type": "integer", "default": -1 },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "toolComponent": { "$ref": "#/definitions/toolComponentReference" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "reportingDescriptorRelationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": { "$ref": "#/definitions/reportingDescriptorReference" },
+        "kinds": { "type": "array", "uniqueItems": true, "default": [ "relevant" ], "items": { "type": "string" } },
+        "description": { "$ref": "#/definitions/message" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "target" ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ruleId": { "type": "string" },
+        "ruleIndex": { "type": "integer", "default": -1 },
+        "rule": { "$ref": "#/definitions/reportingDescriptorReference" },
+        "kind": { "type": "string", "default": "fail", "enum": [ "notApplicable", "pass", "fail", "review", "open", "informational" ] },
+        "level": { "type": "string", "default": "warning", "enum": [ "none", "note", "warning", "error" ] },
+        "message": { "$ref": "#/definitions/message" },
+        "analysisTarget": { "$ref": "#/definitions/artifactLocation" },
+        "locations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/location" } },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "correlationGuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "occurrenceCount": { "type": "integer" },
+        "partialFingerprints": { "type": "object", "additionalProperties": { "type": "string" } },
+        "fingerprints": { "type": "object", "additionalProperties": { "type": "string" } },
+        "stacks": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/stack" } },
+        "codeFlows": {
+          "description": "An array of codeFlow objects relevant to the result. MUST be omitted (not empty) when no path exists.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/codeFlow" }
+        },
+        "graphs": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/graph" } },
+        "graphTraversals": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/graphTraversal" } },
+        "relatedLocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/location" } },
+        "suppressions": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/suppression" } },
+        "baselineState": { "type": "string", "enum": [ "new", "unchanged", "updated", "absent" ] },
+        "rank": { "type": "number", "default": -1.0 },
+        "attachments": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/attachment" } },
+        "hostedViewerUri": { "type": "string", "format": "uri" },
+        "workItemUris": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "type": "string", "format": "uri" } },
+        "provenance": { "$ref": "#/definitions/resultProvenance" },
+        "fixes": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/fix" } },
+        "taxa": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/reportingDescriptorReference" } },
+        "webRequest": { "$ref": "#/definitions/webRequest" },
+        "webResponse": { "$ref": "#/definitions/webResponse" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "message" ]
+    },
+    "resultProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "firstDetectionTimeUtc": { "type": "string", "format": "date-time" },
+        "lastDetectionTimeUtc": { "type": "string", "format": "date-time" },
+        "firstDetectionRunGuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "lastDetectionRunGuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "invocationIndex": { "type": "integer", "default": -1 },
+        "conversionSources": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/physicalLocation" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "$ref": "#/definitions/tool" },
+        "invocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/invocation" } },
+        "conversion": { "$ref": "#/definitions/conversion" },
+        "language": { "type": "string", "default": "en-US", "pattern": "^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$" },
+        "versionControlProvenance": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/versionControlDetails" } },
+        "originalUriBaseIds": { "type": "object", "additionalProperties": { "$ref": "#/definitions/artifactLocation" } },
+        "artifacts": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/artifact" } },
+        "logicalLocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/logicalLocation" } },
+        "graphs": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/graph" } },
+        "results": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/result" } },
+        "automationDetails": { "$ref": "#/definitions/runAutomationDetails" },
+        "runAggregates": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/runAutomationDetails" } },
+        "baselineGuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "redactionTokens": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "type": "string" } },
+        "defaultEncoding": { "type": "string" },
+        "defaultSourceLanguage": { "type": "string" },
+        "newlineSequences": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "columnKind": { "type": "string", "enum": [ "utf16CodeUnits", "unicodeCodePoints" ] },
+        "externalPropertyFileReferences": { "$ref": "#/definitions/externalPropertyFileReferences" },
+        "threadFlowLocations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/threadFlowLocation" } },
+        "taxonomies": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "addresses": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/address" } },
+        "translations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "policies": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "webRequests": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/webRequest" } },
+        "webResponses": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/webResponse" } },
+        "specialLocations": { "$ref": "#/definitions/specialLocations" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "tool" ]
+    },
+    "runAutomationDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "$ref": "#/definitions/message" },
+        "id": { "type": "string" },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "correlationGuid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "specialLocations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "displayBase": { "$ref": "#/definitions/artifactLocation" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "message": { "$ref": "#/definitions/message" },
+        "frames": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/stackFrame" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "frames" ]
+    },
+    "stackFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": { "$ref": "#/definitions/location" },
+        "module": { "type": "string" },
+        "threadId": { "type": "integer" },
+        "parameters": { "type": "array", "minItems": 0, "uniqueItems": false, "items": { "type": "string" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "suppression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "kind": { "type": "string", "enum": [ "inSource", "external" ] },
+        "status": { "type": "string", "default": "accepted", "enum": [ "accepted", "underReview", "rejected" ] },
+        "justification": { "type": "string" },
+        "location": { "$ref": "#/definitions/location" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "kind" ]
+    },
+    "threadFlow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "message": { "$ref": "#/definitions/message" },
+        "initialState": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" }
+        },
+        "immutableState": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" }
+        },
+        "locations": {
+          "description": "A temporally ordered array of 'threadFlowLocation' objects, each of which describes a location visited by the tool while producing the result.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/threadFlowLocation" }
+        },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "locations" ]
+    },
+    "threadFlowLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "default": -1 },
+        "location": { "$ref": "#/definitions/location" },
+        "stack": { "$ref": "#/definitions/stack" },
+        "kinds": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "taxa": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/reportingDescriptorReference" } },
+        "module": { "type": "string" },
+        "state": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" }
+        },
+        "nestingLevel": { "type": "integer" },
+        "executionOrder": { "type": "integer", "default": -1 },
+        "executionTimeUtc": { "type": "string", "format": "date-time" },
+        "importance": { "type": "string", "default": "important", "enum": [ "important", "essential", "unimportant" ] },
+        "webRequest": { "$ref": "#/definitions/webRequest" },
+        "webResponse": { "$ref": "#/definitions/webResponse" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "driver": { "$ref": "#/definitions/toolComponent" },
+        "extensions": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponent" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "driver" ]
+    },
+    "toolComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "name": { "type": "string" },
+        "organization": { "type": "string" },
+        "product": { "type": "string" },
+        "productSuite": { "type": "string" },
+        "shortDescription": { "$ref": "#/definitions/multiformatMessageString" },
+        "fullDescription": { "$ref": "#/definitions/multiformatMessageString" },
+        "fullName": { "type": "string" },
+        "version": { "type": "string" },
+        "semanticVersion": { "type": "string" },
+        "dottedQuadFileVersion": { "type": "string", "pattern": "[0-9]+(\\.[0-9]+){3}" },
+        "releaseDateUtc": { "type": "string" },
+        "downloadUri": { "type": "string", "format": "uri" },
+        "informationUri": { "type": "string", "format": "uri" },
+        "globalMessageStrings": { "type": "object", "additionalProperties": { "$ref": "#/definitions/multiformatMessageString" } },
+        "notifications": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/reportingDescriptor" } },
+        "rules": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/reportingDescriptor" } },
+        "taxa": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/reportingDescriptor" } },
+        "locations": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/artifactLocation" } },
+        "language": { "type": "string", "default": "en-US", "pattern": "^[a-zA-Z]{2,8}(-[a-zA-Z0-9]{1,8})*$" },
+        "contents": { "type": "array", "default": [ "localizedData", "nonLocalizedData" ], "uniqueItems": true, "items": { "type": "string", "enum": [ "localizedData", "nonLocalizedData" ] } },
+        "isComprehensive": { "type": "boolean", "default": false },
+        "localizedDataSemanticVersion": { "type": "string" },
+        "minimumRequiredLocalizedDataSemanticVersion": { "type": "string" },
+        "associatedComponent": { "$ref": "#/definitions/toolComponentReference" },
+        "translationMetadata": { "$ref": "#/definitions/translationMetadata" },
+        "supportedTaxonomies": { "type": "array", "minItems": 0, "items": { "$ref": "#/definitions/toolComponentReference" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "name" ]
+    },
+    "toolComponentReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "index": { "type": "integer", "default": -1 },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "translationMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "fullName": { "type": "string" },
+        "shortDescription": { "$ref": "#/definitions/multiformatMessageString" },
+        "fullDescription": { "$ref": "#/definitions/multiformatMessageString" },
+        "downloadUri": { "type": "string", "format": "uri" },
+        "informationUri": { "type": "string", "format": "uri" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "name" ]
+    },
+    "versionControlDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repositoryUri": { "type": "string", "format": "uri" },
+        "revisionId": { "type": "string" },
+        "branch": { "type": "string" },
+        "revisionTag": { "type": "string" },
+        "asOfTimeUtc": { "type": "string", "format": "date-time" },
+        "mappedTo": { "$ref": "#/definitions/artifactLocation" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      },
+      "required": [ "repositoryUri" ]
+    },
+    "webRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "default": -1 },
+        "protocol": { "type": "string" },
+        "version": { "type": "string" },
+        "target": { "type": "string" },
+        "method": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "parameters": { "type": "object", "additionalProperties": { "type": "string" } },
+        "body": { "$ref": "#/definitions/artifactContent" },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "webResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "default": -1 },
+        "protocol": { "type": "string" },
+        "version": { "type": "string" },
+        "statusCode": { "type": "integer" },
+        "reasonPhrase": { "type": "string" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "body": { "$ref": "#/definitions/artifactContent" },
+        "noResponseReceived": { "type": "boolean", "default": false },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "externalPropertyFileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": { "$ref": "#/definitions/artifactLocation" },
+        "guid": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+        "itemCount": { "type": "integer", "default": -1 },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    },
+    "externalPropertyFileReferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "conversion": { "$ref": "#/definitions/externalPropertyFileReference" },
+        "graphs": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "externalizedProperties": { "$ref": "#/definitions/externalPropertyFileReference" },
+        "artifacts": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "invocations": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "logicalLocations": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "threadFlowLocations": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "results": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "taxonomies": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "addresses": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "driver": { "$ref": "#/definitions/externalPropertyFileReference" },
+        "extensions": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "policies": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "translations": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "webRequests": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "webResponses": { "type": "array", "minItems": 0, "uniqueItems": true, "items": { "$ref": "#/definitions/externalPropertyFileReference" } },
+        "properties": { "$ref": "#/definitions/propertyBag" }
+      }
+    }
+  }
+}

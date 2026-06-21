@@ -1,0 +1,95 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "anst-analyzer",
+          "informationUri": "https://github.com/ducthinh993/anst-analyzer"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GO-2024-0001",
+          "level": "error",
+          "message": {
+            "text": "Vulnerability GO-2024-0001 in golang.org/x/net: a concrete call path to the vulnerable symbol was found (CONFIDENCE_SYMBOL_REACHABLE)."
+          },
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "cmd/main.go"
+                          },
+                          "region": {
+                            "startLine": 42,
+                            "startColumn": 5
+                          }
+                        },
+                        "message": {
+                          "text": "main.main"
+                        }
+                      }
+                    },
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "internal/client/client.go"
+                          },
+                          "region": {
+                            "startLine": 17,
+                            "startColumn": 3
+                          }
+                        },
+                        "message": {
+                          "text": "internal/client.Client.Do"
+                        }
+                      }
+                    },
+                    {
+                      "location": {
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "vendor/golang.org/x/net/http2/transport.go"
+                          },
+                          "region": {
+                            "startLine": 99,
+                            "startColumn": 12
+                          }
+                        },
+                        "message": {
+                          "text": "golang.org/x/net/http2.(*Transport).RoundTrip"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "advisory_url": "https://pkg.go.dev/vuln/GO-2024-0001",
+            "algorithm": "vta",
+            "aliases": [
+              "CVE-2024-12345"
+            ],
+            "confidence": "CONFIDENCE_SYMBOL_REACHABLE",
+            "goarch": "amd64",
+            "goos": "linux",
+            "language": "go",
+            "module": "golang.org/x/net",
+            "pillar": "sca",
+            "snapshot_digest": "sha256:abc123"
+          }
+        }
+      ]
+    }
+  ]
+}

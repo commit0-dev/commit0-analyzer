@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  ci:
+    name: Build, Test, Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Install buf
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.71.0"
+          setup_only: true
+
+      - name: Install protoc-gen-go and protoc-gen-go-grpc
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+      - name: Regenerate proto stubs
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          buf generate
+
+      - name: Check proto-gen drift
+        run: |
+          git diff --exit-code -- pkg/contract/anstv1/
+        # Fails if generated files differ from committed files, catching drift
+        # caused by proto changes without re-running buf generate.
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --timeout=5m

@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.3.1",
+  "id": "GO-2024-0003",
+  "modified": "2024-06-01T00:00:00Z",
+  "published": "2024-03-01T00:00:00Z",
+  "aliases": ["CVE-2024-99003"],
+  "summary": "Vulnerability with a non-zero introduced version and fix",
+  "details": "Introduced in v1.0.0, fixed in v1.5.0.",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "github.com/example/rangetest"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "1.0.0"},
+            {"fixed": "1.5.0"}
+          ]
+        }
+      ],
+      "ecosystem_specific": {
+        "imports": [
+          {
+            "path": "github.com/example/rangetest",
+            "symbols": ["Vulnerable"]
+          }
+        ]
+      }
+    }
+  ],
+  "references": [
+    {"type": "ADVISORY", "url": "https://pkg.go.dev/vuln/GO-2024-0003"}
+  ]
+}
