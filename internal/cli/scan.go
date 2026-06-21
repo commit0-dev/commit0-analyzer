@@ -281,8 +281,8 @@ func renderFindings(format string, findings []*anstv1.Finding) error {
 		_, err = os.Stdout.Write(data)
 		return err
 	case "table":
-		os.Stdout.Write(render.ToTable(findings))
-		return nil
+		_, err := os.Stdout.Write(render.ToTable(findings))
+		return err
 	default:
 		return fmt.Errorf("unknown format %q: must be sarif|json|table", format)
 	}

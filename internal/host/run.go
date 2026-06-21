@@ -111,8 +111,10 @@ func runPlugin(
 	result := &PluginResult{Manifest: m}
 
 	// Build a per-plugin context with optional timeout.
-	pluginCtx := ctx
-	var cancel context.CancelFunc
+	var (
+		pluginCtx context.Context
+		cancel    context.CancelFunc
+	)
 	if opts.Timeout > 0 {
 		pluginCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
 	} else {

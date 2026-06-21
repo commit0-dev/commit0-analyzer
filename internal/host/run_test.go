@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -21,10 +20,6 @@ import (
 
 // pluginBinPath is the path of the testplugin binary built by TestMain.
 var pluginBinPath string
-
-// pluginBinOnce ensures we only build once even if multiple test files call
-// testPluginBin.
-var pluginBinOnce sync.Once
 
 // TestMain builds the testplugin binary into a temp dir, then runs all tests.
 // The binary is shared across all tests in the package.

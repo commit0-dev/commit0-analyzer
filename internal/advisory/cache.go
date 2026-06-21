@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -290,49 +289,3 @@ func lockDir(dir string) (unlock func(), err error) {
 	}, nil
 }
 
-// atomicWrite writes data to path via a temp-file → fsync → rename sequence to
-// prevent partial/torn reads by concurrent readers.
-func atomicWrite(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".anst-tmp-*")
-	if err != nil {
-		return fmt.Errorf("atomicWrite: create temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	// Clean up the temp file on any error.
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("atomicWrite: write: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("atomicWrite: fsync: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("atomicWrite: close: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("atomicWrite: rename: %w", err)
-	}
-
-	ok = true
-	return nil
-}
-
-// computeDigest returns the SHA-256 hex digest of r's contents, prefixed "sha256:".
-func computeDigest(r io.Reader) (string, error) {
-	h := sha256.New()
-	if _, err := io.Copy(h, r); err != nil {
-		return "", err
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
-}
