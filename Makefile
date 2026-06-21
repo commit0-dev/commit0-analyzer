@@ -1,4 +1,4 @@
-.PHONY: generate build test lint vet tidy clean
+.PHONY: generate build test lint vet tidy clean hooks
 
 # Export GOPATH/bin so protoc-gen-go and protoc-gen-go-grpc are found.
 GOPATH_BIN := $(shell go env GOPATH)/bin
@@ -36,3 +36,7 @@ tidy:
 ## clean: remove build artifacts
 clean:
 	rm -f anst-analyzer
+
+## hooks: install git hooks via lefthook (run once after cloning)
+hooks:
+	lefthook install

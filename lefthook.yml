@@ -1,0 +1,36 @@
+# lefthook git hooks for anst-analyzer — https://lefthook.dev
+#
+# Setup (run once after cloning):
+#   brew install lefthook        # or: go install github.com/evilmartians/lefthook@latest
+#   lefthook install             # or: make hooks
+#
+# Requirements:
+#   - golangci-lint v2 (matches CI). Install: brew install golangci-lint
+#
+# Bypass in an emergency: git commit --no-verify  /  git push --no-verify
+
+# Enforce Conventional Commits on the commit message subject line.
+commit-msg:
+  commands:
+    conventional:
+      # {1} is the path to the commit message file passed by git.
+      run: |
+        subject="$(head -n1 "{1}")"
+        if printf '%s' "$subject" | grep -qE '^(Merge |Revert |fixup!|squash!|(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9 ._/-]+\))?!?: .+)'; then
+          exit 0
+        fi
+        echo "✗ Commit message must follow Conventional Commits:"
+        echo "      <type>(<scope>): <description>"
+        echo "  types: build chore ci docs feat fix perf refactor revert style test"
+        echo "  e.g.:  fix(host): exempt sticky world-writable dirs"
+        echo "  got:   $subject"
+        exit 1
+
+# Catch lint/compile errors before they reach CI.
+pre-push:
+  parallel: true
+  commands:
+    lint:
+      run: golangci-lint run --timeout=5m
+    build:
+      run: go build ./...
