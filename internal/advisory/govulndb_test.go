@@ -139,6 +139,69 @@ func TestGoVulnDBClient_Query(t *testing.T) {
 	assert.Empty(t, advisories)
 }
 
+// TestParseOSV_WithdrawnTimestamp verifies that parseOSVRecord surfaces the
+// withdrawn timestamp on the Advisory when the OSV record carries a "withdrawn" field.
+func TestParseOSV_WithdrawnTimestamp(t *testing.T) {
+	data := loadFixture(t, "GO-2025-3408.json")
+
+	adv, err := parseOSVRecord(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "GO-2025-3408", adv.ID)
+	// The withdrawn timestamp must be propagated so the Query-level skip is
+	// clean and testable — callers can inspect Withdrawn to understand why an
+	// advisory was excluded.
+	assert.Equal(t, "2025-02-05T23:01:18Z", adv.Withdrawn,
+		"Withdrawn timestamp must be propagated from OSV record")
+}
+
+// TestGoVulnDBClient_Query_WithdrawnExcluded proves that a withdrawn advisory is
+// excluded from Query results even when its version range and symbols would
+// otherwise match the queried module+version. This matches govulncheck behaviour
+// and prevents false-positive CI failures.
+func TestGoVulnDBClient_Query_WithdrawnExcluded(t *testing.T) {
+	dbDir := t.TempDir()
+
+	// GO-2025-3408 is withdrawn; it covers github.com/example/vulnpkg [0, 2.0.0).
+	// v1.0.0 would normally match — but Query must exclude it.
+	data := loadFixture(t, "GO-2025-3408.json")
+	err := os.WriteFile(filepath.Join(dbDir, "GO-2025-3408.json"), data, 0o644)
+	require.NoError(t, err)
+
+	client := &goVulnDBClient{dbDir: dbDir}
+	ctx := context.Background()
+
+	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	require.NoError(t, err)
+	assert.Empty(t, advisories,
+		"withdrawn advisory GO-2025-3408 must not appear in Query results")
+}
+
+// TestGoVulnDBClient_Query_NonWithdrawnStillReturned is a regression guard
+// ensuring that the withdrawn-exclusion logic does not accidentally filter
+// non-withdrawn advisories that cover the same module.
+func TestGoVulnDBClient_Query_NonWithdrawnStillReturned(t *testing.T) {
+	dbDir := t.TempDir()
+
+	// GO-2024-0001 is NOT withdrawn; covers github.com/example/vulnpkg [0, 1.2.3).
+	// GO-2025-3408 IS withdrawn; covers github.com/example/vulnpkg [0, 2.0.0).
+	for _, name := range []string{"GO-2024-0001.json", "GO-2025-3408.json"} {
+		data := loadFixture(t, name)
+		err := os.WriteFile(filepath.Join(dbDir, name), data, 0o644)
+		require.NoError(t, err)
+	}
+
+	client := &goVulnDBClient{dbDir: dbDir}
+	ctx := context.Background()
+
+	// v1.0.0 is in [0, 1.2.3) for GO-2024-0001 (active) and in [0, 2.0.0) for
+	// GO-2025-3408 (withdrawn). Only the non-withdrawn one must be returned.
+	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	require.NoError(t, err)
+	require.Len(t, advisories, 1, "only the non-withdrawn advisory should be returned")
+	assert.Equal(t, "GO-2024-0001", advisories[0].ID)
+}
+
 // TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")

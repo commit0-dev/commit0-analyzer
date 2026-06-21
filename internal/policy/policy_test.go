@@ -238,3 +238,130 @@ func TestPolicy_EvaluateWithIgnores(t *testing.T) {
 	assert.Equal(t, policy.ExitPass, code,
 		"an exactly-matched, non-expired ignore must suppress the finding from gate count")
 }
+
+// makeCriticalSymbolReachableFinding returns a SYMBOL_REACHABLE CRITICAL finding
+// for use in elevated-ignore gate tests.
+func makeCriticalSymbolReachableFinding() *anstv1.Finding {
+	return &anstv1.Finding{
+		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-CRIT", Url: "https://pkg.go.dev/vuln/GO-2024-CRIT"},
+		Module:     "golang.org/x/net",
+		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+		Path: &anstv1.ReachabilityPath{
+			Steps: []*anstv1.CallStep{
+				{Location: &anstv1.Location{File: "cmd/main.go", Line: 1, Column: 1}, Symbol: "main.main"},
+			},
+		},
+	}
+}
+
+// TestPolicy_NonElevatedIgnore_CriticalSymbolReachable_DoesNotSuppress is the
+// gate-level regression test for Red Team #15d: a plain (non-elevated) ignore
+// entry MUST NOT silently suppress a SYMBOL_REACHABLE CRITICAL finding.
+// Previously, ValidateAgainstFinding was defined but never called by isIgnored,
+// meaning any ignore entry could suppress a proven-reachable critical vuln.
+func TestPolicy_NonElevatedIgnore_CriticalSymbolReachable_DoesNotSuppress(t *testing.T) {
+	nonElevatedIgnore := policy.IgnoreEntry{
+		AdvisoryID:     "GO-2024-CRIT",
+		Module:         "golang.org/x/net",
+		Reason:         "attempt to suppress without elevated flag",
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		ElevatedIgnore: false, // deliberately not set
+	}
+
+	p := &policy.Policy{
+		FailOn:        "critical",
+		ReachableOnly: false,
+		Ignores:       []policy.IgnoreEntry{nonElevatedIgnore},
+	}
+
+	f := makeCriticalSymbolReachableFinding()
+	code := p.Evaluate([]*anstv1.Finding{f})
+
+	// The non-elevated ignore must be refused: the finding must still gate (Red Team #15d).
+	assert.Equal(t, policy.ExitGateFailure, code,
+		"non-elevated ignore of SYMBOL_REACHABLE CRITICAL must NOT suppress the finding (Red Team #15d)")
+}
+
+// TestPolicy_ElevatedIgnore_CriticalSymbolReachable_Suppresses verifies that
+// when ElevatedIgnore=true is explicitly set, the SYMBOL_REACHABLE CRITICAL
+// finding IS suppressed and the gate passes.
+func TestPolicy_ElevatedIgnore_CriticalSymbolReachable_Suppresses(t *testing.T) {
+	elevatedIgnore := policy.IgnoreEntry{
+		AdvisoryID:     "GO-2024-CRIT",
+		Module:         "golang.org/x/net",
+		Reason:         "risk accepted by security team — ticket SEC-42",
+		ExpiresAt:      time.Now().Add(24 * time.Hour),
+		ElevatedIgnore: true, // correctly elevated
+	}
+
+	p := &policy.Policy{
+		FailOn:        "critical",
+		ReachableOnly: false,
+		Ignores:       []policy.IgnoreEntry{elevatedIgnore},
+	}
+
+	f := makeCriticalSymbolReachableFinding()
+	code := p.Evaluate([]*anstv1.Finding{f})
+
+	assert.Equal(t, policy.ExitPass, code,
+		"elevated ignore of SYMBOL_REACHABLE CRITICAL must suppress the finding (Red Team #15d)")
+}
+
+// TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses is a regression test
+// verifying that the elevated-ignore guard only applies to SYMBOL_REACHABLE CRITICAL
+// findings. Non-critical or non-SYMBOL_REACHABLE findings must still be suppressible
+// by a plain (non-elevated) ignore entry.
+func TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses(t *testing.T) {
+	cases := []struct {
+		name       string
+		confidence anstv1.Confidence
+		severity   anstv1.Severity
+	}{
+		{
+			name:       "symbol_reachable_high",
+			confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			severity:   anstv1.Severity_SEVERITY_HIGH,
+		},
+		{
+			name:       "package_reachable_critical",
+			confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			severity:   anstv1.Severity_SEVERITY_CRITICAL,
+		},
+		{
+			name:       "unknown_critical",
+			confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			severity:   anstv1.Severity_SEVERITY_CRITICAL,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			f := &anstv1.Finding{
+				Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-REG"},
+				Module:     "example.com/mod",
+				Confidence: tc.confidence,
+				Severity:   tc.severity,
+			}
+
+			nonElevated := policy.IgnoreEntry{
+				AdvisoryID:     "GO-2024-REG",
+				Module:         "example.com/mod",
+				Reason:         "risk accepted — non-critical or non-symbol-reachable",
+				ExpiresAt:      time.Now().Add(24 * time.Hour),
+				ElevatedIgnore: false,
+			}
+
+			p := &policy.Policy{
+				FailOn:        "high",
+				ReachableOnly: false,
+				Ignores:       []policy.IgnoreEntry{nonElevated},
+			}
+
+			code := p.Evaluate([]*anstv1.Finding{f})
+			assert.Equal(t, policy.ExitPass, code,
+				"%s: non-elevated ignore must suppress non-(SYMBOL_REACHABLE+CRITICAL) finding", tc.name)
+		})
+	}
+}

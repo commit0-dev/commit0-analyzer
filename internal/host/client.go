@@ -55,8 +55,11 @@ type LaunchOptions struct {
 //     not read ANST_PLUGIN_MAGIC_COOKIE will be rejected before any RPC.
 //
 //   - Hash pinning: when m.SHA256 != "" and opts.SkipHashCheck == false,
-//     go-plugin's SecureConfig will compute SHA-256 of the binary and compare
-//     it to the manifest value before exec. A mismatch aborts the launch.
+//     go-plugin's SecureConfig computes SHA-256 of the binary and compares it to
+//     the manifest value before exec; a mismatch aborts the launch. Note that in
+//     the default self-build flow the manifest hash is computed from the same
+//     artifact, so this only guards the TOCTOU window, not supply-chain integrity
+//     (see Manifest doc).
 //
 //   - Protocol compatibility: MetadataResponse.ProtocolVersion is parsed and
 //     checked with contract.Compatible. A different MAJOR is always rejected;

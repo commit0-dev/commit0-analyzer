@@ -19,6 +19,11 @@ type osvRecord struct {
 	ID       string      `json:"id"`
 	Aliases  []string    `json:"aliases"`
 	Affected []osvAffect `json:"affected"`
+	// Withdrawn is an RFC3339 timestamp present when the advisory has been
+	// retracted by the Go vuln DB maintainers. A non-empty value means the
+	// record is no longer considered a real vulnerability and must be excluded
+	// from query results to avoid false-positive findings (mirrors govulncheck).
+	Withdrawn string `json:"withdrawn"`
 }
 
 type osvAffect struct {
@@ -70,9 +75,10 @@ func parseOSVRecord(data []byte) (*Advisory, error) {
 	}
 
 	adv := &Advisory{
-		ID:      rec.ID,
-		Aliases: rec.Aliases,
-		Sources: []string{SourceGoVulnDB},
+		ID:        rec.ID,
+		Aliases:   rec.Aliases,
+		Sources:   []string{SourceGoVulnDB},
+		Withdrawn: rec.Withdrawn, // RFC3339 timestamp; non-empty means retracted
 	}
 
 	for _, aff := range rec.Affected {
@@ -189,6 +195,15 @@ func (c *goVulnDBClient) Query(ctx context.Context, modulePath, version string) 
 			// Corrupt advisory: skip with a warning rather than failing the
 			// entire query. The caller gets a partial result but not a hard error
 			// for a single bad file.
+			continue
+		}
+
+		// Exclude withdrawn advisories regardless of version-range or symbol
+		// match. The Go vuln DB marks a record withdrawn when the maintainers
+		// determine it is not a real vulnerability; surfacing it would produce
+		// a false-positive finding and could trip the CI gate. This mirrors
+		// the behaviour of govulncheck, which also skips withdrawn records.
+		if adv.Withdrawn != "" {
 			continue
 		}
 

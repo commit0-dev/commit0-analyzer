@@ -241,7 +241,11 @@ func isModuleImported(prog *ssa.Program, modulePath string) bool {
 		if pkg == nil || pkg.Package() == nil || pkg.Package().Pkg == nil {
 			continue
 		}
-		if strings.HasPrefix(pkg.Package().Pkg.Path(), modulePath) {
+		// Match the module path exactly or as a parent directory of the package
+		// path. A bare HasPrefix would over-match prefix-colliding modules
+		// (e.g. "golang.org/x/te" matching package "golang.org/x/text/...").
+		path := pkg.Package().Pkg.Path()
+		if path == modulePath || strings.HasPrefix(path, modulePath+"/") {
 			return true
 		}
 	}

@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -129,9 +130,26 @@ func (e IgnoreEntry) Matches(f *anstv1.Finding) bool {
 
 // isActiveIgnore reports whether e is valid, non-expired, and matches f.
 // This is the single gating predicate used by the policy engine.
+//
+// Elevated-ignore guard (Red Team #15d): if the entry matches but the finding is
+// SYMBOL_REACHABLE + CRITICAL and ElevatedIgnore is not set, the entry is treated
+// as inactive (fail-closed). A warning is printed to stderr so the user knows their
+// ignore was refused rather than silently accepted.
 func isActiveIgnore(e IgnoreEntry, f *anstv1.Finding) bool {
 	if e.IsExpired() {
 		return false
 	}
-	return e.Matches(f)
+	if !e.Matches(f) {
+		return false
+	}
+	// Guard: a proven-reachable CRITICAL finding must not be silently suppressed
+	// without an explicit acknowledgment. ValidateAgainstFinding enforces this
+	// invariant; treat a failed validation as "not active" (fail-closed).
+	if err := e.ValidateAgainstFinding(f); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"anst-analyzer: ignore refused for %q / %q — %v (finding NOT suppressed)\n",
+			e.AdvisoryID, e.Module, err)
+		return false
+	}
+	return true
 }

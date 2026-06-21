@@ -12,12 +12,17 @@ import (
 // It is the unit of configuration for the plugin allowlist: only binaries
 // explicitly listed here (with matching path + hash) will be launched.
 //
-// Security: the combination of an explicit allowlist path and a SHA-256 hash
-// provides two independent trust checks:
+// Security: two checks gate execution:
 //  1. Path allowlist  – the file must be at a known, non-world-writable location.
 //  2. Hash pinning    – the binary must match the expected content hash exactly.
 //
 // Either check failing causes the plugin to be refused before execution.
+//
+// Caveat (MVP): in the default flow the host builds the plugin itself and hashes
+// the artifact it just produced (see internal/cli buildPlugin), so the SHA-256
+// only closes the TOCTOU window between hashing and exec — it is NOT a
+// supply-chain integrity guarantee. Genuine pinning requires an expected hash
+// obtained out-of-band from a trusted source (roadmap).
 type Manifest struct {
 	// Name is a human-readable identifier for this plugin (e.g. "go-reachability").
 	// Used in log messages, synthetic findings, and the self-test scope label.
@@ -32,8 +37,8 @@ type Manifest struct {
 	Pillar string
 
 	// Languages is the set of language tags this plugin handles (e.g. ["go"]).
-	// Used for routing: the host only sends a request to a plugin whose language
-	// set overlaps with the target project's languages.
+	// Reserved for multi-plugin language routing; the single-plugin MVP fans out
+	// to every registered plugin and does not yet filter on this field.
 	Languages []string
 
 	// SHA256 is the expected lowercase hex-encoded SHA-256 digest of the plugin

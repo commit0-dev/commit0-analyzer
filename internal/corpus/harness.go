@@ -6,10 +6,12 @@
 // through the host infrastructure (host.Launch / host.Run), validating the full
 // host-driven pipeline end-to-end.
 //
-// Baseline comparison: the harness records GovulncheckVersion and DBDigest in
-// the returned Metrics but NEVER runs govulncheck live. The caller compares
-// against a recorded baseline file (regenerated deliberately via --regen-baseline)
-// to avoid unpinned baseline drift (Red Team #13).
+// Baseline comparison (scope caveat): the recorded baseline pins the analyzer's
+// OWN precision/recall numbers against the labeled corpus, regenerated
+// deliberately to avoid unpinned drift (Red Team #13). govulncheck itself is
+// NOT run and its findings are NOT compared — only GovulncheckVersion and
+// DBDigest are recorded as provenance metadata. A true side-by-side
+// FP-suppression-vs-govulncheck comparison is a roadmap item, not implemented here.
 package corpus
 
 import (

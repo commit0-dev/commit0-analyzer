@@ -46,6 +46,13 @@ type Advisory struct {
 	// Sources lists the advisory data sources (always includes SourceGoVulnDB for MVP).
 	Sources []string
 
+	// Withdrawn is the RFC3339 timestamp at which this advisory was retracted by
+	// the Go vuln DB maintainers. A non-empty value means the advisory is no
+	// longer considered a real vulnerability. Query filters these out before
+	// returning results; this field is exposed so callers can inspect the
+	// reason an advisory was excluded when needed (e.g. in debug logging).
+	Withdrawn string
+
 	// Provenance — not part of the wire proto; stamped into finding properties.
 	SnapshotDigest  string // content digest of the snapshot this advisory came from
 	SnapshotAge     string // human-readable age string (e.g. "72h")
