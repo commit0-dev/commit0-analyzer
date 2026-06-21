@@ -1,0 +1,279 @@
+// Package anst.v1 defines the versioned gRPC plugin contract for anst-analyzer.
+//
+// # Version and Compatibility Policy
+//
+// This contract is "v0-PROVISIONAL": the wire format is versioned at the message level
+// (ProtocolVersion in MetadataResponse), but the schema is NOT yet frozen. Breaking
+// changes may happen between Phase 1 and Phase 2. Once Phase 2 confirms the transport
+// (subprocess/gRPC over stdio), the contract is frozen at v0.
+//
+// Compatibility rule: the host accepts a plugin when host.Major == plugin.Major AND
+// host.Minor >= plugin.Minor. A plugin with a higher Minor than the host is rejected
+// (host may be missing optional fields the plugin depends on). Minor bumps are additive
+// (new optional fields only). Major bumps are breaking.
+//
+// # SARIF Mapping Intent
+//
+// Fields are chosen to lower cleanly into a SARIF 2.1 `result` + `codeFlows`:
+//   - Finding.id        → result.ruleId
+//   - Finding.severity  → result.level (Critical/High→error, Medium→warning, Low→note)
+//   - Finding.advisory  → result.relatedLocations or rule.help
+//   - ReachabilityPath  → result.codeFlows[0].threadFlows[0].locations
+//   - Location          → physicalLocation { artifactLocation.uri, region.startLine/startColumn }
+//   - Finding with no ReachabilityPath MUST omit codeFlows (an empty codeFlows array
+//     invalidates a SARIF document and causes GitHub code scanning to reject the whole upload).
+//
+// # Analyze Stream Direction and Framing
+//
+// The Analyze RPC is a server-streaming call: the client (host) sends one AnalyzeRequest
+// and the server (plugin) streams zero or more Finding messages back, closing the stream
+// when analysis is complete. There is no client-side flow control; the plugin is expected
+// to emit findings eagerly as they are discovered. The stream ends normally on a clean
+// close; any error terminates the stream and is surfaced to the host as a gRPC status.
+// Plugins MUST NOT buffer all findings and send them in a batch; hosts MUST tolerate
+// findings arriving in any order.
+syntax = "proto3";
+
+package anst.v1;
+
+option go_package = "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1";
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+// Confidence describes how certain the analyzer is that a vulnerable symbol or
+// package is actually reachable from an entry point.
+//
+// CRITICAL INVARIANT: unknown ≠ safe. A Finding with CONFIDENCE_UNKNOWN MUST be
+// surfaced to the user; it MUST NOT be silently suppressed. Callers must treat
+// unknown as "could not determine reachability" (e.g. reflection, dynamic
+// dispatch, cgo, build-tag mismatch), NOT as "not reachable."
+//
+// The proto3 zero value is CONFIDENCE_UNKNOWN so that a freshly-deserialized or
+// default-constructed Finding is conservative by default.
+enum Confidence {
+  // CONFIDENCE_UNKNOWN is the zero/default value. Reachability could not be
+  // determined (e.g. reflection, dynamic dispatch, incomplete build graph,
+  // build-tag mismatch). This finding MUST be surfaced, never suppressed.
+  CONFIDENCE_UNKNOWN = 0;
+
+  // CONFIDENCE_NOT_REACHABLE means the analyzer found no call path from any
+  // entry point to the vulnerable symbol/package. Only NOT_REACHABLE findings
+  // may be suppressed by a policy gate.
+  CONFIDENCE_NOT_REACHABLE = 1;
+
+  // CONFIDENCE_PACKAGE_REACHABLE means the vulnerable package is imported and
+  // reachable from an entry point, but the specific vulnerable symbol could not
+  // be confirmed (symbol-level data unavailable or inconclusive).
+  CONFIDENCE_PACKAGE_REACHABLE = 2;
+
+  // CONFIDENCE_SYMBOL_REACHABLE means a concrete call-graph path from an entry
+  // point to the specific vulnerable symbol was found. This is the highest
+  // confidence tier; ReachabilityPath SHOULD be populated.
+  CONFIDENCE_SYMBOL_REACHABLE = 3;
+}
+
+// Severity classifies the impact of a vulnerability.
+enum Severity {
+  // SEVERITY_UNSPECIFIED is the zero/default. Treat as unknown severity.
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_LOW         = 1;
+  SEVERITY_MEDIUM      = 2;
+  SEVERITY_HIGH        = 3;
+  SEVERITY_CRITICAL    = 4;
+}
+
+// ─── Location and Path Types ─────────────────────────────────────────────────
+
+// Location identifies a source position.
+// Maps to SARIF physicalLocation { artifactLocation.uri, region.startLine/startColumn }.
+message Location {
+  // file is a path relative to the module root (e.g. "pkg/foo/bar.go").
+  string file   = 1;
+  int32  line   = 2;
+  int32  column = 3;
+}
+
+// CallStep is one frame in a reachability call chain.
+message CallStep {
+  // location is the call site (the line that calls the next step).
+  Location location = 1;
+  // symbol is the fully-qualified symbol at this call site (e.g. "pkg/foo.Bar").
+  string   symbol   = 2;
+}
+
+// ReachabilityPath is a concrete call chain from an entry point to a vulnerable
+// symbol. Maps to SARIF result.codeFlows[0].threadFlows[0].locations.
+// Only populated when Confidence == CONFIDENCE_SYMBOL_REACHABLE.
+message ReachabilityPath {
+  // steps is the ordered sequence of call frames, from entry point to
+  // the vulnerable symbol (inclusive at both ends).
+  repeated CallStep steps = 1;
+}
+
+// ─── Advisory Reference ──────────────────────────────────────────────────────
+
+// AdvisoryRef identifies the vulnerability this Finding relates to.
+// Maps to SARIF result.ruleId + rule.help.
+message AdvisoryRef {
+  // id is the canonical advisory identifier (e.g. "GO-2024-0001", "CVE-2024-12345").
+  string id     = 1;
+  // url is a human-readable link to the advisory (optional).
+  string url    = 2;
+  // aliases are alternative identifiers (e.g. CVEs when the primary id is a GHSA).
+  repeated string aliases = 3;
+}
+
+// ─── Finding ─────────────────────────────────────────────────────────────────
+
+// Finding is the normalized output of a single vulnerability report from a plugin.
+//
+// SARIF lowering:
+//   - id / advisory → result.ruleId + rule.help
+//   - severity      → result.level
+//   - path          → result.codeFlows (OMIT if nil/empty; empty codeFlows is invalid SARIF)
+//   - properties    → result.properties (carries algorithm, snapshot_digest, goos, goarch, tags)
+//   - pillar/lang   → reserved tags for multi-pillar expansion (SAST, Secrets, …)
+message Finding {
+  // advisory is the vulnerability reference this finding relates to.
+  AdvisoryRef advisory = 1;
+
+  // module is the Go module path of the dependency containing the vulnerability
+  // (e.g. "golang.org/x/net").
+  string module = 2;
+
+  // confidence is the analyzer's certainty about reachability.
+  // The zero value is CONFIDENCE_UNKNOWN (conservative default).
+  Confidence confidence = 3;
+
+  // severity is the vulnerability's impact classification.
+  Severity severity = 4;
+
+  // path is the concrete call chain, if available.
+  // MUST be nil/omitted when confidence < CONFIDENCE_SYMBOL_REACHABLE,
+  // and MUST be populated when confidence == CONFIDENCE_SYMBOL_REACHABLE.
+  ReachabilityPath path = 5;
+
+  // properties carries analyzer metadata:
+  //   "goos"             → GOOS used for analysis
+  //   "goarch"           → GOARCH used for analysis
+  //   "tags"             → comma-separated build tags
+  //   "snapshot_digest"  → hex digest of the advisory snapshot used
+  //   "algorithm"        → call-graph algorithm (e.g. "vta", "rta", "cha")
+  map<string, string> properties = 6;
+
+  // pillar is a reserved tag for multi-pillar expansion (e.g. "sca", "sast", "secrets").
+  // Populated by the host when aggregating findings from multiple plugin types.
+  string pillar = 7;
+
+  // language is a reserved tag for multi-language support (e.g. "go", "js", "python").
+  string language = 8;
+}
+
+// ─── Input Messages ──────────────────────────────────────────────────────────
+
+// Symbol identifies a specific function or method within a package.
+message Symbol {
+  // package is the fully-qualified Go package path (e.g. "crypto/tls").
+  string package = 1;
+  // name is the symbol name within the package (e.g. "Conn.Read").
+  string name    = 2;
+}
+
+// Advisory carries a resolved vulnerability from the advisory service to the analyzer.
+// The host (Phase 2) resolves advisories and embeds them in AnalyzeRequest; the
+// standalone runner (Phase 4) constructs an identical AnalyzeRequest from the same
+// source, so both paths share one request type with no divergent plumbing.
+message Advisory {
+  // id is the canonical advisory identifier (e.g. "GO-2024-0001").
+  string id           = 1;
+  // module is the affected Go module path.
+  string module       = 2;
+  // version_range is the affected version range in semver notation (e.g. "<1.2.3").
+  string version_range = 3;
+  // symbols are the specific vulnerable symbols, if known (Go vuln DB provides these).
+  repeated Symbol symbols = 4;
+  // symbol_level indicates whether symbol-level data is available for this advisory.
+  // When false, the analyzer MUST degrade to CONFIDENCE_PACKAGE_REACHABLE at best.
+  bool symbol_level = 5;
+  // sources lists the advisory data sources (e.g. ["go-vuln-db"]).
+  repeated string sources = 6;
+}
+
+// BuildConfig specifies the build environment for analysis.
+// When the analysis target cannot be built for the specified config, the analyzer
+// MUST degrade to CONFIDENCE_UNKNOWN (never NOT_REACHABLE) for affected findings.
+message BuildConfig {
+  // goos is the target GOOS (e.g. "linux", "darwin", "windows").
+  string goos   = 1;
+  // goarch is the target GOARCH (e.g. "amd64", "arm64").
+  string goarch = 2;
+  // tags are additional build tags to apply during analysis.
+  repeated string tags = 3;
+}
+
+// AnalyzeRequest is the single input type for the Analyze RPC.
+// Used by both the plugin host (Phase 2) and the standalone runner (Phase 4);
+// there is exactly one request type — no divergent advisory plumbing.
+message AnalyzeRequest {
+  // module_root is the absolute path to the Go module root directory.
+  string module_root = 1;
+  // entrypoints are the packages to use as analysis roots (e.g. ["./cmd/myapp"]).
+  // When empty, the analyzer auto-detects entry points based on the module type
+  // (main packages → main+init+tests; library → exported symbols + init).
+  repeated string entrypoints = 2;
+  // build_config specifies the build environment for analysis.
+  BuildConfig build_config = 3;
+  // advisories are the resolved vulnerabilities to check reachability for.
+  repeated Advisory advisories = 4;
+}
+
+// ─── Metadata Messages ───────────────────────────────────────────────────────
+
+// MetadataRequest is sent by the host to identify itself during the handshake.
+message MetadataRequest {
+  // host_version is the host's protocol version string (e.g. "0.1").
+  string host_version = 1;
+}
+
+// MetadataResponse is returned by a plugin to describe itself.
+message MetadataResponse {
+  // name is the plugin's human-readable name (e.g. "go-reachability").
+  string name = 1;
+  // version is the plugin's own semantic version (e.g. "0.1.0").
+  string version = 2;
+  // protocol_version is the protocol version this plugin implements (e.g. "0.1").
+  // The host uses this to decide compatibility before calling Analyze.
+  string protocol_version = 3;
+  // description is a short human-readable description of what the plugin analyzes.
+  string description = 4;
+  // supported_languages lists the programming language pillars this plugin handles.
+  repeated string supported_languages = 5;
+}
+
+// ─── Analyzer Service ────────────────────────────────────────────────────────
+
+// Analyzer is the gRPC service every anst-analyzer plugin must implement.
+//
+// Transport: subprocess + gRPC over stdio (hashicorp/go-plugin pattern).
+// The host launches the plugin as a child process and communicates over its
+// stdio streams. Plugins MUST NOT write to stdout except via gRPC framing.
+//
+// Handshake sequence:
+//  1. Host sends Metadata(MetadataRequest) to retrieve the plugin's identity
+//     and protocol_version.
+//  2. Host checks compatibility using the compat rule (see file header).
+//  3. If compatible, host sends Analyze(AnalyzeRequest) and streams findings.
+//  4. On incompatibility, the host terminates the plugin process immediately.
+service Analyzer {
+  // Metadata returns the plugin's identity and protocol version.
+  // Called once per plugin startup as part of the handshake.
+  rpc Metadata(MetadataRequest) returns (MetadataResponse);
+
+  // Analyze streams Finding messages back to the host as they are discovered.
+  // Stream direction: client (host) sends ONE AnalyzeRequest; server (plugin)
+  // streams ZERO OR MORE Finding messages and closes the stream when done.
+  // Findings MAY arrive in any order. The stream ends cleanly on EOF; any
+  // error is surfaced as a gRPC status code (codes.Internal for engine errors,
+  // codes.InvalidArgument for bad input).
+  rpc Analyze(AnalyzeRequest) returns (stream Finding);
+}

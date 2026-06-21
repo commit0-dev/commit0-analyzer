@@ -1,0 +1,130 @@
+name: CI
+
+# Cost/time optimizations:
+#  - push runs only on main; PRs cover feature branches → no duplicate push+PR runs.
+#  - concurrency cancels superseded in-flight runs (except on main).
+#  - a `changes` job gates the heavy jobs so docs-only changes skip build/test/proto.
+#  - the proto drift job (buf + protoc install) runs only when proto/buf files change.
+#  - the `ci` aggregate gate stays green when sub-jobs are correctly skipped, so it is
+#    safe to mark as the single required status check in branch protection.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Keep every main commit; cancel superseded runs on feature branches/PRs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      proto: ${{ steps.filter.outputs.proto }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - '.golangci.yml'
+              - '.github/workflows/ci.yml'
+            proto:
+              - 'proto/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'pkg/contract/anstv1/**'
+              - '.github/workflows/ci.yml'
+
+  proto:
+    name: Proto drift
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: Install buf
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.71.0"
+          setup_only: true
+      - name: Install protoc-gen-go and protoc-gen-go-grpc
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+      - name: Regenerate proto stubs
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          buf generate
+      - name: Check proto-gen drift
+        # Fails if generated files differ from committed files, catching drift
+        # from proto changes without re-running buf generate.
+        run: git diff --exit-code -- pkg/contract/anstv1/
+
+  build-test:
+    name: Build, Test, Lint
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        # Fast feedback on PRs; the race detector (slower) runs on main pushes only.
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            go test -race ./...
+          else
+            go test ./...
+          fi
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --timeout=5m
+
+  ci:
+    # Single required status check. Passes when heavy jobs succeed OR are skipped
+    # (docs-only changes), fails if any heavy job failed or was cancelled.
+    name: CI
+    needs: [changes, proto, build-test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on sub-job results
+        run: |
+          changes="${{ needs.changes.result }}"
+          proto="${{ needs.proto.result }}"
+          build="${{ needs.build-test.result }}"
+          echo "changes=$changes proto=$proto build-test=$build"
+          for r in "$changes" "$proto" "$build"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::a required CI job did not succeed"
+              exit 1
+            fi
+          done
+          echo "CI gate passed"

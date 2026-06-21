@@ -1,0 +1,144 @@
+package render_test
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+
+	"github.com/ducthinh993/anst-analyzer/internal/render"
+)
+
+// TestJSON_StableOutput verifies that repeated calls with the same input produce
+// byte-identical JSON (deterministic key order + finding sort).
+func TestJSON_StableOutput(t *testing.T) {
+	findings := []*anstv1.Finding{
+		symbolReachableFinding3Steps(),
+		packageReachableFinding(),
+		unknownFinding(),
+		notReachableFinding(),
+	}
+
+	out1, err := render.ToJSON(findings)
+	require.NoError(t, err)
+	out2, err := render.ToJSON(findings)
+	require.NoError(t, err)
+
+	assert.Equal(t, string(out1), string(out2), "ToJSON must be deterministic across calls")
+}
+
+// TestJSON_GoldenFile verifies that the JSON output matches the golden file and
+// contains required fields: confidence, source attribution, path.
+func TestJSON_GoldenFile(t *testing.T) {
+	findings := []*anstv1.Finding{
+		symbolReachableFinding3Steps(),
+		packageReachableFinding(),
+		unknownFinding(),
+		notReachableFinding(),
+	}
+
+	out, err := render.ToJSON(findings)
+	require.NoError(t, err)
+
+	// Must be valid JSON.
+	var parsed interface{}
+	require.NoError(t, json.Unmarshal(out, &parsed), "ToJSON must produce valid JSON")
+
+	// Structural checks.
+	root, ok := parsed.([]interface{})
+	require.True(t, ok, "JSON root must be an array of findings")
+	assert.Len(t, root, 4, "all 4 findings must be present")
+
+	// Find the SYMBOL_REACHABLE entry (GO-2024-0001) and verify its structure.
+	var symbolEntry map[string]interface{}
+	for _, item := range root {
+		entry := item.(map[string]interface{})
+		if adv, ok := entry["advisory"].(map[string]interface{}); ok {
+			if adv["id"] == "GO-2024-0001" {
+				symbolEntry = entry
+				break
+			}
+		}
+	}
+	require.NotNil(t, symbolEntry, "SYMBOL_REACHABLE finding must be present in JSON output")
+
+	// Confidence must be present and meaningful.
+	assert.NotEmpty(t, symbolEntry["confidence"], "confidence field must be present")
+
+	// Source attribution: the advisory URL and aliases must be present.
+	adv := symbolEntry["advisory"].(map[string]interface{})
+	assert.Equal(t, "GO-2024-0001", adv["id"])
+	assert.Equal(t, "https://pkg.go.dev/vuln/GO-2024-0001", adv["url"])
+	aliases, ok := adv["aliases"].([]interface{})
+	require.True(t, ok, "aliases must be present")
+	assert.Contains(t, aliases, "CVE-2024-12345")
+
+	// Path must be present for SYMBOL_REACHABLE.
+	path, ok := symbolEntry["path"].(map[string]interface{})
+	require.True(t, ok, "path must be present for SYMBOL_REACHABLE finding")
+	steps, ok := path["steps"].([]interface{})
+	require.True(t, ok, "path.steps must be present")
+	assert.Len(t, steps, 3, "3 call steps must be present")
+
+	// Properties (goos, algorithm, snapshot_digest) must be present.
+	props, ok := symbolEntry["properties"].(map[string]interface{})
+	require.True(t, ok, "properties must be present")
+	assert.Equal(t, "linux", props["goos"])
+	assert.Equal(t, "vta", props["algorithm"])
+
+	// Golden-file check.
+	if *updateGolden {
+		goldenWrite(t, "json_findings.golden.json", out)
+	}
+	golden := goldenRead(t, "json_findings.golden.json")
+	assert.JSONEq(t, string(golden), string(out), "JSON output must match golden file")
+}
+
+// TestJSON_SortOrder verifies findings are sorted deterministically (by advisory ID).
+func TestJSON_SortOrder(t *testing.T) {
+	// Provide findings in reverse order; output must be sorted by advisory ID.
+	findings := []*anstv1.Finding{
+		{
+			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0003"},
+			Module:     "example.com/z",
+			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Severity:   anstv1.Severity_SEVERITY_LOW,
+		},
+		{
+			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+			Module:     "example.com/a",
+			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Severity:   anstv1.Severity_SEVERITY_HIGH,
+		},
+		{
+			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0002"},
+			Module:     "example.com/b",
+			Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			Severity:   anstv1.Severity_SEVERITY_MEDIUM,
+		},
+	}
+
+	out, err := render.ToJSON(findings)
+	require.NoError(t, err)
+
+	var parsed []map[string]interface{}
+	require.NoError(t, json.Unmarshal(out, &parsed))
+	require.Len(t, parsed, 3)
+
+	ids := make([]string, len(parsed))
+	for i, e := range parsed {
+		ids[i] = e["advisory"].(map[string]interface{})["id"].(string)
+	}
+	assert.Equal(t, []string{"GO-2024-0001", "GO-2024-0002", "GO-2024-0003"}, ids,
+		"findings must be sorted by advisory ID for deterministic output")
+}
+
+// TestJSON_NilInput verifies that a nil or empty input produces a valid empty JSON array.
+func TestJSON_NilInput(t *testing.T) {
+	out, err := render.ToJSON(nil)
+	require.NoError(t, err)
+	assert.JSONEq(t, "[]", string(out))
+}

@@ -1,0 +1,20 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+  exclusions:
+    # Generated protobuf/gRPC files are not subject to linting.
+    paths:
+      - "pkg/contract/anstv1"
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10
