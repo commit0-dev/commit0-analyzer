@@ -16,8 +16,11 @@ import (
 //     OFF and is not exposed by this package.
 //   - World-writable path check: before accepting a manifest the registry
 //     verifies that neither the binary nor any of its parent directories (up
-//     to the fs root) are world-writable. A world-writable path lets an
+//     to the fs root) are unsafely world-writable. A world-writable path lets an
 //     unprivileged process swap the binary between the hash check and exec.
+//     A world-writable directory with the sticky bit set (e.g. /tmp, mode 1777)
+//     is exempt: the sticky bit prevents non-owners from renaming/deleting the
+//     binary, so the TOCTOU swap is not possible.
 type Registry struct {
 	manifests []*Manifest
 }
@@ -81,6 +84,11 @@ func (r *Registry) Len() int { return len(r.manifests) }
 // the time we hash-check and the time we exec — a classic TOCTOU attack.
 // Rejecting world-writable paths raises the bar significantly.
 //
+// A world-writable directory with the sticky bit set (e.g. /tmp, mode 1777) is
+// treated as safe: the sticky bit restricts rename/delete to the file owner, so
+// an attacker cannot swap the binary. A world-writable file, or a world-writable
+// directory WITHOUT the sticky bit, is rejected.
+//
 // Note: this check is OS-best-effort on Unix (mode bits). It does not cover
 // ACLs, extended attributes, or Windows DACLs; those environments should rely
 // on OS-level controls (e.g. NTFS permissions, SELinux labels).
@@ -92,9 +100,13 @@ func checkNotWorldWritable(path string) error {
 		if err != nil {
 			return fmt.Errorf("world-writable check: lstat %q: %w", cur, err)
 		}
-		if fi.Mode()&0o002 != 0 {
+		mode := fi.Mode()
+		// Exempt sticky world-writable directories (e.g. /tmp): the sticky bit
+		// blocks non-owners from replacing the binary, defeating the TOCTOU swap.
+		sticky := mode.IsDir() && mode&os.ModeSticky != 0
+		if mode&0o002 != 0 && !sticky {
 			return fmt.Errorf("path component %q is world-writable (mode %04o): refusing to load plugin from this location",
-				cur, fi.Mode().Perm())
+				cur, mode.Perm())
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
