@@ -135,13 +135,23 @@ type CacheConfig struct {
 	Dir string
 	// SnapshotPin, if non-empty, pins queries to a pre-fetched snapshot directory
 	// rather than fetching from the network. Verified against the manifest digest.
+	// A pinned snapshot is read-only and never fetched or mutated; Refresh is a
+	// no-op when SnapshotPin is set.
 	SnapshotPin string
 	// Offline, if true, disables all network access. Requires SnapshotPin or a
 	// pre-populated Dir. Returns a clear error when the snapshot is missing.
+	// Refresh is a no-op when Offline is true.
 	Offline bool
 	// StalenessWarning is the age threshold past which a staleness warning is
 	// surfaced. Zero uses DefaultStalenessWarning.
 	StalenessWarning time.Duration
+	// Fetcher is the network client used to populate the writable Dir.
+	// Only consulted by Refresh; Get/Query are always network-free.
+	// Nil means online fetch is unavailable (equivalent to Offline for Refresh).
+	Fetcher *Fetcher
+	// ForceUpdate, if true, causes Refresh to re-fetch even when the cached
+	// DBSourceVersion already matches the live DB modified timestamp.
+	ForceUpdate bool
 }
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
@@ -264,6 +274,182 @@ func (c *Cache) get(ctx context.Context, modulePath, version string) ([]Advisory
 	}
 
 	return advs, nil
+}
+
+// ─── Online refresh ───────────────────────────────────────────────────────────
+
+// Refresh ensures the writable cache Dir is populated and up-to-date for the
+// given set of module paths. It is called once before the per-dep Get loop so
+// that Get/Query remain network-free.
+//
+// Refresh is a no-op when:
+//   - SnapshotPin is set (pins are read-only and never fetched).
+//   - Offline is true (network access is explicitly disabled).
+//   - No Fetcher is configured.
+//
+// Staleness check: Refresh fetches /index/db.json to read the live DB modified
+// timestamp and compares it to the cached manifest's DBSourceVersion. A fetch
+// is performed when:
+//   - The cache Dir is missing or empty (no manifest).
+//   - The cached DBSourceVersion is strictly older than the live modified.
+//   - ForceUpdate is true (always re-fetch regardless of version match).
+//
+// On a fetch error, Refresh returns a hard error without modifying the manifest
+// (unknown ≠ safe: a failed fetch must never leave the cache appearing clean).
+func (c *Cache) Refresh(ctx context.Context, modules []string) error {
+	// No-op conditions: pin, offline, or no fetcher.
+	if c.cfg.SnapshotPin != "" || c.cfg.Offline || c.cfg.Fetcher == nil {
+		return nil
+	}
+	if c.cfg.Dir == "" {
+		return fmt.Errorf("advisory: Refresh requires Dir to be set")
+	}
+
+	// Acquire the dir lock for the whole refresh to prevent concurrent processes
+	// from racing on the same cache directory.
+	//
+	// We must create the dir before locking because lockDir opens a file inside it.
+	if err := os.MkdirAll(c.cfg.Dir, 0o755); err != nil {
+		return fmt.Errorf("advisory: create cache dir %q: %w", c.cfg.Dir, err)
+	}
+
+	unlock, err := lockDir(c.cfg.Dir)
+	if err != nil {
+		return fmt.Errorf("advisory: lock cache dir: %w", err)
+	}
+	defer unlock()
+
+	// Determine whether a fetch is needed.
+	needFetch, err := c.shouldFetch(ctx)
+	if err != nil {
+		return err
+	}
+	if !needFetch {
+		return nil
+	}
+
+	// Perform the fetch into the writable Dir. FetchModules writes OSV files
+	// atomically but does NOT write the manifest — that is our job below.
+	dbModified, err := c.cfg.Fetcher.FetchModules(ctx, modules, c.cfg.Dir)
+	if err != nil {
+		return fmt.Errorf("advisory: fetch modules: %w", err)
+	}
+
+	// Write the manifest last — only after all OSV files are in place.
+	// This ensures a crash between FetchModules and writeManifest leaves the
+	// dir in a state where verifyManifest will fail (missing manifest), so the
+	// next Refresh detects the incomplete state and re-fetches.
+	if err := writeManifestToDir(c.cfg.Dir, dbModified); err != nil {
+		return fmt.Errorf("advisory: write manifest: %w", err)
+	}
+
+	return nil
+}
+
+// shouldFetch checks the live DB modified timestamp and the cached manifest to
+// decide whether a fetch is required. It returns true when:
+//   - ForceUpdate is set, OR
+//   - The cache Dir is missing / has no valid manifest, OR
+//   - The live db modified is strictly newer than the cached DBSourceVersion.
+//
+// It returns false when the cache already carries the current DB version.
+// A network error fetching db.json is a hard error (unknown ≠ safe).
+func (c *Cache) shouldFetch(ctx context.Context) (bool, error) {
+	if c.cfg.ForceUpdate {
+		return true, nil
+	}
+
+	// Read the cached manifest — if absent or corrupt, we must fetch.
+	cached, err := verifyManifest(c.cfg.Dir)
+	if err != nil {
+		// Missing or corrupt manifest means we have no usable cache.
+		return true, nil
+	}
+	if cached.DBSourceVersion == "" {
+		return true, nil
+	}
+
+	// Fetch the live DB modified timestamp to compare.
+	liveModified, err := c.cfg.Fetcher.fetchDBModified(ctx)
+	if err != nil {
+		return false, fmt.Errorf("advisory: check db modified: %w", err)
+	}
+
+	// Compare as strings: vuln.go.dev uses RFC3339 with fixed-width zero-padded
+	// fields, so lexicographic ordering equals chronological ordering.
+	if liveModified > cached.DBSourceVersion {
+		return true, nil
+	}
+	return false, nil
+}
+
+// ─── Manifest write helper ────────────────────────────────────────────────────
+
+// writeManifestToDir computes the content digest for the OSV files in destDir,
+// sets DBSourceVersion=dbModified and BuildTimestamp=now, then atomically writes
+// the manifest to filepath.Join(destDir, ManifestFilename).
+func writeManifestToDir(destDir, dbModified string) error {
+	m, err := buildManifest(destDir)
+	if err != nil {
+		return err
+	}
+	m.DBSourceVersion = dbModified
+	m.BuildTimestamp = time.Now().UTC()
+
+	data, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("advisory: marshal manifest: %w", err)
+	}
+	return atomicWrite(filepath.Join(destDir, ManifestFilename), data)
+}
+
+// ─── Atomic file write ────────────────────────────────────────────────────────
+
+// atomicWrite writes data to path using a temp-file → fsync → rename sequence.
+// This guarantees that a concurrent reader of path never observes a partial write:
+// either the old file or the new file, never a torn intermediate state.
+//
+// The temp file is created in the same directory as path so that the rename is
+// guaranteed to be on the same filesystem (rename across filesystems is not atomic).
+func atomicWrite(path string, data []byte) error {
+	dir := filepath.Dir(path)
+
+	tmp, err := os.CreateTemp(dir, ".anst-tmp-*")
+	if err != nil {
+		return fmt.Errorf("advisory: atomicWrite: create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	// Clean up the temp file on any error path.
+	success := false
+	defer func() {
+		if !success {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("advisory: atomicWrite: write %q: %w", path, err)
+	}
+
+	// fsync ensures the data reaches stable storage before the rename makes it
+	// visible. Without this, a crash between rename and flush could corrupt the
+	// file even though the rename succeeded.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("advisory: atomicWrite: sync %q: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("advisory: atomicWrite: close %q: %w", path, err)
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("advisory: atomicWrite: rename to %q: %w", path, err)
+	}
+
+	success = true
+	return nil
 }
 
 // ─── File locking ─────────────────────────────────────────────────────────────
