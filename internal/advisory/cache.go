@@ -204,8 +204,7 @@ func NewCache(cfg CacheConfig) *Cache {
 	return &Cache{cfg: cfg}
 }
 
-// Get returns advisories for modulePath@version. It honours the following
-// precedence:
+// Get returns advisories for pkg@version. It honours the following precedence:
 //  1. If SnapshotPin is set, query that snapshot directory (after digest verification).
 //  2. Otherwise, if Offline is true, query Dir (must be pre-populated).
 //  3. Otherwise, fetch from the network into Dir, then query.
@@ -213,8 +212,8 @@ func NewCache(cfg CacheConfig) *Cache {
 // A *StalenessWarningError is returned alongside advisories when the snapshot
 // is older than the staleness threshold. Callers must handle this non-nil error
 // and still use the embedded advisories.
-func (c *Cache) Get(ctx context.Context, modulePath, version string) ([]Advisory, error) {
-	key := modulePath + "@" + version
+func (c *Cache) Get(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
+	key := pkg.Ecosystem + ":" + pkg.Name + "@" + version
 
 	type result struct {
 		advs []Advisory
@@ -223,7 +222,7 @@ func (c *Cache) Get(ctx context.Context, modulePath, version string) ([]Advisory
 
 	// singleflight deduplicates concurrent requests for the same key in-process.
 	v, err, _ := c.sf.Do(key, func() (interface{}, error) {
-		advs, err := c.get(ctx, modulePath, version)
+		advs, err := c.get(ctx, pkg, version)
 		return result{advs: advs, err: err}, nil
 	})
 	if err != nil {
@@ -235,7 +234,7 @@ func (c *Cache) Get(ctx context.Context, modulePath, version string) ([]Advisory
 }
 
 // get is the unsynchronised inner implementation called by Get via singleflight.
-func (c *Cache) get(ctx context.Context, modulePath, version string) ([]Advisory, error) {
+func (c *Cache) get(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
 	snapshotDir := c.cfg.SnapshotPin
 	if snapshotDir == "" {
 		snapshotDir = c.cfg.Dir
@@ -269,7 +268,7 @@ func (c *Cache) get(ctx context.Context, modulePath, version string) ([]Advisory
 
 	// Query the Go vuln DB client over the verified snapshot directory.
 	client := &goVulnDBClient{dbDir: snapshotDir}
-	advs, err := client.Query(ctx, modulePath, version)
+	advs, err := client.Query(ctx, pkg, version)
 	if err != nil {
 		return nil, err
 	}

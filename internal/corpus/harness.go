@@ -200,7 +200,7 @@ func queryAdvisory(ctx context.Context, advisoryID, snapshotDir string) ([]*anst
 		StalenessWarning: 365 * 24 * 3600 * 1e9, // 1 year — pinned test snapshots don't expire
 	})
 
-	advs, err := cache.Get(ctx, "example.com/corpusvulnlib", "v0.0.0")
+	advs, err := cache.Get(ctx, advisory.Package{Ecosystem: advisory.EcosystemGo, Name: "example.com/corpusvulnlib"}, "v0.0.0")
 	var staleWarn *advisory.StalenessWarningError
 	if err != nil && !errors.As(err, &staleWarn) {
 		return nil, fmt.Errorf("advisory query: %w", err)

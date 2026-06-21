@@ -115,26 +115,26 @@ func TestGoVulnDBClient_Query(t *testing.T) {
 	ctx := context.Background()
 
 	// Query for github.com/example/vulnpkg at v1.0.0 — expect GO-2024-0001.
-	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	advisories, err := client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advisories, 1)
 	assert.Equal(t, "GO-2024-0001", advisories[0].ID)
 	assert.True(t, advisories[0].SymbolLevel)
 
 	// Query for github.com/example/vulnpkg at fixed version — expect nothing.
-	advisories, err = client.Query(ctx, "github.com/example/vulnpkg", "v1.2.3")
+	advisories, err = client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.2.3")
 	require.NoError(t, err)
 	assert.Empty(t, advisories)
 
 	// Query for github.com/example/pkgonly at v1.0.0 — expect GO-2024-0002, package-level.
-	advisories, err = client.Query(ctx, "github.com/example/pkgonly", "v1.0.0")
+	advisories, err = client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/pkgonly"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advisories, 1)
 	assert.Equal(t, "GO-2024-0002", advisories[0].ID)
 	assert.False(t, advisories[0].SymbolLevel)
 
 	// Query for a module with no advisories.
-	advisories, err = client.Query(ctx, "github.com/example/safe", "v1.0.0")
+	advisories, err = client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/safe"}, "v1.0.0")
 	require.NoError(t, err)
 	assert.Empty(t, advisories)
 }
@@ -171,7 +171,7 @@ func TestGoVulnDBClient_Query_WithdrawnExcluded(t *testing.T) {
 	client := &goVulnDBClient{dbDir: dbDir}
 	ctx := context.Background()
 
-	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	advisories, err := client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	assert.Empty(t, advisories,
 		"withdrawn advisory GO-2025-3408 must not appear in Query results")
@@ -196,7 +196,7 @@ func TestGoVulnDBClient_Query_NonWithdrawnStillReturned(t *testing.T) {
 
 	// v1.0.0 is in [0, 1.2.3) for GO-2024-0001 (active) and in [0, 2.0.0) for
 	// GO-2025-3408 (withdrawn). Only the non-withdrawn one must be returned.
-	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	advisories, err := client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advisories, 1, "only the non-withdrawn advisory should be returned")
 	assert.Equal(t, "GO-2024-0001", advisories[0].ID)

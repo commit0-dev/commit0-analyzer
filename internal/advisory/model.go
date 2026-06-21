@@ -32,6 +32,9 @@ type VersionRange struct {
 type Advisory struct {
 	// ID is the canonical advisory identifier (e.g. "GO-2024-0001").
 	ID string
+	// Ecosystem is the package ecosystem this advisory belongs to (e.g. "Go").
+	// Set by the Source implementation that produced this advisory.
+	Ecosystem string
 	// Module is the affected Go module path.
 	Module string
 	// Aliases are alternative identifiers (CVE, GHSA IDs).

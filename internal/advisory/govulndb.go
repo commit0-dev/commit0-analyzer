@@ -163,10 +163,18 @@ type goVulnDBClient struct {
 }
 
 // Query implements Source. It scans every OSV file in dbDir, parses it, and
-// returns advisories that match modulePath and whose version ranges include version.
+// returns advisories that match pkg.Name and whose version ranges include version.
 // The scan is O(n) in the number of advisory files; the cache layer is expected
 // to keep that set small (one directory per module, or a pre-filtered index).
-func (c *goVulnDBClient) Query(ctx context.Context, modulePath, version string) ([]Advisory, error) {
+//
+// Returns (nil, nil) when pkg.Ecosystem is not EcosystemGo — this client is
+// Go-only and silently passes on other ecosystems so a compose layer can route.
+func (c *goVulnDBClient) Query(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
+	// This source only handles Go modules.
+	if pkg.Ecosystem != EcosystemGo {
+		return nil, nil
+	}
+
 	entries, err := os.ReadDir(c.dbDir)
 	if err != nil {
 		return nil, fmt.Errorf("advisory: read db dir %q: %w", c.dbDir, err)
@@ -207,10 +215,11 @@ func (c *goVulnDBClient) Query(ctx context.Context, modulePath, version string) 
 			continue
 		}
 
-		if adv.Module != modulePath {
+		if adv.Module != pkg.Name {
 			continue
 		}
 		if adv.AffectsVersion(version) {
+			adv.Ecosystem = pkg.Ecosystem
 			results = append(results, *adv)
 		}
 	}

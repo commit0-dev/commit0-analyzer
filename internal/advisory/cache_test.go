@@ -51,11 +51,11 @@ func TestOfflineMode_PinnedSnapshot(t *testing.T) {
 
 	ctx := context.Background()
 
-	result1, err := cache.Get(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	result1, err := cache.Get(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, result1, 1)
 
-	result2, err := cache.Get(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	result2, err := cache.Get(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 
 	// Results must be identical (deterministic).
@@ -73,7 +73,7 @@ func TestOfflineMode_MissingSnapshot(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	_, err := cache.Get(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	_, err := cache.Get(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.Error(t, err, "offline mode with missing snapshot must error")
 	assert.Contains(t, err.Error(), "snapshot", "error should mention snapshot")
 }
@@ -105,7 +105,7 @@ func TestConcurrentReadersWriters(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			advs, err := cache.Get(ctx, "github.com/example/vulnpkg", "v1.0.0")
+			advs, err := cache.Get(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 			if err != nil {
 				errCount.Add(1)
 				return
@@ -143,7 +143,7 @@ func TestSnapshotDigestMismatch(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	_, err := cache.Get(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	_, err := cache.Get(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.Error(t, err, "digest mismatch must be a hard error")
 	assert.Contains(t, err.Error(), "digest", "error must mention digest mismatch")
 }
@@ -167,7 +167,7 @@ func TestSnapshotStaleness(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	_, err := cache.Get(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	_, err := cache.Get(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	// A stale snapshot is a WARNING, not a fatal error — data is still returned.
 	// But the warning must be surfaced via the cache's warning channel or the
 	// returned error wrapper. We verify by checking the cache's last warning.
@@ -242,7 +242,7 @@ func TestCacheRefresh_OnlineThenOffline(t *testing.T) {
 	assert.Equal(t, dbModified, manifest.DBSourceVersion)
 
 	// Get must return the fetched advisory.
-	advs, err := cache.Get(context.Background(), "github.com/example/vulnpkg", "v1.0.0")
+	advs, err := cache.Get(context.Background(), Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advs, 1)
 	assert.Equal(t, "GO-2024-0001", advs[0].ID)
@@ -254,7 +254,7 @@ func TestCacheRefresh_OnlineThenOffline(t *testing.T) {
 		Dir:     cacheDir,
 		Offline: true,
 	})
-	advs2, err := offlineCache.Get(context.Background(), "github.com/example/vulnpkg", "v1.0.0")
+	advs2, err := offlineCache.Get(context.Background(), Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advs2, 1)
 	assert.Equal(t, "GO-2024-0001", advs2[0].ID)

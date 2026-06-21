@@ -178,7 +178,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// ── 5. Query advisory service for each dep ────────────────────────────────
 	var protoAdvs []*anstv1.Advisory
 	for _, dep := range deps {
-		advs, err := cache.Get(ctx, dep.Path, dep.Version)
+		advs, err := cache.Get(ctx, advisory.Package{Ecosystem: advisory.EcosystemGo, Name: dep.Path}, dep.Version)
 		var staleWarn *advisory.StalenessWarningError
 		if err != nil && !errors.As(err, &staleWarn) {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
