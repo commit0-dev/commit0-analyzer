@@ -127,6 +127,33 @@ func (e *StalenessWarningError) Error() string {
 	return e.Warning
 }
 
+// ─── Probe-failure fallback warning ──────────────────────────────────────────
+
+// RefreshFallbackWarning is returned by Refresh when the live-DB staleness probe
+// (GET /index/db.json) fails BUT a valid local cache already exists.
+//
+// "unknown ≠ safe" applies here: the caller MUST surface this warning AND mark
+// the scan incomplete — the cached data may be stale. The scan result must never
+// appear as a clean pass when live freshness could not be confirmed.
+//
+// Contrast with a hard error: if the cache is also missing or unverifiable,
+// Refresh returns a plain error (not RefreshFallbackWarning) and the scan must
+// abort with exit 3 rather than producing results at all.
+type RefreshFallbackWarning struct {
+	// Warning is a human-readable description of the degraded state.
+	Warning string
+	// ProbeErr is the underlying error from the staleness-probe fetch.
+	ProbeErr error
+}
+
+func (e *RefreshFallbackWarning) Error() string {
+	return e.Warning
+}
+
+func (e *RefreshFallbackWarning) Unwrap() error {
+	return e.ProbeErr
+}
+
 // ─── Cache config ─────────────────────────────────────────────────────────────
 
 // CacheConfig holds configuration for a Cache instance.
@@ -320,9 +347,17 @@ func (c *Cache) Refresh(ctx context.Context, modules []string) error {
 	defer unlock()
 
 	// Determine whether a fetch is needed.
-	needFetch, err := c.shouldFetch(ctx)
+	// shouldFetch returns a RefreshFallbackWarning (not a hard error) when the
+	// staleness probe fails but a valid local cache already exists. In that case
+	// we surface the warning so the caller can mark the scan incomplete.
+	needFetch, fallback, err := c.shouldFetch(ctx)
 	if err != nil {
 		return err
+	}
+	if fallback != nil {
+		// Probe failed + valid cache exists: degrade gracefully.
+		// Return the warning so the CLI can print it and set incomplete=true.
+		return fallback
 	}
 	if !needFetch {
 		return nil
@@ -347,40 +382,58 @@ func (c *Cache) Refresh(ctx context.Context, modules []string) error {
 }
 
 // shouldFetch checks the live DB modified timestamp and the cached manifest to
-// decide whether a fetch is required. It returns true when:
+// decide whether a fetch is required. It returns (needFetch, fallbackWarning, error).
+//
+// Returns (true, nil, nil) when:
 //   - ForceUpdate is set, OR
 //   - The cache Dir is missing / has no valid manifest, OR
 //   - The live db modified is strictly newer than the cached DBSourceVersion.
 //
-// It returns false when the cache already carries the current DB version.
-// A network error fetching db.json is a hard error (unknown ≠ safe).
-func (c *Cache) shouldFetch(ctx context.Context) (bool, error) {
+// Returns (false, nil, nil) when the cache already carries the current DB version.
+//
+// Returns (false, *RefreshFallbackWarning, nil) when the staleness probe fails BUT
+// a valid local cache exists — the caller should use the existing cache and mark
+// the scan incomplete (unknown ≠ safe: freshness unconfirmed).
+//
+// Returns (false, nil, error) when the probe fails AND the cache is also missing
+// or corrupt — the caller should abort (no usable data at all).
+func (c *Cache) shouldFetch(ctx context.Context) (needFetch bool, fallback *RefreshFallbackWarning, err error) {
 	if c.cfg.ForceUpdate {
-		return true, nil
+		return true, nil, nil
 	}
 
-	// Read the cached manifest — if absent or corrupt, we must fetch.
-	cached, err := verifyManifest(c.cfg.Dir)
-	if err != nil {
-		// Missing or corrupt manifest means we have no usable cache.
-		return true, nil
+	// Check whether a valid local cache exists before hitting the network.
+	// If the manifest is missing or corrupt, we have no fallback.
+	cached, manifestErr := verifyManifest(c.cfg.Dir)
+	if manifestErr != nil {
+		// No usable cache — we must fetch (and errors later will be hard errors).
+		return true, nil, nil
 	}
 	if cached.DBSourceVersion == "" {
-		return true, nil
+		// Cache exists but has no version recorded — force a refresh.
+		return true, nil, nil
 	}
 
 	// Fetch the live DB modified timestamp to compare.
-	liveModified, err := c.cfg.Fetcher.fetchDBModified(ctx)
-	if err != nil {
-		return false, fmt.Errorf("advisory: check db modified: %w", err)
+	liveModified, probeErr := c.cfg.Fetcher.fetchDBModified(ctx)
+	if probeErr != nil {
+		// Probe failed but we have a verified local cache. Fall back gracefully:
+		// the caller should use the existing cache and mark the scan incomplete
+		// so the result is never silently treated as a clean pass.
+		warn := fmt.Sprintf(
+			"advisory: could not check live DB freshness (%v); using existing cache in %q — "+
+				"scan is marked incomplete because advisory data may be stale",
+			probeErr, c.cfg.Dir,
+		)
+		return false, &RefreshFallbackWarning{Warning: warn, ProbeErr: probeErr}, nil
 	}
 
 	// Compare as strings: vuln.go.dev uses RFC3339 with fixed-width zero-padded
 	// fields, so lexicographic ordering equals chronological ordering.
 	if liveModified > cached.DBSourceVersion {
-		return true, nil
+		return true, nil, nil
 	}
-	return false, nil
+	return false, nil, nil
 }
 
 // ─── Manifest write helper ────────────────────────────────────────────────────

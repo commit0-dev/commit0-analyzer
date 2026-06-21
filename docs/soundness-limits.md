@@ -60,11 +60,17 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 | `NOT_REACHABLE` | No call path from any entry point to the vulnerable symbol was found in the static call graph. | BFS from all roots found no edge to the symbol, no reflection detected, no build mismatch. |
 | `UNKNOWN` | Reachability could not be determined. See above. | Any of the cases above. |
 
-## Advisory Data Scope (MVP)
+## Advisory Data Scope
 
 Advisory data comes exclusively from the **Go vulnerability database** (`vuln.go.dev`). Only the Go vuln DB reliably carries symbol-level data. OSV.dev and GHSA are roadmap items that add CVE *coverage* (more advisories), not symbol *precision* (the same symbols, from a different source).
 
 **Implication:** `anst-analyzer` and `govulncheck` use the same advisory symbol data for Go modules. The differentiation is SARIF `codeFlows`, policy-as-code gating, and the plugin architecture — not symbol resolution precision.
+
+### Live fetch and caching
+
+`anst-analyzer scan` fetches advisory data from `vuln.go.dev` automatically on first run and caches it locally. Subsequent scans check the DB `modified` timestamp and re-fetch only when the live DB is newer. Use `--update` to force a re-fetch.
+
+**Failure handling at the fetch boundary:** A fetch failure (network error, HTTP 5xx, partial download) marks the scan **incomplete** (exit 3), never silently produces a clean pass. If the staleness probe fails but a valid local cache exists, the scan uses the existing cache, prints a warning, and exits 3 (incomplete). See `docs/usage.md` for the three advisory-data modes.
 
 ## Entry-Point Detection
 

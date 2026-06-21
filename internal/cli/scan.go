@@ -24,6 +24,7 @@ type scanFlags struct {
 	policyFile string
 	dbSnapshot string
 	offline    bool
+	update     bool
 	failOn     string
 	goos       string
 	goarch     string
@@ -77,8 +78,9 @@ Exit codes:
 	fs := cmd.Flags()
 	fs.StringVar(&flags.format, "format", "sarif", "output format: sarif|json|table")
 	fs.StringVar(&flags.policyFile, "policy", "", "path to a YAML policy file (optional)")
-	fs.StringVar(&flags.dbSnapshot, "db-snapshot", "", "path to a pinned advisory snapshot directory")
-	fs.BoolVar(&flags.offline, "offline", false, "disable network access; requires --db-snapshot")
+	fs.StringVar(&flags.dbSnapshot, "db-snapshot", "", "path to a pinned advisory snapshot directory (read-only; never fetched)")
+	fs.BoolVar(&flags.offline, "offline", false, "disable network access; use existing cache or --db-snapshot")
+	fs.BoolVar(&flags.update, "update", false, "force re-fetch of advisory data even when cached version is current")
 	fs.StringVar(&flags.failOn, "fail-on", "high", "minimum severity to fail: low|medium|high|critical")
 	fs.StringVar(&flags.goos, "goos", "", "GOOS override for build config")
 	fs.StringVar(&flags.goarch, "goarch", "", "GOARCH override for build config")
@@ -100,20 +102,43 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	}
 
 	// ── 2. Load advisory cache ────────────────────────────────────────────────
-	snapshotDir := flags.dbSnapshot
-	if flags.offline && snapshotDir == "" {
-		fmt.Fprintln(os.Stderr, "anst-analyzer scan: --offline requires --db-snapshot")
-		return policy.ExitOperationalError
-	}
-	if snapshotDir == "" {
-		// Default to a user cache directory when no snapshot is pinned.
-		// In offline mode this will fail clearly if the cache is absent.
+	//
+	// Three distinct modes:
+	//   a) --db-snapshot <dir>  → pin to that dir (read-only, never fetched).
+	//   b) --offline            → read the writable cache dir; no network.
+	//   c) default (online)     → refresh the writable cache dir from vuln.go.dev.
+	//
+	// Note: previously the code passed the writable cache dir as SnapshotPin,
+	// which silently disabled all fetching. The fix is to use Dir (writable) for
+	// the default path and SnapshotPin only when --db-snapshot is given.
+	var cacheCfg advisory.CacheConfig
+	cacheCfg.StalenessWarning = advisory.DefaultStalenessWarning
+
+	if flags.dbSnapshot != "" {
+		// Pinned snapshot: read-only, manifest-verified, never fetched.
+		cacheCfg.SnapshotPin = flags.dbSnapshot
+		cacheCfg.Offline = true // pins are always read-only
+	} else {
+		// Writable cache dir (online default or --offline).
 		cacheDir, err := os.UserCacheDir()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", err)
 			return policy.ExitOperationalError
 		}
-		snapshotDir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
+		cacheCfg.Dir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
+		cacheCfg.Offline = flags.offline
+		if !flags.offline {
+			// Online mode: wire the fetcher for Refresh.
+			// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL.
+			// This seam is used in hermetic tests to inject a mock server;
+			// it must not be set in production deployments.
+			f := advisory.NewFetcher()
+			if override := os.Getenv("ANST_VULN_DB_URL"); override != "" {
+				f.BaseURL = override
+			}
+			cacheCfg.Fetcher = f
+			cacheCfg.ForceUpdate = flags.update
+		}
 	}
 
 	// ── 3. Resolve module dependencies ────────────────────────────────────────
@@ -123,15 +148,35 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	// ── 4. Query advisory service for each dep ────────────────────────────────
-	cache := advisory.NewCache(advisory.CacheConfig{
-		SnapshotPin:      snapshotDir,
-		Offline:          flags.offline,
-		StalenessWarning: advisory.DefaultStalenessWarning,
-	})
-
-	var protoAdvs []*anstv1.Advisory
+	// ── 4. Online refresh before the per-dep Get loop ─────────────────────────
+	//
+	// Refresh is a no-op for pinned snapshots, offline mode, and when no Fetcher
+	// is configured. In online mode it populates / refreshes the writable Dir for
+	// the resolved module set so that subsequent Get calls are network-free.
+	//
+	// Failure handling ("unknown ≠ safe"):
+	//   - RefreshFallbackWarning: probe failed but valid local cache exists →
+	//     print warning and mark scan incomplete (not a silent clean pass).
+	//   - Any other error (no cache + fetch failed) → exit 3.
+	cache := advisory.NewCache(cacheCfg)
 	incomplete := false
+
+	if err := cache.Refresh(ctx, modPaths(deps)); err != nil {
+		var fallback *advisory.RefreshFallbackWarning
+		if errors.As(err, &fallback) {
+			// Degraded mode: probe failed but existing cache is usable.
+			// Surface the warning and mark incomplete so the scan never exits 0.
+			fmt.Fprintf(os.Stderr, "warning: %s\n", fallback.Warning)
+			incomplete = true
+		} else {
+			// Hard failure: no usable cache and fetch failed — abort.
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory refresh: %v\n", err)
+			return policy.ExitOperationalError
+		}
+	}
+
+	// ── 5. Query advisory service for each dep ────────────────────────────────
+	var protoAdvs []*anstv1.Advisory
 	for _, dep := range deps {
 		advs, err := cache.Get(ctx, dep.Path, dep.Version)
 		var staleWarn *advisory.StalenessWarningError
@@ -150,7 +195,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 	}
 
-	// ── 5. Build AnalyzeRequest ───────────────────────────────────────────────
+	// ── 6. Build AnalyzeRequest ───────────────────────────────────────────────
 	req := &anstv1.AnalyzeRequest{
 		ModuleRoot: moduleRoot,
 		Advisories: protoAdvs,
@@ -307,6 +352,15 @@ func loadPolicyFromFlags(flags scanFlags) (*policy.Policy, error) {
 type modDep struct {
 	Path    string
 	Version string
+}
+
+// modPaths returns just the module paths from a dep list, for use with Refresh.
+func modPaths(deps []modDep) []string {
+	paths := make([]string, len(deps))
+	for i, d := range deps {
+		paths[i] = d.Path
+	}
+	return paths
 }
 
 // listModDeps uses `go list -m -json all` to enumerate module dependencies.
