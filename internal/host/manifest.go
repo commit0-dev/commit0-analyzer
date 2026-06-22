@@ -8,6 +8,18 @@ import (
 	"os"
 )
 
+// ArtifactPin holds the path and expected SHA-256 digest of a plugin artifact
+// beyond the primary executable (e.g. a native napi sidecar .node file).
+// Both Path and SHA256 must be set; an empty SHA256 is only valid when the
+// parent Manifest's SHA256 is also empty (test-only escape hatch).
+type ArtifactPin struct {
+	// Path is the absolute path to the artifact file.
+	Path string
+
+	// SHA256 is the expected lowercase hex-encoded SHA-256 digest of the file.
+	SHA256 string
+}
+
 // Manifest describes a single plugin binary that the host is allowed to load.
 // It is the unit of configuration for the plugin allowlist: only binaries
 // explicitly listed here (with matching path + hash) will be launched.
@@ -45,33 +57,54 @@ type Manifest struct {
 	// binary. go-plugin's SecureConfig uses this to reject tampered binaries.
 	// Leave empty only in tests that explicitly opt out of hash checking.
 	SHA256 string
+
+	// AdditionalArtifacts lists extra files that must be present and hash-verified
+	// alongside the primary binary (e.g. a native napi sidecar .node file).
+	// A single-file plugin (e.g. the Go plugin) leaves this nil or empty.
+	// VerifyHash checks each entry; the registry's world-writable guard applies
+	// to each path as well.
+	AdditionalArtifacts []ArtifactPin
 }
 
 // VerifyHash reads the plugin binary at m.ExecPath and returns an error if its
 // SHA-256 digest does not match m.SHA256. An empty m.SHA256 skips the check
 // (test-only escape hatch — production manifests must always set the hash).
+// When AdditionalArtifacts is non-empty, each artifact's hash is also verified.
 func (m *Manifest) VerifyHash() error {
 	if m.SHA256 == "" {
 		return nil // caller opted out (tests only)
 	}
 
-	f, err := os.Open(m.ExecPath)
+	if err := verifyFileHash(m.ExecPath, m.SHA256, fmt.Sprintf("manifest %s: binary", m.Name)); err != nil {
+		return err
+	}
+
+	for i, a := range m.AdditionalArtifacts {
+		label := fmt.Sprintf("manifest %s: artifact[%d] %s", m.Name, i, a.Path)
+		if err := verifyFileHash(a.Path, a.SHA256, label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verifyFileHash opens path, computes its SHA-256, and returns an error if it
+// does not match want. label is used in the error message for context.
+func verifyFileHash(path, want, label string) error {
+	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("manifest %s: open binary: %w", m.Name, err)
+		return fmt.Errorf("%s: open: %w", label, err)
 	}
 	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return fmt.Errorf("manifest %s: hash binary: %w", m.Name, err)
+		return fmt.Errorf("%s: hash: %w", label, err)
 	}
 
 	got := hex.EncodeToString(h.Sum(nil))
-	if got != m.SHA256 {
-		return fmt.Errorf(
-			"manifest %s: binary hash mismatch: want %s, got %s",
-			m.Name, m.SHA256, got,
-		)
+	if got != want {
+		return fmt.Errorf("%s: hash mismatch: want %s, got %s", label, want, got)
 	}
 	return nil
 }

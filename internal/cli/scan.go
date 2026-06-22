@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,6 +33,41 @@ type scanFlags struct {
 	pluginBin      string
 	source         string // comma-separated source names; default "go-vuln-db,osv"
 	sourceExplicit bool   // true when --source was explicitly set by the user
+	language       string // "auto"|"go"|"js"; default "auto"
+}
+
+// ecosystems records which ecosystem marker files were detected in a module root.
+type ecosystems struct {
+	hasGo bool // go.mod present
+	hasJS bool // package.json present
+}
+
+// detectEcosystems checks the module root for go.mod and package.json.
+func detectEcosystems(moduleRoot string) ecosystems {
+	var e ecosystems
+	if _, err := os.Stat(filepath.Join(moduleRoot, "go.mod")); err == nil {
+		e.hasGo = true
+	}
+	if _, err := os.Stat(filepath.Join(moduleRoot, "package.json")); err == nil {
+		e.hasJS = true
+	}
+	return e
+}
+
+// resolveLanguage applies the --language override to the detected ecosystems and
+// returns (hasGo, hasJS, error). "auto" defers to detection; "go" forces Go only;
+// "js" forces JS only. Any other value is an operational error.
+func resolveLanguage(lang string, e ecosystems) (hasGo, hasJS bool, err error) {
+	switch lang {
+	case "go":
+		return true, false, nil
+	case "js":
+		return false, true, nil
+	case "auto":
+		return e.hasGo, e.hasJS, nil
+	default:
+		return false, false, fmt.Errorf("unknown --language value %q: must be one of auto|go|js", lang)
+	}
 }
 
 // sourceAliases maps user-facing --source flag tokens to canonical advisory
@@ -102,6 +138,8 @@ Exit codes:
 	fs.StringVar(&flags.pluginBin, "plugin-binary", "", "path to pre-built go-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.source, "source", "go-vuln-db,osv",
 		"comma-separated advisory sources to query: go-vuln-db, osv (default: both)")
+	fs.StringVar(&flags.language, "language", "auto",
+		"ecosystem to scan: go|js|auto (default: auto — detected from go.mod / package.json)")
 
 	return cmd
 }
@@ -109,12 +147,30 @@ Exit codes:
 // runScan executes the full scan pipeline and returns the exit code.
 // It never panics; panics are caught by policy.RunWithRecovery in main.
 func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
-	// ── 1. Validate module root ───────────────────────────────────────────────
-	goModPath := filepath.Join(moduleRoot, "go.mod")
-	if _, err := os.Stat(goModPath); err != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: %s does not contain a go.mod file: %v\n",
-			moduleRoot, err)
+	// ── 1. Detect ecosystems and validate module root ────────────────────────
+	eco := detectEcosystems(moduleRoot)
+	scanGo, scanJS, langErr := resolveLanguage(flags.language, eco)
+	if langErr != nil {
+		fmt.Fprintf(os.Stderr, "anst-analyzer scan: %v\n", langErr)
 		return policy.ExitOperationalError
+	}
+
+	if !scanGo && !scanJS {
+		fmt.Fprintf(os.Stderr,
+			"anst-analyzer scan: %s contains neither go.mod nor package.json; nothing to scan\n",
+			moduleRoot)
+		return policy.ExitOperationalError
+	}
+
+	// The Go advisory pipeline (steps 3–5) requires go.mod to resolve deps.
+	// Skip it when only the JS ecosystem was selected.
+	if scanGo {
+		goModPath := filepath.Join(moduleRoot, "go.mod")
+		if _, err := os.Stat(goModPath); err != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: --language go selected but %s does not contain a go.mod file: %v\n",
+				moduleRoot, err)
+			return policy.ExitOperationalError
+		}
 	}
 
 	// ── 2. Validate --source flag ─────────────────────────────────────────────
@@ -124,14 +180,18 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	// ── 3. Resolve module dependencies ────────────────────────────────────────
-	deps, err := listModDeps(ctx, moduleRoot)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve deps: %v\n", err)
-		return policy.ExitOperationalError
+	// ── 3. Resolve module dependencies (Go only) ─────────────────────────────
+	var deps []modDep
+	if scanGo {
+		var depsErr error
+		deps, depsErr = listModDeps(ctx, moduleRoot)
+		if depsErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve deps: %v\n", depsErr)
+			return policy.ExitOperationalError
+		}
 	}
 
-	// ── 4. Build advisory sources and refresh ─────────────────────────────────
+	// ── 4. Build advisory sources and refresh (Go only) ──────────────────────
 	//
 	// Each enabled source is cache-backed (Go-DB via Cache; OSV via
 	// OSVBundleSource). Both honour --offline (no Refresh) and --db-snapshot
@@ -145,150 +205,153 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	//   a) --db-snapshot <dir>  → pin Go-DB to that dir (read-only, never fetched).
 	//   b) --offline            → read existing caches; no network.
 	//   c) default (online)     → refresh both caches from upstream.
-	cacheDir, cacheErr := os.UserCacheDir()
-	if cacheErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
-		return policy.ExitOperationalError
-	}
-
 	incomplete := false
 	var namedSources []advisory.NamedSource
-
-	// ── 4a. Go vuln DB source ─────────────────────────────────────────────────
-	if selectedSources[advisory.SourceGoVulnDB] {
-		var cacheCfg advisory.CacheConfig
-		cacheCfg.StalenessWarning = advisory.DefaultStalenessWarning
-
-		if flags.dbSnapshot != "" {
-			// Pinned snapshot: read-only, manifest-verified, never fetched.
-			cacheCfg.SnapshotPin = flags.dbSnapshot
-			cacheCfg.Offline = true
-		} else {
-			cacheCfg.Dir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
-			cacheCfg.Offline = flags.offline
-			if !flags.offline {
-				// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL (test seam).
-				f := advisory.NewFetcher()
-				if override := os.Getenv("ANST_VULN_DB_URL"); override != "" {
-					f.BaseURL = override
-				}
-				cacheCfg.Fetcher = f
-				cacheCfg.ForceUpdate = flags.update
-			}
-		}
-
-		goCache := advisory.NewCache(cacheCfg)
-
-		// Refresh Go-DB (no-op for pinned/offline/no-fetcher).
-		// Failure handling ("unknown ≠ safe"):
-		//   - RefreshFallbackWarning: probe failed but valid cache exists → warn + incomplete.
-		//   - Other error (no cache + fetch failed) → abort (primary source).
-		if refreshErr := goCache.Refresh(ctx, modPaths(deps)); refreshErr != nil {
-			var fallback *advisory.RefreshFallbackWarning
-			if errors.As(refreshErr, &fallback) {
-				fmt.Fprintf(os.Stderr, "warning: %s\n", fallback.Warning)
-				incomplete = true
-			} else {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory refresh: %v\n", refreshErr)
-				return policy.ExitOperationalError
-			}
-		}
-
-		namedSources = append(namedSources, advisory.NamedSource{
-			Name: advisory.SourceGoVulnDB,
-			S:    goCache,
-		})
-	}
-
-	// ── 4b. OSV bundle source ─────────────────────────────────────────────────
-	if selectedSources[advisory.SourceOSV] {
-		osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
-
-		osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
-		// ANST_OSV_DB_URL overrides the default OSV GCS base URL (test seam).
-		// BaseURL is an exported field on OSVBundleSource for exactly this purpose.
-		if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
-			osvSrc.BaseURL = override
-		}
-		osvSrc.ForceUpdate = flags.update
-
-		// Refresh OSV (secondary source): failure → warn + incomplete, not abort.
-		// --offline and --db-snapshot skip the Refresh; OSV falls back to its
-		// existing cache dir if populated, or returns empty (nil,nil) if not.
-		// A missing OSV cache in offline mode is recorded as incomplete (not silent).
-		if !flags.offline && flags.dbSnapshot == "" {
-			if refreshErr := osvSrc.Refresh(ctx, advisory.EcosystemGo); refreshErr != nil {
-				fmt.Fprintf(os.Stderr, "warning: OSV source refresh failed (%s): %v; scan marked incomplete\n",
-					advisory.SourceOSV, refreshErr)
-				incomplete = true
-				// Do not add OSV to sources when its refresh failed — it has no usable cache.
-				goto skipOSV
-			}
-		} else if flags.offline || flags.dbSnapshot != "" {
-			// Offline/snapshot mode: check whether the OSV cache exists.
-			// If missing:
-			//   - When --source was explicitly set to include osv → warn + incomplete
-			//     ("unknown ≠ safe": the user specifically requested OSV coverage).
-			//   - When --source was not explicitly set (OSV is the default) → silently
-			//     skip. This preserves backward compat for callers using --db-snapshot
-			//     (a Go-DB-only mode) who never populated an OSV cache.
-			if !osvCacheDirExists(osvCacheDir, advisory.EcosystemGo) {
-				if flags.sourceExplicit {
-					fmt.Fprintf(os.Stderr,
-						"warning: OSV cache not populated at %s (run without --offline to fetch); OSV source skipped, scan marked incomplete\n",
-						filepath.Join(osvCacheDir, advisory.EcosystemGo))
-					incomplete = true
-				}
-				goto skipOSV
-			}
-		}
-
-		namedSources = append(namedSources, advisory.NamedSource{
-			Name: advisory.SourceOSV,
-			S:    osvSrc,
-		})
-	skipOSV:
-	}
-
-	// ── 5. Query advisory sources for each dep ────────────────────────────────
-	multiSrc := advisory.NewMultiSource(namedSources...)
-
 	var protoAdvs []*anstv1.Advisory
-	// sourcesByID records the merged source attribution for each advisory so it
-	// can be stamped onto findings (the Finding carries only an advisory ref, not
-	// the advisory's Sources, so we propagate it here for visible attribution).
 	sourcesByID := map[string][]string{}
-	for _, dep := range deps {
-		pkg := advisory.Package{Ecosystem: advisory.EcosystemGo, Name: dep.Path}
-		advs, queryErr := multiSrc.Query(ctx, pkg, dep.Version)
 
-		// A *SourcesIncompleteError means one or more sources failed for this dep.
-		// Warn + mark incomplete, but still gate on the advisories that succeeded.
-		var srcIncomplete *advisory.SourcesIncompleteError
-		if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
-			for i, name := range srcIncomplete.FailedSources {
-				fmt.Fprintf(os.Stderr, "warning: advisory source %q failed for %s@%s: %v\n",
-					name, dep.Path, dep.Version, srcIncomplete.Errors[i])
-			}
-			incomplete = true
-		} else if queryErr != nil {
-			// A non-StalenessWarning, non-SourcesIncomplete error (e.g. cache corrupt).
-			var staleWarn *advisory.StalenessWarningError
-			if errors.As(queryErr, &staleWarn) {
-				fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
-				advs = staleWarn.Advisories
+	if scanGo {
+		cacheDir, cacheErr := os.UserCacheDir()
+		if cacheErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+			return policy.ExitOperationalError
+		}
+
+		// ── 4a. Go vuln DB source ─────────────────────────────────────────────────
+		if selectedSources[advisory.SourceGoVulnDB] {
+			var cacheCfg advisory.CacheConfig
+			cacheCfg.StalenessWarning = advisory.DefaultStalenessWarning
+
+			if flags.dbSnapshot != "" {
+				// Pinned snapshot: read-only, manifest-verified, never fetched.
+				cacheCfg.SnapshotPin = flags.dbSnapshot
+				cacheCfg.Offline = true
 			} else {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
-					dep.Path, dep.Version, queryErr)
-				incomplete = true
-				continue
+				cacheCfg.Dir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
+				cacheCfg.Offline = flags.offline
+				if !flags.offline {
+					// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL (test seam).
+					f := advisory.NewFetcher()
+					if override := os.Getenv("ANST_VULN_DB_URL"); override != "" {
+						f.BaseURL = override
+					}
+					cacheCfg.Fetcher = f
+					cacheCfg.ForceUpdate = flags.update
+				}
+			}
+
+			goCache := advisory.NewCache(cacheCfg)
+
+			// Refresh Go-DB (no-op for pinned/offline/no-fetcher).
+			// Failure handling ("unknown ≠ safe"):
+			//   - RefreshFallbackWarning: probe failed but valid cache exists → warn + incomplete.
+			//   - Other error (no cache + fetch failed) → abort (primary source).
+			if refreshErr := goCache.Refresh(ctx, modPaths(deps)); refreshErr != nil {
+				var fallback *advisory.RefreshFallbackWarning
+				if errors.As(refreshErr, &fallback) {
+					fmt.Fprintf(os.Stderr, "warning: %s\n", fallback.Warning)
+					incomplete = true
+				} else {
+					fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory refresh: %v\n", refreshErr)
+					return policy.ExitOperationalError
+				}
+			}
+
+			namedSources = append(namedSources, advisory.NamedSource{
+				Name: advisory.SourceGoVulnDB,
+				S:    goCache,
+			})
+		}
+
+		// ── 4b. OSV bundle source ─────────────────────────────────────────────────
+		if selectedSources[advisory.SourceOSV] {
+			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+
+			osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
+			// ANST_OSV_DB_URL overrides the default OSV GCS base URL (test seam).
+			// BaseURL is an exported field on OSVBundleSource for exactly this purpose.
+			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+				osvSrc.BaseURL = override
+			}
+			osvSrc.ForceUpdate = flags.update
+
+			// Refresh OSV (secondary source): failure → warn + incomplete, not abort.
+			// --offline and --db-snapshot skip the Refresh; OSV falls back to its
+			// existing cache dir if populated, or returns empty (nil,nil) if not.
+			// A missing OSV cache in offline mode is recorded as incomplete (not silent).
+			addOSV := true
+			if !flags.offline && flags.dbSnapshot == "" {
+				if refreshErr := osvSrc.Refresh(ctx, advisory.EcosystemGo); refreshErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: OSV source refresh failed (%s): %v; scan marked incomplete\n",
+						advisory.SourceOSV, refreshErr)
+					incomplete = true
+					addOSV = false
+				}
+			} else if flags.offline || flags.dbSnapshot != "" {
+				// Offline/snapshot mode: check whether the OSV cache exists.
+				// If missing:
+				//   - When --source was explicitly set to include osv → warn + incomplete
+				//     ("unknown ≠ safe": the user specifically requested OSV coverage).
+				//   - When --source was not explicitly set (OSV is the default) → silently
+				//     skip. This preserves backward compat for callers using --db-snapshot
+				//     (a Go-DB-only mode) who never populated an OSV cache.
+				if !osvCacheDirExists(osvCacheDir, advisory.EcosystemGo) {
+					if flags.sourceExplicit {
+						fmt.Fprintf(os.Stderr,
+							"warning: OSV cache not populated at %s (run without --offline to fetch); OSV source skipped, scan marked incomplete\n",
+							filepath.Join(osvCacheDir, advisory.EcosystemGo))
+						incomplete = true
+					}
+					addOSV = false
+				}
+			}
+
+			if addOSV {
+				namedSources = append(namedSources, advisory.NamedSource{
+					Name: advisory.SourceOSV,
+					S:    osvSrc,
+				})
 			}
 		}
 
-		for i := range advs {
-			protoAdvs = append(protoAdvs, advs[i].ToProto())
-			if advs[i].ID != "" {
-				sourcesByID[advs[i].ID] = advs[i].Sources
+		// ── 5. Query advisory sources for each Go dep ─────────────────────────────
+		multiSrc := advisory.NewMultiSource(namedSources...)
+
+		// sourcesByID records the merged source attribution for each advisory so it
+		// can be stamped onto findings (the Finding carries only an advisory ref, not
+		// the advisory's Sources, so we propagate it here for visible attribution).
+		for _, dep := range deps {
+			pkg := advisory.Package{Ecosystem: advisory.EcosystemGo, Name: dep.Path}
+			advs, queryErr := multiSrc.Query(ctx, pkg, dep.Version)
+
+			// A *SourcesIncompleteError means one or more sources failed for this dep.
+			// Warn + mark incomplete, but still gate on the advisories that succeeded.
+			var srcIncomplete *advisory.SourcesIncompleteError
+			if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
+				for i, name := range srcIncomplete.FailedSources {
+					fmt.Fprintf(os.Stderr, "warning: advisory source %q failed for %s@%s: %v\n",
+						name, dep.Path, dep.Version, srcIncomplete.Errors[i])
+				}
+				incomplete = true
+			} else if queryErr != nil {
+				// A non-StalenessWarning, non-SourcesIncomplete error (e.g. cache corrupt).
+				var staleWarn *advisory.StalenessWarningError
+				if errors.As(queryErr, &staleWarn) {
+					fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
+					advs = staleWarn.Advisories
+				} else {
+					fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
+						dep.Path, dep.Version, queryErr)
+					incomplete = true
+					continue
+				}
+			}
+
+			for i := range advs {
+				protoAdvs = append(protoAdvs, advs[i].ToProto())
+				if advs[i].ID != "" {
+					sourcesByID[advs[i].ID] = advs[i].Sources
+				}
 			}
 		}
 	}
@@ -306,39 +369,54 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		req.BuildConfig.Tags = strings.Split(flags.tags, ",")
 	}
 
-	// ── 6. Locate / build the plugin binary ───────────────────────────────────
-	pluginBin := flags.pluginBin
-	if pluginBin == "" {
-		var buildErr error
-		pluginBin, buildErr = buildPlugin(ctx)
-		if buildErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: build plugin: %v\n", buildErr)
+	// ── 7. Locate / build plugins and register ────────────────────────────────
+	reg := host.NewRegistry()
+
+	if scanGo {
+		pluginBin := flags.pluginBin
+		if pluginBin == "" {
+			var buildErr error
+			pluginBin, buildErr = buildPlugin(ctx)
+			if buildErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: build plugin: %v\n", buildErr)
+				return policy.ExitOperationalError
+			}
+		}
+		var absErr error
+		pluginBin, absErr = filepath.Abs(pluginBin)
+		if absErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve plugin binary path: %v\n", absErr)
+			return policy.ExitOperationalError
+		}
+
+		pluginHash, hashErr := host.SHA256OfFile(pluginBin)
+		if hashErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: hash plugin binary: %v\n", hashErr)
+			return policy.ExitOperationalError
+		}
+
+		if addErr := reg.Add(&host.Manifest{
+			Name:      "go-reachability",
+			ExecPath:  pluginBin,
+			Pillar:    "sca",
+			Languages: []string{"go"},
+			SHA256:    pluginHash,
+		}); addErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register go plugin: %v\n", addErr)
 			return policy.ExitOperationalError
 		}
 	}
-	pluginBin, err = filepath.Abs(pluginBin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve plugin binary path: %v\n", err)
-		return policy.ExitOperationalError
-	}
 
-	pluginHash, err := host.SHA256OfFile(pluginBin)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: hash plugin binary: %v\n", err)
-		return policy.ExitOperationalError
-	}
-
-	// ── 7. Register plugin and run through host ───────────────────────────────
-	reg := host.NewRegistry()
-	if addErr := reg.Add(&host.Manifest{
-		Name:      "go-reachability",
-		ExecPath:  pluginBin,
-		Pillar:    "sca",
-		Languages: []string{"go"},
-		SHA256:    pluginHash,
-	}); addErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: register plugin: %v\n", addErr)
-		return policy.ExitOperationalError
+	if scanJS {
+		m, buildErr := buildJSPluginManifest()
+		if buildErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available: %v\n", buildErr)
+			return policy.ExitOperationalError
+		}
+		if addErr := reg.Add(m); addErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register js plugin: %v\n", addErr)
+			return policy.ExitOperationalError
+		}
 	}
 
 	results, runErr := host.Run(ctx, reg, req, host.RunOptions{})
@@ -639,4 +717,78 @@ func buildPlugin(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("go build %s: %w\n%s", pluginPkg, err, out)
 	}
 	return binPath, nil
+}
+
+// jsDistDir returns the absolute path to the JS plugin's dist directory,
+// resolved relative to this source file's location in the repository tree.
+// At runtime, the binary is compiled and the source layout is gone, so we
+// resolve relative to the executable's location instead (for installed builds).
+// Tests and local development use the repo-relative path.
+func jsDistDir() string {
+	// Prefer the repo-relative path for development and test.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if ok {
+		// This file is at internal/cli/scan.go; repo root is two dirs up.
+		repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+		candidate := filepath.Join(repoRoot, "plugins", "js-reachability", "dist")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	// Fall back to a path adjacent to the running executable (installed build).
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(exe), "plugins", "js-reachability", "dist")
+}
+
+// jsSidecarName returns the platform-specific napi sidecar filename, e.g.
+// "parser.darwin-arm64.node". It mirrors the naming convention used by the
+// oxc-binding package.
+func jsSidecarName() string {
+	return fmt.Sprintf("parser.%s-%s.node", runtime.GOOS, runtime.GOARCH)
+}
+
+// buildJSPluginManifest constructs a Manifest for the js-reachability plugin
+// by locating its two-file distribution (main binary + napi sidecar) under
+// plugins/js-reachability/dist/ and computing SHA-256 pins for both files.
+// Returns an error when the distribution has not been built yet.
+func buildJSPluginManifest() (*host.Manifest, error) {
+	distDir := jsDistDir()
+	if distDir == "" {
+		return nil, fmt.Errorf("cannot locate js-reachability dist directory")
+	}
+
+	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	if _, err := os.Stat(mainBin); err != nil {
+		return nil, fmt.Errorf("js-reachability plugin not built: %s not found (run 'make build-js-plugin'): %w", mainBin, err)
+	}
+
+	sidecarName := jsSidecarName()
+	sidecarPath := filepath.Join(distDir, "oxc-binding", sidecarName)
+	if _, err := os.Stat(sidecarPath); err != nil {
+		return nil, fmt.Errorf("js-reachability napi sidecar not found: %s (run 'make build-js-plugin'): %w", sidecarPath, err)
+	}
+
+	mainHash, err := host.SHA256OfFile(mainBin)
+	if err != nil {
+		return nil, fmt.Errorf("hash js-reachability binary: %w", err)
+	}
+
+	sidecarHash, err := host.SHA256OfFile(sidecarPath)
+	if err != nil {
+		return nil, fmt.Errorf("hash js-reachability sidecar: %w", err)
+	}
+
+	return &host.Manifest{
+		Name:      "js-reachability",
+		ExecPath:  mainBin,
+		Pillar:    "sca",
+		Languages: []string{"js", "ts"},
+		SHA256:    mainHash,
+		AdditionalArtifacts: []host.ArtifactPin{
+			{Path: sidecarPath, SHA256: sidecarHash},
+		},
+	}, nil
 }

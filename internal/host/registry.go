@@ -52,6 +52,22 @@ func (r *Registry) Add(m *Manifest) error {
 		return fmt.Errorf("registry: plugin %q: %w", m.Name, err)
 	}
 
+	for i, a := range m.AdditionalArtifacts {
+		if !filepath.IsAbs(a.Path) {
+			return fmt.Errorf("registry: plugin %q: artifact[%d] path must be absolute, got %q", m.Name, i, a.Path)
+		}
+		ai, err := os.Stat(a.Path)
+		if err != nil {
+			return fmt.Errorf("registry: plugin %q: artifact[%d] stat: %w", m.Name, i, err)
+		}
+		if !ai.Mode().IsRegular() {
+			return fmt.Errorf("registry: plugin %q: artifact[%d] %q is not a regular file", m.Name, i, a.Path)
+		}
+		if err := checkNotWorldWritable(a.Path); err != nil {
+			return fmt.Errorf("registry: plugin %q: artifact[%d]: %w", m.Name, i, err)
+		}
+	}
+
 	r.manifests = append(r.manifests, m)
 	return nil
 }
