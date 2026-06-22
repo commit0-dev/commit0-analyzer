@@ -114,6 +114,17 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 	cmd.Stderr = &stderrBuf
 	cmd.Env = append(os.Environ(), extraEnv...)
 
+	// When a test overrides HOME (to isolate the advisory cache), the scan's
+	// internal `go list`/`go build` would otherwise write Go telemetry counter
+	// files into that temp HOME asynchronously, racing t.TempDir cleanup
+	// ("directory not empty"). Disabling telemetry via the "off" mode file in the
+	// overridden HOME avoids the flake. Best-effort; only applied to test HOMEs.
+	for _, e := range extraEnv {
+		if home, ok := strings.CutPrefix(e, "HOME="); ok {
+			disableGoTelemetry(home)
+		}
+	}
+
 	runErr := cmd.Run()
 	stdout = stdoutBuf.String()
 	stderr = stderrBuf.String()
@@ -129,6 +140,20 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 		}
 	}
 	return stdout, stderr, exitCode
+}
+
+// disableGoTelemetry writes an "off" Go telemetry mode file under home so that
+// `go` subprocesses run with HOME=home do not write counter files (which race
+// t.TempDir cleanup). It covers both the macOS and XDG/Linux config locations.
+// Best-effort: errors are ignored.
+func disableGoTelemetry(home string) {
+	for _, dir := range []string{
+		filepath.Join(home, "Library", "Application Support", "go", "telemetry"), // macOS
+		filepath.Join(home, ".config", "go", "telemetry"),                        // Linux/XDG default
+	} {
+		_ = os.MkdirAll(dir, 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "mode"), []byte("off"), 0o644)
+	}
 }
 
 // newCorpusMockServer creates an httptest.Server that acts as a vuln.go.dev
