@@ -8,6 +8,19 @@ interface DiscoverResult {
   incomplete: IncompleteEntry[];
 }
 
+/**
+ * A directory path tagged with how it was produced:
+ *   fromGlob=true  → produced by a wildcard expansion (/* or /**)
+ *   fromGlob=false → listed literally in the workspaces array
+ *
+ * A glob-expanded path that has no package.json is silently skipped.
+ * A literally-listed path that has no package.json may warrant an incomplete entry.
+ */
+interface CandidateDir {
+  dir: string;
+  fromGlob: boolean;
+}
+
 /** Expand a glob pattern of the form "prefix/*" or "prefix/**" relative to root.
  *  Only supports the trailing /* and /** wildcard — sufficient for workspace patterns.
  *  Results are sorted deterministically by directory name.
@@ -16,17 +29,17 @@ async function expandGlob(
   root: string,
   pattern: string,
   incomplete: IncompleteEntry[]
-): Promise<string[]> {
+): Promise<CandidateDir[]> {
   // Normalise: "packages/*" → base="packages", depth=1; "packages/**" → depth=2
   const singleStar = pattern.endsWith("/*");
   const doubleStar = pattern.endsWith("/**");
 
   if (!singleStar && !doubleStar) {
-    // Literal path — no glob
+    // Literal path — no glob expansion
     const dir = path.resolve(root, pattern);
     try {
       const stat = await fs.stat(dir);
-      if (stat.isDirectory()) return [dir];
+      if (stat.isDirectory()) return [{ dir, fromGlob: false }];
     } catch {
       incomplete.push({
         scope: pattern,
@@ -64,7 +77,10 @@ async function expandGlob(
     });
   }
 
-  return entries;
+  // All entries from a wildcard expansion are tagged fromGlob=true.
+  // A matched directory with no package.json is an ordinary scaffolding or
+  // intermediate container directory — not a workspace, not an error signal.
+  return entries.map((dir) => ({ dir, fromGlob: true }));
 }
 
 async function readPackageJson(dir: string): Promise<PackageJson | null> {
@@ -82,7 +98,7 @@ async function resolveGlobs(
   manager: string,
   rootManifest: PackageJson,
   incomplete: IncompleteEntry[]
-): Promise<string[]> {
+): Promise<CandidateDir[]> {
   let patterns: string[] = [];
 
   if (manager === "pnpm") {
@@ -112,12 +128,12 @@ async function resolveGlobs(
     return []; // single-package repo
   }
 
-  const dirs: string[] = [];
+  const candidates: CandidateDir[] = [];
   for (const pattern of patterns) {
     const expanded = await expandGlob(root, pattern, incomplete);
-    dirs.push(...expanded);
+    candidates.push(...expanded);
   }
-  return dirs;
+  return candidates;
 }
 
 /**
@@ -141,9 +157,9 @@ export async function discoverWorkspaces(
     return { workspaces: [], incomplete };
   }
 
-  const dirs = await resolveGlobs(root, manager, rootManifest, incomplete);
+  const candidates = await resolveGlobs(root, manager, rootManifest, incomplete);
 
-  if (dirs.length === 0) {
+  if (candidates.length === 0) {
     // Single-package repo
     const ws: Workspace = {
       name: rootManifest.name ?? path.basename(root),
@@ -156,9 +172,16 @@ export async function discoverWorkspaces(
   }
 
   const workspaces: Workspace[] = [];
-  for (const dir of dirs) {
+  for (const { dir, fromGlob } of candidates) {
     const manifest = await readPackageJson(dir);
     if (!manifest) {
+      if (fromGlob) {
+        // A glob-expanded directory without package.json is a normal scaffolding
+        // or intermediate container dir in a monorepo — silently skip it.
+        continue;
+      }
+      // An explicitly-listed (non-glob) workspace path with no package.json
+      // is unexpected and surfaces as an incomplete signal.
       incomplete.push({
         scope: dir,
         reason: `No package.json found in workspace directory ${dir}.`,

@@ -1577,6 +1577,191 @@ function buildCorpusDynComputedDispatch() {
   installSerializeJavascript(root, "3.0.0");
 }
 
+// ── npm-ws-nested ─────────────────────────────────────────────────────────────
+// npm workspace where a deeply-nested workspace (packages/app/core) declares a
+// dep that is HOISTED to the repo root node_modules. The workspace-local key
+// does not exist in the lockfile — only the root "node_modules/lodash" entry
+// does. Verifies that the resolver walks up to find the hoisted entry.
+
+function buildNpmWsNested() {
+  const root = path.join(projects, "npm-ws-nested");
+
+  // Static package.json files (already committed, not rebuilt here) must exist
+  // as committed files. We only write lockfile + node_modules (gitignored).
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "npm-ws-nested-root",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "npm-ws-nested-root",
+            version: "1.0.0",
+            workspaces: ["packages/app/*"],
+          },
+          // lodash is ONLY at the root-hoisted path, not at the workspace-local path
+          "node_modules/lodash": {
+            version: "4.17.21",
+            resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            integrity: "sha512-nested-root-lodash",
+          },
+          "packages/app/core": {
+            name: "@nested/core",
+            version: "1.0.0",
+            dependencies: { lodash: "^4.17.21" },
+          },
+          "packages/app/utils": {
+            name: "@nested/utils",
+            version: "1.0.0",
+            dependencies: { "@nested/core": "*" },
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // Root-hoisted node_modules/lodash
+  rmdir(path.join(root, "node_modules"));
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+}
+
+// ── npm-ws-glob-empty-dir ─────────────────────────────────────────────────────
+// npm workspace whose glob pattern (packages/*) matches a directory with NO
+// package.json (e.g. a shared config folder). That directory should be silently
+// skipped: no workspace added, no incomplete entry emitted, no fail-close.
+
+function buildNpmWsGlobEmptyDir() {
+  const root = path.join(projects, "npm-ws-glob-empty-dir");
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "npm-ws-glob-empty-dir-root",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "npm-ws-glob-empty-dir-root",
+            version: "1.0.0",
+            workspaces: ["packages/*"],
+          },
+          "node_modules/lodash": {
+            version: "4.17.21",
+            resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            integrity: "sha512-glob-empty-lodash",
+          },
+          "packages/app": {
+            name: "@glob-empty/app",
+            version: "1.0.0",
+            dependencies: { lodash: "^4.17.21" },
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // packages/app has package.json
+  rmdir(path.join(root, "node_modules"));
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+
+  // packages/config has NO package.json (just a plain dir)
+  mkdir(path.join(root, "packages", "config"));
+  // Ensure no stale package.json from previous runs
+  const configPkg = path.join(root, "packages", "config", "package.json");
+  if (fs.existsSync(configPkg)) fs.unlinkSync(configPkg);
+}
+
+// ── npm-ws-unresolved-dep ─────────────────────────────────────────────────────
+// npm workspace where a required external dep is absent from the lockfile.
+// Verifies that a dep-unresolved incomplete entry is emitted (fail-closed honesty).
+
+function buildNpmWsUnresolvedDep() {
+  const root = path.join(projects, "npm-ws-unresolved-dep");
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "npm-ws-unresolved-dep-root",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "npm-ws-unresolved-dep-root",
+            version: "1.0.0",
+            workspaces: ["packages/*"],
+          },
+          // lodash IS in the lockfile
+          "node_modules/lodash": {
+            version: "4.17.21",
+            resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            integrity: "sha512-unresolved-lodash",
+          },
+          "packages/app": {
+            name: "@unresolved/app",
+            version: "1.0.0",
+            dependencies: {
+              lodash: "^4.17.21",
+              "not-in-lockfile": "^1.0.0",
+            },
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+}
+
+// ── yarn-ws-nested ────────────────────────────────────────────────────────────
+// yarn v1 workspace with a nested workspace (packages/app/core). The dep is
+// declared in the workspace and the yarn.lock has a flat entry (hoisted to root
+// node_modules). Verifies yarn flat-resolution works for nested workspaces.
+
+function buildYarnWsNested() {
+  const root = path.join(projects, "yarn-ws-nested");
+
+  write(
+    path.join(root, "yarn.lock"),
+    [
+      "# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.",
+      "# yarn lockfile v1",
+      "",
+      "",
+      "lodash@^4.17.21:",
+      '  version "4.17.21"',
+      '  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#yarn-nested"',
+      "  integrity sha512-yarn-nested",
+      "",
+    ].join("\n")
+  );
+
+  // Root node_modules (yarn hoists everything here)
+  rmdir(path.join(root, "node_modules"));
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -1611,4 +1796,8 @@ export default function setup() {
   buildCorpusYarnWs();
   buildCorpusTwoVersionWs();
   buildCorpusDynComputedDispatch();
+  buildNpmWsNested();
+  buildNpmWsGlobEmptyDir();
+  buildNpmWsUnresolvedDep();
+  buildYarnWsNested();
 }

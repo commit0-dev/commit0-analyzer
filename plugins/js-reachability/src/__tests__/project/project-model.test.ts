@@ -166,6 +166,124 @@ describe("buildProjectModel – berry yarn incomplete propagation", () => {
   });
 });
 
+describe("buildProjectModel – glob dir without package.json is silently skipped", () => {
+  it("glob match missing package.json produces no incomplete entry", async () => {
+    // packages/config is a directory matched by packages/* but has no package.json.
+    // It must be silently skipped — no 'other' or any kind of incomplete entry for it.
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-glob-empty-dir")
+    );
+    const dirEntries = model.incomplete.filter((e) =>
+      e.scope.includes("config")
+    );
+    expect(dirEntries).toHaveLength(0);
+  });
+
+  it("glob match missing package.json does not prevent resolving the real workspace dep", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-glob-empty-dir")
+    );
+    const app = model.workspaces.find((w) => w.name === "@glob-empty/app");
+    expect(app).toBeDefined();
+    expect(app!.deps.get("lodash")?.version).toBe("4.17.21");
+  });
+
+  it("scan is not fail-closed due to a glob dir without package.json", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-glob-empty-dir")
+    );
+    // incomplete must not contain entries for the empty config dir
+    const otherEntries = model.incomplete.filter(
+      (e) => e.kind === "other" && e.scope.includes("config")
+    );
+    expect(otherEntries).toHaveLength(0);
+  });
+});
+
+describe("buildProjectModel – npm nested workspace with root-hoisted dep", () => {
+  it("produces two workspaces from packages/app/* glob", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-nested")
+    );
+    expect(model.workspaces).toHaveLength(2);
+    expect(model.manager).toBe("npm");
+  });
+
+  it("deeply-nested workspace resolves dep hoisted to root node_modules", async () => {
+    // @nested/core is at packages/app/core — a two-level nesting.
+    // lodash is ONLY in the lockfile at "node_modules/lodash" (root-hoisted),
+    // not at "packages/app/core/node_modules/lodash". The walk-up must find it.
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-nested")
+    );
+    const core = model.workspaces.find((w) => w.name === "@nested/core");
+    expect(core).toBeDefined();
+    expect(core!.deps.get("lodash")?.version).toBe("4.17.21");
+  });
+
+  it("deeply-nested workspace resolves sibling dep as local", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-nested")
+    );
+    const utils = model.workspaces.find((w) => w.name === "@nested/utils");
+    expect(utils).toBeDefined();
+    expect(utils!.localDeps).toContain("@nested/core");
+  });
+
+  it("no incomplete entries when all external deps resolve via hoisted walk-up", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-nested")
+    );
+    const depUnresolved = model.incomplete.filter(
+      (e) => e.kind === "dep-unresolved"
+    );
+    expect(depUnresolved).toHaveLength(0);
+  });
+});
+
+describe("buildProjectModel – declared external dep absent everywhere emits dep-unresolved", () => {
+  it("dep in package.json but absent from lockfile produces dep-unresolved incomplete entry", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-unresolved-dep")
+    );
+    const entry = model.incomplete.find(
+      (e) => e.kind === "dep-unresolved" && e.scope.includes("not-in-lockfile")
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.reason).toMatch(/not-in-lockfile/);
+  });
+
+  it("dep that IS in lockfile still resolves despite the missing sibling dep", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "npm-ws-unresolved-dep")
+    );
+    const app = model.workspaces.find((w) => w.name === "@unresolved/app");
+    expect(app!.deps.get("lodash")?.version).toBe("4.17.21");
+  });
+});
+
+describe("buildProjectModel – yarn nested workspace with root-hoisted dep", () => {
+  it("produces two workspaces from packages/app/* glob", async () => {
+    const model = await buildProjectModel(
+      path.join(fixtures, "yarn-ws-nested")
+    );
+    expect(model.workspaces).toHaveLength(2);
+    expect(model.manager).toBe("yarn");
+  });
+
+  it("deeply-nested yarn workspace resolves dep from flat yarn.lock", async () => {
+    // @yarn-nested/core is at packages/app/core (two-level nesting).
+    // yarn v1 locks are flat and hoisted to root node_modules. The resolver
+    // must look up by name@specifier regardless of workspace nesting depth.
+    const model = await buildProjectModel(
+      path.join(fixtures, "yarn-ws-nested")
+    );
+    const core = model.workspaces.find((w) => w.name === "@yarn-nested/core");
+    expect(core).toBeDefined();
+    expect(core!.deps.get("lodash")?.version).toBe("4.17.21");
+  });
+});
+
 describe("serializeProjectModel – determinism", () => {
   it("produces byte-identical JSON across two calls", async () => {
     const model = await buildProjectModel(path.join(fixtures, "npm-ws"));
