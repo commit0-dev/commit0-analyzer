@@ -1,0 +1,7 @@
+{
+  "name": "default-index-ws",
+  "version": "1.0.0",
+  "dependencies": {
+    "serialize-javascript": "^3.0.0"
+  }
+}

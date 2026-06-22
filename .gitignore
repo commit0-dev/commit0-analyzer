@@ -96,3 +96,6 @@ external/
 
 # Git worktrees (local development only)
 worktrees/
+
+# Phase 8 acceptance scratch (cloned real repos, OSV snapshot, scan outputs)
+testdata/acceptance/
