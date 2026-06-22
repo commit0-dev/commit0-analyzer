@@ -125,6 +125,15 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
   for (const ws of sortedWorkspaces) {
     const wsEps = (epMap.get(ws.name) ?? []).map((e) => e.file).sort();
 
+    // A workspace with no resolvable entrypoint (no bin, main, or exports — e.g.
+    // a private example or fixture package whose dependencies are exercised only
+    // through test files or source types we do not parse such as .vue/.svelte)
+    // cannot be analyzed for reachability. There are no roots to traverse from,
+    // so concluding NOT_REACHABLE would be a false negative ("checked from no
+    // starting point, found nothing"). Per unknown != safe, such a workspace's
+    // declared-dependency advisories are UNKNOWN.
+    const noEntrypoint = wsEps.length === 0;
+
     // Build a call graph scoped to this workspace's entrypoints.
     const cgResult = await buildCallGraph({
       projectRoot: moduleRoot,
@@ -146,7 +155,9 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
         ? Confidence.CONFIDENCE_PACKAGE_REACHABLE
         : Confidence.CONFIDENCE_NOT_REACHABLE;
 
-      const { confidence, path } = resolveAdvisoryConfidence(advisory, cgResult, wsEps);
+      const { confidence, path } = noEntrypoint
+        ? { confidence: Confidence.CONFIDENCE_UNKNOWN, path: undefined }
+        : resolveAdvisoryConfidence(advisory, cgResult, wsEps);
 
       const importingFile = sites.find((s) => cgResult.reachableFiles.has(s.fromFile))
         ?.fromFile;

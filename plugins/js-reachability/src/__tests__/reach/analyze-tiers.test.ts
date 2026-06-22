@@ -127,3 +127,28 @@ describe("analyze() tier (d): symbol-level advisory with resolvable symbol → S
     expect(f!.path!.steps.length).toBeGreaterThan(0);
   });
 });
+
+// ── No entrypoint: UNKNOWN, never NOT_REACHABLE ───────────────────────────────
+// A private package that declares and imports a vulnerable dependency but has
+// no bin/main/exports yields no entrypoint. With no root to traverse from, the
+// engine must report UNKNOWN — concluding NOT_REACHABLE would be a false
+// negative (the dep is genuinely used; we simply cannot prove a path).
+
+const noEntry = path.resolve(
+  __dirname,
+  "../../../testdata/projects/no-entrypoint-ws"
+);
+
+describe("analyze() no entrypoint → UNKNOWN, never NOT_REACHABLE", () => {
+  it("returns UNKNOWN for a declared+imported dep when the workspace has no resolvable entrypoint", async () => {
+    const findings = await analyze({
+      moduleRoot: noEntry,
+      entrypoints: [], // force auto-detection, which finds none
+      advisories: [{ ...baseAdvisory }],
+    });
+    const f = findings.find((f) => f.module === "serialize-javascript");
+    expect(f).toBeDefined();
+    expect(f!.confidence).toBe(Confidence.CONFIDENCE_UNKNOWN);
+    expect(f!.confidence).not.toBe(Confidence.CONFIDENCE_NOT_REACHABLE);
+  });
+});

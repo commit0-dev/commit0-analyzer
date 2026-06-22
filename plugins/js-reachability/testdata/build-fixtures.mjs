@@ -1006,6 +1006,83 @@ function buildGateG1() {
   );
 }
 
+// ── no-entrypoint-ws ──────────────────────────────────────────────────────────
+// A private package that declares and imports a vulnerable dependency but has
+// no bin, main, or exports — so no entrypoint is resolvable. The engine must
+// return UNKNOWN (not NOT_REACHABLE) for its advisories: with no root to
+// traverse from, "not reachable" would be a false negative.
+
+function buildNoEntrypointWs() {
+  const root = path.join(projects, "no-entrypoint-ws");
+
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "no-entrypoint-ws",
+        version: "1.0.0",
+        private: true,
+        // intentionally NO main / module / exports / bin
+        dependencies: { "serialize-javascript": "^3.0.0" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // The dependency is genuinely imported by source, but that source is not an
+  // entrypoint (no main/bin/exports reference it), mirroring a private example
+  // app whose dep is used only via test files or unparsed component files.
+  write(
+    path.join(root, "lib", "uses-dep.js"),
+    [
+      `const serialize = require("serialize-javascript");`,
+      `module.exports = (data) => serialize(data);`,
+      ``,
+    ].join("\n")
+  );
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "no-entrypoint-ws",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "no-entrypoint-ws",
+            version: "1.0.0",
+            dependencies: { "serialize-javascript": "^3.0.0" },
+          },
+          "node_modules/serialize-javascript": {
+            version: "3.0.0",
+            resolved:
+              "https://registry.npmjs.org/serialize-javascript/-/serialize-javascript-3.0.0.tgz",
+            integrity: "sha512-stub",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+  const nm = path.join(root, "node_modules", "serialize-javascript");
+  mkdir(nm);
+  write(
+    path.join(nm, "package.json"),
+    JSON.stringify(
+      { name: "serialize-javascript", version: "3.0.0", main: "./index.js" },
+      null,
+      2
+    ) + "\n"
+  );
+  write(path.join(nm, "index.js"), `module.exports = function () {};\n`);
+}
+
 // ── Corpus fixture builders ───────────────────────────────────────────────────
 // Each corpus case commits source + labels.json + package.json.
 // This section generates the gitignored lockfiles and node_modules layouts.
@@ -1779,6 +1856,7 @@ export default function setup() {
   buildPnpmPeerSuffix();
   buildResolveFixtures();
   buildGateG1();
+  buildNoEntrypointWs();
   // Corpus fixtures
   buildCorpusCjsDirect();
   buildCorpusEsmDirect();
