@@ -1,0 +1,13 @@
+{
+  "name": "@ws/app",
+  "version": "1.0.0",
+  "private": true,
+  "bin": {
+    "my-app": "./bin/cli.js"
+  },
+  "main": "./src/index.js",
+  "dependencies": {
+    "@ws/utils": "workspace:*",
+    "lodash": "^4.17.21"
+  }
+}

@@ -482,6 +482,355 @@ function buildPnpmPeerSuffix() {
   );
 }
 
+// ── resolve-fixtures ─────────────────────────────────────────────────────────
+// A synthetic project layout exercising all resolver paths:
+//   - relative specifiers (src/app.js → ./index.js, ../lib/util.js)
+//   - extension-less resolution (./typed → typed.ts)
+//   - directory/index resolution (./components → components/index.js)
+//   - bare specifier → pinned dep (lodash in node_modules)
+//   - scoped dep (@scope/helper)
+//   - phantom dep (phantom-pkg: in node_modules but NOT declared in manifest)
+//   - exports map (exports-pkg: with import/require/default conditions + subpaths)
+//   - workspace sibling (@ws/utils)
+//   - parser fixtures (ESM, CJS, TS, TSX, dynamic import, syntax error)
+
+function buildResolveFixtures() {
+  const root = path.join(projects, "resolve-fixtures");
+
+  // ── source files ──────────────────────────────────────────────────────────
+
+  // src/app.js — ESM file with static imports used by resolver + parser tests
+  write(
+    path.join(root, "src", "app.js"),
+    [
+      `import _ from "lodash";`,
+      `import { helper } from "./index.js";`,
+      `export function main() { return _; }`,
+      "",
+    ].join("\n")
+  );
+
+  // src/index.js — re-exports, used as directory/index target and named exports test
+  write(
+    path.join(root, "src", "index.js"),
+    [
+      `export function helper() {}`,
+      `export function util() {}`,
+      "",
+    ].join("\n")
+  );
+
+  // src/typed.ts — TypeScript file (no .js counterpart) for extension-less resolution
+  write(
+    path.join(root, "src", "typed.ts"),
+    [
+      `import { helper } from "./index.js";`,
+      `export function greet(name: string): string { return "hello " + name; }`,
+      "",
+    ].join("\n")
+  );
+
+  // src/component.tsx — TSX file
+  write(
+    path.join(root, "src", "component.tsx"),
+    [
+      `import React from "react";`,
+      `export function Button() { return null; }`,
+      "",
+    ].join("\n")
+  );
+
+  // src/components/index.js — for directory specifier resolution
+  write(
+    path.join(root, "src", "components", "index.js"),
+    `export const Button = () => {};` + "\n"
+  );
+
+  // lib/util.js — for ../lib/util.js relative resolution from src/
+  write(
+    path.join(root, "lib", "util.js"),
+    `export function noop() {}` + "\n"
+  );
+
+  // src/dyn-import.js — literal dynamic import()
+  write(
+    path.join(root, "src", "dyn-import.js"),
+    [
+      `async function load() {`,
+      `  const m = await import("./lazy");`,
+      `  return m;`,
+      `}`,
+      "",
+    ].join("\n")
+  );
+
+  // src/lazy.js — target of the dynamic import above
+  write(
+    path.join(root, "src", "lazy.js"),
+    `export const lazy = true;` + "\n"
+  );
+
+  // src/dyn-var.js — dynamic import with a variable (non-literal)
+  // Wrapped in an async function so the file is valid in "unambiguous" mode.
+  write(
+    path.join(root, "src", "dyn-var.js"),
+    [
+      `export async function loadDynamic() {`,
+      `  const name = getModuleName();`,
+      `  const m = await import(name);`,
+      `  return m;`,
+      `}`,
+      "",
+    ].join("\n")
+  );
+
+  // src/cjs-module.cjs — CJS with literal require()
+  write(
+    path.join(root, "src", "cjs-module.cjs"),
+    [
+      `const path = require("path");`,
+      `const helper = require("./helper");`,
+      `module.exports = { path, helper };`,
+      "",
+    ].join("\n")
+  );
+
+  // src/helper.cjs — target of cjs-module.cjs require
+  write(
+    path.join(root, "src", "helper.cjs"),
+    `module.exports = function helper() {};` + "\n"
+  );
+
+  // src/cjs-dynamic.cjs — CJS with dynamic require(variable)
+  write(
+    path.join(root, "src", "cjs-dynamic.cjs"),
+    [
+      `function load(name) {`,
+      `  return require(name);`,
+      `}`,
+      `module.exports = load;`,
+      "",
+    ].join("\n")
+  );
+
+  // src/syntax-error.js — intentional parse error
+  write(
+    path.join(root, "src", "syntax-error.js"),
+    `export function broken( {` + "\n"
+  );
+
+  // src/reexport-star.js — re-export all from another module
+  write(
+    path.join(root, "src", "reexport-star.js"),
+    `export * from "./utils.js";` + "\n"
+  );
+
+  // src/reexport-named.js — named re-export from another module
+  write(
+    path.join(root, "src", "reexport-named.js"),
+    `export { helper } from "./helpers.js";` + "\n"
+  );
+
+  // src/reexport-renamed.js — renamed re-export from another module
+  write(
+    path.join(root, "src", "reexport-renamed.js"),
+    `export { base as renamed } from "./base.js";` + "\n"
+  );
+
+  // src/utils.js, src/helpers.js, src/base.js — targets of re-exports
+  write(path.join(root, "src", "utils.js"), `export const utils = true;` + "\n");
+  write(path.join(root, "src", "helpers.js"), `export function helper() {}` + "\n");
+  write(path.join(root, "src", "base.js"), `export const base = 1;` + "\n");
+
+  // src/cjs-plain.js — plain .js file using only require() (no ESM syntax)
+  write(
+    path.join(root, "src", "cjs-plain.js"),
+    [
+      `const fs = require("fs");`,
+      `const util = require("./util.js");`,
+      `module.exports = { fs, util };`,
+      "",
+    ].join("\n")
+  );
+
+  // packages/app/src/index.js — workspace app entry
+  write(
+    path.join(root, "packages", "app", "src", "index.js"),
+    [
+      `import { helper } from "@ws/utils";`,
+      `export function app() { return helper(); }`,
+      "",
+    ].join("\n")
+  );
+
+  // packages/app/src/custom-entry.js — for explicit entrypoint override test
+  write(
+    path.join(root, "packages", "app", "src", "custom-entry.js"),
+    `export function custom() {}` + "\n"
+  );
+
+  // packages/app/bin/cli.js — bin script
+  write(
+    path.join(root, "packages", "app", "bin", "cli.js"),
+    `#!/usr/bin/env node\nconsole.log("cli");` + "\n"
+  );
+
+  // packages/utils/src/index.js — workspace utils entry
+  write(
+    path.join(root, "packages", "utils", "src", "index.js"),
+    `export function helper() { return 42; }` + "\n"
+  );
+
+  // ── package.json files (static, not gitignored) ───────────────────────────
+
+  // Root package.json for resolve-fixtures
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "resolve-fixtures",
+        version: "1.0.0",
+        private: true,
+        dependencies: {
+          lodash: "^4.17.21",
+          "@scope/helper": "^1.0.0",
+          "exports-pkg": "^1.0.0",
+          // NOTE: phantom-pkg intentionally NOT declared here
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // packages/app package.json
+  write(
+    path.join(root, "packages", "app", "package.json"),
+    JSON.stringify(
+      {
+        name: "@ws/app",
+        version: "1.0.0",
+        private: true,
+        bin: { "my-app": "./bin/cli.js" },
+        main: "./src/index.js",
+        dependencies: {
+          "@ws/utils": "workspace:*",
+          lodash: "^4.17.21",
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // packages/utils package.json
+  write(
+    path.join(root, "packages", "utils", "package.json"),
+    JSON.stringify(
+      {
+        name: "@ws/utils",
+        version: "1.0.0",
+        main: "./src/index.js",
+        exports: { ".": "./src/index.js" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ── node_modules layout (gitignored) ──────────────────────────────────────
+  rmdir(path.join(root, "node_modules"));
+
+  // lodash (lockfile-pinned dep)
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+  write(path.join(nmLodash, "index.js"), `module.exports = {};` + "\n");
+
+  // @scope/helper (scoped dep)
+  const nmScopeHelper = path.join(root, "node_modules", "@scope", "helper");
+  mkdir(nmScopeHelper);
+  write(
+    path.join(nmScopeHelper, "package.json"),
+    JSON.stringify({ name: "@scope/helper", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmScopeHelper, "index.js"), `module.exports = {};` + "\n");
+
+  // phantom-pkg (in node_modules but NOT in package.json deps — phantom)
+  const nmPhantom = path.join(root, "node_modules", "phantom-pkg");
+  mkdir(nmPhantom);
+  writePkg(nmPhantom, "phantom-pkg", "2.0.0");
+  write(path.join(nmPhantom, "index.js"), `module.exports = {};` + "\n");
+
+  // exports-pkg — package with exports map, conditions, subpaths, and patterns
+  const nmExportsPkg = path.join(root, "node_modules", "exports-pkg");
+  mkdir(nmExportsPkg);
+  write(
+    path.join(nmExportsPkg, "package.json"),
+    JSON.stringify(
+      {
+        name: "exports-pkg",
+        version: "1.0.0",
+        exports: {
+          ".": {
+            import: "./esm/index.js",
+            require: "./cjs/index.js",
+            default: "./esm/index.js",
+          },
+          "./utils": {
+            import: "./esm/utils.js",
+            default: "./esm/utils.js",
+          },
+          "./features/*": {
+            import: "./esm/features/*.js",
+            default: "./esm/features/*.js",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  // ESM entry
+  mkdir(path.join(nmExportsPkg, "esm"));
+  write(path.join(nmExportsPkg, "esm", "index.js"), `export const x = 1;` + "\n");
+  write(path.join(nmExportsPkg, "esm", "utils.js"), `export const utils = true;` + "\n");
+  mkdir(path.join(nmExportsPkg, "esm", "features"));
+  write(path.join(nmExportsPkg, "esm", "features", "auth.js"), `export const auth = true;` + "\n");
+  // CJS entry (for require condition)
+  mkdir(path.join(nmExportsPkg, "cjs"));
+  write(path.join(nmExportsPkg, "cjs", "index.js"), `module.exports = {};` + "\n");
+
+  // unknown-cond-pkg — package whose exports has only an unknown condition (no default)
+  // Resolving its root entry with standard conditions must yield UNKNOWN, not a directory.
+  const nmUnknownCond = path.join(root, "node_modules", "unknown-cond-pkg");
+  mkdir(nmUnknownCond);
+  write(
+    path.join(nmUnknownCond, "package.json"),
+    JSON.stringify(
+      {
+        name: "unknown-cond-pkg",
+        version: "1.0.0",
+        exports: {
+          ".": {
+            "electron": "./electron.js",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  write(path.join(nmUnknownCond, "electron.js"), `module.exports = {};` + "\n");
+
+  // declared-flat-pkg — in node_modules but intentionally absent from lockfile-pinned deps
+  // Used to verify phantom:false when the dep IS declared in the manifest.
+  const nmDeclaredFlat = path.join(root, "node_modules", "declared-flat-pkg");
+  mkdir(nmDeclaredFlat);
+  writePkg(nmDeclaredFlat, "declared-flat-pkg", "3.0.0");
+  write(path.join(nmDeclaredFlat, "index.js"), `module.exports = {};` + "\n");
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -496,4 +845,5 @@ export default function setup() {
   buildMissingDepPnpm();
   buildBerryYarn();
   buildPnpmPeerSuffix();
+  buildResolveFixtures();
 }
