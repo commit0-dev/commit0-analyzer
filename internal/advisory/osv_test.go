@@ -527,6 +527,20 @@ func withHTTPClient(c *http.Client) osvOption {
 	return func(s *OSVBundleSource) { s.HTTP = c }
 }
 
+// withExtractCaps overrides the aggregate zip-bomb caps so the guards can be
+// exercised with small fixtures instead of gigabyte archives. A non-positive
+// value leaves the corresponding default in place.
+func withExtractCaps(maxTotal, maxEntries int64) osvOption {
+	return func(s *OSVBundleSource) {
+		if maxTotal > 0 {
+			s.maxTotalExtracted = maxTotal
+		}
+		if maxEntries > 0 {
+			s.maxExtractEntries = maxEntries
+		}
+	}
+}
+
 // withForceUpdate returns an option that sets ForceUpdate=true.
 func withForceUpdate(v bool) osvOption {
 	return func(s *OSVBundleSource) { s.ForceUpdate = v }
@@ -630,20 +644,17 @@ func TestOSVBundleSource_Refresh_AbsolutePath_HardError(t *testing.T) {
 	assertNoManifest(t, ecoDir)
 }
 
-// TestOSVBundleSource_Refresh_TotalSizeBomb_HardError verifies that many
-// entries whose combined size exceeds the total extraction cap are rejected.
+// TestOSVBundleSource_Refresh_TotalSizeBomb_HardError verifies that entries
+// whose combined size exceeds the total extraction cap are rejected. The cap is
+// injected small so the guard is exercised without a gigabyte fixture; each
+// entry stays under the per-file cap so only the aggregate guard can trip.
 func TestOSVBundleSource_Refresh_TotalSizeBomb_HardError(t *testing.T) {
-	// Build 6 entries × 20 MiB each = 120 MiB > 100 MiB total cap.
-	// Each individual entry is under the 10 MiB per-file cap but the total is not.
-	// Use 6 MiB each: 6 * 6 MiB = 36 MiB > maxTotalExtractedBytes(defined in osv.go).
-	// The test relies on maxTotalExtractedBytes being < 60 MiB; using a value that
-	// clearly exceeds any reasonable cap without using too much test memory.
-	chunk := bytes.Repeat([]byte("X"), 6<<20) // 6 MiB per entry
+	chunk := bytes.Repeat([]byte("X"), 6<<20) // 6 MiB per entry, under the 10 MiB per-file cap
 	entries := make(map[string][]byte)
 	for i := 0; i < 10; i++ {
 		entries[fmt.Sprintf("entry%02d.json", i)] = chunk
 	}
-	// Total: 10 * 6 MiB = 60 MiB — exceeds the 50 MiB default cap.
+	// Total 60 MiB exceeds the injected 50 MiB total cap.
 	zipBytes := buildZip(t, entries)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -652,11 +663,37 @@ func TestOSVBundleSource_Refresh_TotalSizeBomb_HardError(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	cacheDir := t.TempDir()
-	src := NewOSVBundleSource(cacheDir, withBaseURL(srv.URL), withHTTPClient(srv.Client()))
+	src := NewOSVBundleSource(cacheDir, withBaseURL(srv.URL), withHTTPClient(srv.Client()),
+		withExtractCaps(50<<20, 0))
 
 	err := src.Refresh(context.Background(), EcosystemGo)
 	require.Error(t, err, "total extracted size exceeding cap must be a hard error")
+	require.Contains(t, err.Error(), "total extracted size exceeds")
 
 	ecoDir := filepath.Join(cacheDir, EcosystemGo)
 	assertNoManifest(t, ecoDir)
+}
+
+// TestOSVBundleSource_Refresh_EntryCountBomb_HardError verifies the entry-count
+// guard: an archive padded with more (tiny) entries than the cap is rejected.
+func TestOSVBundleSource_Refresh_EntryCountBomb_HardError(t *testing.T) {
+	entries := make(map[string][]byte)
+	for i := 0; i < 8; i++ {
+		entries[fmt.Sprintf("rec%02d.json", i)] = []byte("{}")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(buildZip(t, entries))
+	}))
+	t.Cleanup(srv.Close)
+
+	cacheDir := t.TempDir()
+	src := NewOSVBundleSource(cacheDir, withBaseURL(srv.URL), withHTTPClient(srv.Client()),
+		withExtractCaps(0, 5)) // 8 entries exceeds the injected 5-entry cap
+
+	err := src.Refresh(context.Background(), EcosystemGo)
+	require.Error(t, err, "entry count exceeding cap must be a hard error")
+	require.Contains(t, err.Error(), "entry count exceeds")
+
+	assertNoManifest(t, filepath.Join(cacheDir, EcosystemGo))
 }

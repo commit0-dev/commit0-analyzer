@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,18 +25,26 @@ const SourceOSV = "osv.dev"
 // Reference: https://google.github.io/osv-scanner/usage/offline-mode/
 const osvDefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
-// Zip-bomb guards. These apply per-file and in aggregate across the entire
-// extracted bundle. OSV ecosystem bundles are typically tens of MiB uncompressed
-// (the Go bundle is ~20 MiB); these caps are generous while still protecting
-// against malicious or corrupted archives.
+// Zip-bomb guards. These apply per-file, per-entry-count, and in aggregate
+// across the entire extracted bundle. Bundle sizes vary widely by ecosystem:
+// the Go bundle is ~20 MiB, but the npm bundle is ~333 MiB uncompressed across
+// ~221k advisory files. The caps below accommodate the largest current
+// ecosystem with headroom while still bounding a decompression bomb.
 const (
 	// maxPerFileBytes is the maximum uncompressed size of a single zip entry.
 	// 10 MiB — no individual OSV record should approach this.
 	maxPerFileBytes = 10 << 20 // 10 MiB
 
 	// maxTotalExtractedBytes is the maximum total uncompressed size across all
-	// accepted entries in one bundle. 50 MiB — generous for any current ecosystem.
-	maxTotalExtractedBytes = 50 << 20 // 50 MiB
+	// accepted entries in one bundle. 1 GiB — comfortably above the npm bundle
+	// (~333 MiB) with room to grow; entries are streamed to disk, not buffered
+	// in memory, so this bounds disk use, not RAM.
+	maxTotalExtractedBytes = 1 << 30 // 1 GiB
+
+	// maxEntries bounds the number of accepted entries — a complementary defense
+	// against archives padded with a huge count of tiny files. The npm bundle has
+	// ~221k entries today; cap well above that to allow growth.
+	maxEntries = 4 << 20 // 4,194,304
 )
 
 // ─── Functional options ───────────────────────────────────────────────────────
@@ -73,6 +82,20 @@ type OSVBundleSource struct {
 	// cacheDir is the root directory under which per-ecosystem subdirectories
 	// are created. Never mutated after construction.
 	cacheDir string
+
+	// maxTotalExtracted and maxExtractEntries are the aggregate zip-bomb caps
+	// applied during extraction. They default to maxTotalExtractedBytes and
+	// maxEntries; tests inject small values to exercise the guards without
+	// gigabyte fixtures.
+	maxTotalExtracted int64
+	maxExtractEntries int64
+
+	// indexMu guards indexes, a per-ecosystem-directory cache of the advisory
+	// index. A large bundle (npm has ~221k records) is parsed once into a
+	// name-keyed index so each package query is a map lookup rather than a full
+	// directory rescan. The cache lives for the source's lifetime (one scan).
+	indexMu sync.Mutex
+	indexes map[string]*advisoryIndex
 }
 
 // NewOSVBundleSource returns an OSVBundleSource that caches bundles under
@@ -80,9 +103,12 @@ type OSVBundleSource struct {
 // HTTP client, or ForceUpdate flag.
 func NewOSVBundleSource(cacheDir string, opts ...osvOption) *OSVBundleSource {
 	s := &OSVBundleSource{
-		BaseURL:  osvDefaultBaseURL,
-		HTTP:     &http.Client{Timeout: 60 * time.Second},
-		cacheDir: cacheDir,
+		BaseURL:           osvDefaultBaseURL,
+		HTTP:              &http.Client{Timeout: 60 * time.Second},
+		cacheDir:          cacheDir,
+		maxTotalExtracted: maxTotalExtractedBytes,
+		maxExtractEntries: maxEntries,
+		indexes:           make(map[string]*advisoryIndex),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -148,7 +174,7 @@ func (s *OSVBundleSource) Refresh(ctx context.Context, ecosystem string) error {
 
 	// Safe-extract the zip into the ecosystem directory.
 	// Any safety violation → hard error, no manifest written.
-	if err := safeExtractZip(zipData, dir); err != nil {
+	if err := safeExtractZip(zipData, dir, s.maxTotalExtracted, s.maxExtractEntries); err != nil {
 		return fmt.Errorf("advisory: osv: extract %s/all.zip: %w", ecosystem, err)
 	}
 
@@ -254,13 +280,14 @@ func (s *OSVBundleSource) downloadBundle(ctx context.Context, ecosystem string) 
 //
 // Each accepted entry is written via atomicWrite so that concurrent readers
 // never observe a partially-written file.
-func safeExtractZip(zipData []byte, destDir string) error {
+func safeExtractZip(zipData []byte, destDir string, maxTotal, maxEntriesLimit int64) error {
 	r, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
 		return fmt.Errorf("open zip: %w", err)
 	}
 
 	var totalExtracted int64
+	var entryCount int64
 
 	for _, f := range r.File {
 		name := f.Name
@@ -273,6 +300,15 @@ func safeExtractZip(zipData []byte, destDir string) error {
 		// Guard: only accept *.json entries.
 		if !strings.HasSuffix(name, ".json") {
 			continue
+		}
+
+		// Guard: bound the number of accepted entries.
+		entryCount++
+		if entryCount > maxEntriesLimit {
+			return fmt.Errorf(
+				"zip-bomb guard: entry count exceeds %d limit",
+				maxEntriesLimit,
+			)
 		}
 
 		// Guard: reject absolute paths (e.g. "/etc/evil.json").
@@ -319,19 +355,28 @@ func safeExtractZip(zipData []byte, destDir string) error {
 
 		// Guard: aggregate total size cap.
 		totalExtracted += int64(len(data))
-		if totalExtracted > maxTotalExtractedBytes {
+		if totalExtracted > maxTotal {
 			return fmt.Errorf(
 				"zip-bomb guard: total extracted size exceeds %d byte limit",
-				maxTotalExtractedBytes,
+				maxTotal,
 			)
 		}
 
 		// Use only the base filename — discard any subdirectory component in the
-		// zip entry name so all files land flat in destDir.
+		// zip entry name so all files land flat in destDir. fsync=false: a bundle
+		// has up to ~221k entries, so we skip per-file fsync and flush the whole
+		// batch once via syncDir below. Crash-safety is preserved because the
+		// caller writes the validating manifest only after this returns.
 		dest := filepath.Join(destDir, filepath.Base(cleaned))
-		if err := atomicWrite(dest, data); err != nil {
+		if err := atomicWrite(dest, data, false); err != nil {
 			return fmt.Errorf("write entry %q: %w", name, err)
 		}
+	}
+
+	// Flush all the batched renames to stable storage once, before the caller
+	// writes the manifest that marks this cache valid.
+	if err := syncDir(destDir); err != nil {
+		return err
 	}
 
 	return nil
@@ -357,8 +402,101 @@ func (s *OSVBundleSource) Query(ctx context.Context, pkg Package, version string
 		return nil, nil
 	}
 
-	ds := &dirSource{dir: dir, sources: []string{SourceOSV}}
-	return ds.query(ctx, pkg, version)
+	idx, err := s.indexFor(ctx, dir, pkg.Ecosystem)
+	if err != nil {
+		return nil, err
+	}
+	return idx.lookup(pkg, version, []string{SourceOSV}), nil
+}
+
+// indexFor returns the advisory index for an ecosystem cache directory, building
+// and caching it on first use. The lock serialises concurrent first-builders;
+// after the index exists, lookups are read-only.
+func (s *OSVBundleSource) indexFor(ctx context.Context, dir, ecosystem string) (*advisoryIndex, error) {
+	s.indexMu.Lock()
+	defer s.indexMu.Unlock()
+	if idx, ok := s.indexes[dir]; ok {
+		return idx, nil
+	}
+	idx, err := buildAdvisoryIndex(ctx, dir, ecosystem)
+	if err != nil {
+		return nil, err
+	}
+	s.indexes[dir] = idx
+	return idx, nil
+}
+
+// advisoryIndex groups parsed, non-withdrawn advisories by their per-ecosystem
+// normalized module name. It makes a per-package query a map lookup instead of
+// a full directory rescan — essential for the npm bundle (~221k records), which
+// the scan-every-file path of dirSource.query is too slow for.
+type advisoryIndex struct {
+	byName map[string][]Advisory
+}
+
+// buildAdvisoryIndex parses every *.json advisory in dir once and groups them by
+// normalized module name. It mirrors dirSource.query exactly for parsing,
+// corrupt-file skipping, withdrawn exclusion, and npm name normalization — only
+// the access pattern differs (index once vs. scan per query).
+func buildAdvisoryIndex(ctx context.Context, dir, ecosystem string) (*advisoryIndex, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("advisory: index db dir %q: %w", dir, err)
+	}
+	idx := &advisoryIndex{byName: make(map[string][]Advisory)}
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") || entry.Name() == ManifestFilename {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("advisory: read %q: %w", entry.Name(), err)
+		}
+		adv, err := parseOSVRecord(data, ecosystem)
+		if err != nil {
+			// Corrupt advisory: skip with no hard error (matches dirSource.query).
+			continue
+		}
+		if adv.Withdrawn != "" {
+			continue
+		}
+		key := adv.Module
+		if ecosystem == EcosystemNPM {
+			key = normalizeNPMPackageName(key)
+		}
+		idx.byName[key] = append(idx.byName[key], *adv)
+	}
+	return idx, nil
+}
+
+// lookup returns advisories for pkg whose version ranges include version,
+// stamped with the given source attribution. It reproduces the match logic of
+// dirSource.query (name normalization, canonical version, AffectsVersion) on the
+// pre-grouped index.
+func (idx *advisoryIndex) lookup(pkg Package, version string, sources []string) []Advisory {
+	queryName := pkg.Name
+	if pkg.Ecosystem == EcosystemNPM {
+		queryName = normalizeNPMPackageName(queryName)
+	}
+	candidates := idx.byName[queryName]
+	if len(candidates) == 0 {
+		return nil
+	}
+	queryVersion := canonical(version)
+	var results []Advisory
+	for i := range candidates {
+		// Copy so the cached index is never mutated by per-query stamping.
+		adv := candidates[i]
+		if adv.AffectsVersion(queryVersion) {
+			adv.Ecosystem = pkg.Ecosystem
+			adv.Sources = append([]string(nil), sources...)
+			results = append(results, adv)
+		}
+	}
+	return results
 }
 
 // ─── Version normalisation ────────────────────────────────────────────────────

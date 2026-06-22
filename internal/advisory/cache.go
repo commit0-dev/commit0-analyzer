@@ -459,7 +459,7 @@ func writeManifestToDir(destDir, dbModified string) error {
 	if err != nil {
 		return fmt.Errorf("advisory: marshal manifest: %w", err)
 	}
-	return atomicWrite(filepath.Join(destDir, ManifestFilename), data)
+	return atomicWrite(filepath.Join(destDir, ManifestFilename), data, true)
 }
 
 // ─── Atomic file write ────────────────────────────────────────────────────────
@@ -470,7 +470,12 @@ func writeManifestToDir(destDir, dbModified string) error {
 //
 // The temp file is created in the same directory as path so that the rename is
 // guaranteed to be on the same filesystem (rename across filesystems is not atomic).
-func atomicWrite(path string, data []byte) error {
+// When fsync is true the temp file is flushed to stable storage before the
+// rename, guaranteeing durability of this individual file. Bulk writers that
+// produce many files (e.g. OSV bundle extraction of ~221k entries) pass
+// fsync=false to avoid one fsync per file — a dominant cost — and instead flush
+// once via syncDir after the batch, before the validating manifest is written.
+func atomicWrite(path string, data []byte, fsync bool) error {
 	dir := filepath.Dir(path)
 
 	tmp, err := os.CreateTemp(dir, ".anst-tmp-*")
@@ -495,9 +500,11 @@ func atomicWrite(path string, data []byte) error {
 	// fsync ensures the data reaches stable storage before the rename makes it
 	// visible. Without this, a crash between rename and flush could corrupt the
 	// file even though the rename succeeded.
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("advisory: atomicWrite: sync %q: %w", path, err)
+	if fsync {
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return fmt.Errorf("advisory: atomicWrite: sync %q: %w", path, err)
+		}
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("advisory: atomicWrite: close %q: %w", path, err)
@@ -509,6 +516,22 @@ func atomicWrite(path string, data []byte) error {
 
 	success = true
 	return nil
+}
+
+// syncDir flushes a directory's metadata to stable storage, durably persisting
+// the renames of files written into it. Used once after a bulk batch of
+// fsync-free atomicWrite calls so the batch is durable before the manifest that
+// validates it is written.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("advisory: syncDir: open %q: %w", dir, err)
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return fmt.Errorf("advisory: syncDir: sync %q: %w", dir, err)
+	}
+	return d.Close()
 }
 
 // ─── File locking ─────────────────────────────────────────────────────────────

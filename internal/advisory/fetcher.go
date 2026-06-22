@@ -133,7 +133,7 @@ func (f *Fetcher) FetchModules(ctx context.Context, modules []string, destDir st
 	// All fetches succeeded — now write files atomically.
 	for id, data := range fetched {
 		path := filepath.Join(destDir, id+".json")
-		if err := atomicWrite(path, data); err != nil {
+		if err := atomicWrite(path, data, true); err != nil {
 			return "", fmt.Errorf("advisory: write %s: %w", id, err)
 		}
 	}
