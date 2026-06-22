@@ -2,9 +2,9 @@
 
 ## Overview
 
-`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to import-only scanners.
+`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules and JavaScript/TypeScript packages. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to import-only scanners.
 
-**Differentiator vs `govulncheck`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. Advisory symbol data is sourced from the same Go vulnerability database, so symbol-level precision is equivalent; the differentiation is in output format, policy gating, and the plugin architecture.
+**Differentiator vs `govulncheck` / `npm audit`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. For Go, advisory symbol data comes from the same Go vulnerability database (`vuln.go.dev`), so symbol-level precision is equivalent; the differentiation is SARIF output, policy gating, and the plugin architecture. For JS/TS, the differentiator is package-level import-graph reachability (with Jelly symbol enrichment as fast-follow) versus `npm audit`'s install-only scope.
 
 ## Installation
 
@@ -16,32 +16,36 @@ go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
 
 ### `anst-analyzer scan [path]`
 
-Scans a Go module for reachable dependency vulnerabilities.
+Scans a project for reachable dependency vulnerabilities. The path defaults to the current directory. Supported project roots:
 
-`path` defaults to the current directory. It must contain a `go.mod` file.
+- **Go:** must contain `go.mod`
+- **JS/TS:** must contain `package.json` (npm, Yarn, or pnpm workspace)
+- **Polyglot:** both `go.mod` and `package.json` present — both plugins run and findings merge
 
 **Pipeline:**
-1. Resolve module dependencies via `go list -m -json all`.
-2. Query the advisory service (Go vuln DB snapshot) for each dependency.
-3. Build an `AnalyzeRequest` with advisory data and build config.
-4. Drive the `go-reachability` plugin through the host subprocess transport (go-plugin / gRPC over stdio).
-5. Render findings in the requested format.
-6. Evaluate the policy gate and exit with the appropriate code.
+1. Detect ecosystems at the project root (`--language` overrides auto-detect).
+2. Resolve dependencies per ecosystem (Go: `go list -m -json all`; JS: parse lockfile).
+3. Fetch advisories from enabled sources (Go vuln DB, OSV.dev npm bundle).
+4. Drive the appropriate plugins through the host subprocess transport (gRPC over stdio).
+5. Merge and sort findings deterministically.
+6. Render in the requested format.
+7. Evaluate the policy gate and exit with the appropriate code.
 
 #### Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--format` | `sarif` | Output format: `sarif`, `json`, or `table` |
+| `--language` | `auto` | Ecosystem: `auto`, `go`, or `js` |
 | `--policy` | _(none)_ | Path to a YAML policy file |
 | `--db-snapshot` | _(none)_ | Path to a pinned advisory snapshot directory (read-only; never fetched or mutated) |
 | `--offline` | `false` | Disable network access; use existing writable cache or `--db-snapshot` |
 | `--update` | `false` | Force re-fetch of advisory data even when the cached version is current |
 | `--fail-on` | `high` | Minimum severity to fail: `low`, `medium`, `high`, `critical` |
 | `--source` | `go-vuln-db,osv` | Comma-separated advisory sources: `go-vuln-db`, `osv` (see below) |
-| `--goos` | _(host GOOS)_ | GOOS override for build config |
-| `--goarch` | _(host GOARCH)_ | GOARCH override for build config |
-| `--tags` | _(none)_ | Comma-separated build tags |
+| `--goos` | _(host GOOS)_ | GOOS override for Go build config |
+| `--goarch` | _(host GOARCH)_ | GOARCH override for Go build config |
+| `--tags` | _(none)_ | Comma-separated Go build tags |
 | `--plugin-binary` | _(auto-built)_ | Path to pre-built `go-reachability` plugin binary |
 
 #### Exit Codes
@@ -61,15 +65,17 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 | Source token | Description |
 |---|---|
 | `go-vuln-db` | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
-| `osv` | OSV.dev offline bundle (`osv-vulnerabilities.storage.googleapis.com/Go/all.zip`). Package-level data for Go; primarily valuable as an **architectural seam** for future non-Go ecosystems (npm, PyPI, …). |
+| `osv` | OSV.dev offline bundle. For Go: `osv-vulnerabilities.storage.googleapis.com/Go/all.zip`. For npm/JS: `osv-vulnerabilities.storage.googleapis.com/npm/all.zip`. Package-level data for both ecosystems. |
 
-**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot).
+**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For JS-only scans, `--source osv` is automatically used.
 
-**Honest coverage note:** For Go modules, OSV.dev's "Go" ecosystem dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). OSV adds **near-zero additional coverage** for Go — the merge layer will mostly dedup OSV entries back onto the existing Go-DB symbol-level advisories. The value of enabling OSV for Go is **architectural**: it exercises the multi-source merge path and makes adding non-Go ecosystems cheap later.
+**Honest coverage notes:**
+- For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto the existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and future non-Go ecosystem support.
+- For JS/TS, OSV.dev's npm bundle is the **only** supported advisory source. It is package-level (no symbol-level data). The JS plugin uses import-graph reachability to reduce install-scope noise.
 
 **Cache directories:**
 - Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
-- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/` (Linux) / `~/Library/Caches/anst-analyzer/osv/Go/` (macOS).
+- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/` (Go) and `$XDG_CACHE_HOME/anst-analyzer/osv/npm/` (npm) on Linux; same under `~/Library/Caches/anst-analyzer/osv/` on macOS.
 
 #### Advisory DB Modes
 

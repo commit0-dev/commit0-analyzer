@@ -5,14 +5,25 @@
  * sorted, deterministic Finding[] array.  The shim writes this to stdout as
  * JSON; the gRPC handler streams them one by one.
  *
- * Algorithm:
- *   1. Build the call graph once for the project (demand-driven from entrypoints).
- *   2. For each advisory, run BFS + confidence assignment via resolveAdvisoryConfidence.
- *   3. Build a Finding proto from the result.
- *   4. Sort findings by stable key and return.
+ * Algorithm (per-workspace):
+ *   1. Build the project model and discover workspaces.
+ *   2. Deduplicate advisories by id+module (the Go host queries per workspace dep
+ *      and may send the same advisory once per workspace).
+ *   3. For each workspace:
+ *      a. Detect that workspace's entrypoints.
+ *      b. Build a call graph scoped to those entrypoints.
+ *      c. For each advisory whose package is declared in this workspace's deps,
+ *         resolve reachability against the per-workspace call graph.
+ *      d. Emit one Finding per (advisory, workspace).
+ *   4. Sort all findings by stable key and return.
+ *
+ * When explicit entrypoints are provided (override from the caller), the engine
+ * falls back to single-pass mode using the first workspace name, preserving the
+ * pre-workspace behaviour for callers that supply their own entrypoint list.
  *
  * Determinism invariants:
- *   - Advisories processed in input order (caller must sort if needed).
+ *   - Workspaces processed in sorted-name order.
+ *   - Advisories deduplicated, then processed in original order within each workspace.
  *   - Import sites and BFS are deterministic (sorted internally).
  *   - Output sorted by stable key before return.
  *   - unknown ≠ safe: UNKNOWN frontiers never coerced to NOT_REACHABLE.
@@ -51,75 +62,113 @@ export interface EngineRequest {
 export async function analyze(req: EngineRequest): Promise<Finding[]> {
   const { moduleRoot, advisories } = req;
 
-  // Resolve entrypoints: explicit override or auto-detect from project model
+  // Resolve project model to discover workspaces and their declared deps.
   const model = await buildProjectModel(moduleRoot);
 
-  let entrypoints: string[];
+  // Deduplicate advisories by id+module. The Go host queries advisories
+  // per-dep across workspaces and may send the same advisory once per
+  // workspace that declares the dep. Per-workspace attribution is handled
+  // below by checking each workspace's deps map — duplicates in the input
+  // would otherwise produce duplicate findings for the same workspace.
+  const seenAdvisory = new Set<string>();
+  const uniqueAdvisories = advisories.filter((a) => {
+    const key = `${a.id}\x00${a.module}`;
+    if (seenAdvisory.has(key)) return false;
+    seenAdvisory.add(key);
+    return true;
+  });
+
+  // ── Explicit-entrypoints path (single-pass, caller-scoped) ────────────────
+  // When the caller provides explicit entrypoints we cannot infer per-workspace
+  // scope, so we fall back to the original single-pass behaviour and assign all
+  // findings to the first workspace name.
   if (req.entrypoints && req.entrypoints.length > 0) {
-    entrypoints = [...req.entrypoints].sort();
-  } else {
-    const epMap = detectEntrypoints(model);
-    // Collect all entrypoints across all workspaces, sorted for determinism
-    entrypoints = [];
-    for (const [, eps] of [...epMap.entries()].sort((a, b) =>
-      a[0].localeCompare(b[0])
-    )) {
-      for (const ep of eps) {
-        entrypoints.push(ep.file);
-      }
+    const entrypoints = [...req.entrypoints].sort();
+    const cgResult = await buildCallGraph({ projectRoot: moduleRoot, entrypoints });
+    const workspaceName = model.workspaces[0]?.name ?? "default";
+    const findings: Finding[] = [];
+
+    for (const advisory of uniqueAdvisories) {
+      const sites = cgResult.importSites.get(advisory.module) ?? [];
+      const igReachable = sites.some((s) => cgResult.reachableFiles.has(s.fromFile));
+      const igVerdict = igReachable
+        ? Confidence.CONFIDENCE_PACKAGE_REACHABLE
+        : Confidence.CONFIDENCE_NOT_REACHABLE;
+      const { confidence, path } = resolveAdvisoryConfidence(advisory, cgResult, entrypoints);
+      const importingFile = sites.find((s) => cgResult.reachableFiles.has(s.fromFile))?.fromFile;
+      const phantom = cgResult.unknownFrontiers.some(
+        (u) => u.reason === "phantom-dep" && sites.some((s) => s.fromFile === u.fromFile)
+      );
+      findings.push(buildFinding({ advisory, confidence, workspace: workspaceName, importingFile, path, phantom, importGraphVerdict: igVerdict }));
     }
-    entrypoints.sort();
+
+    return sortFindings(findings);
   }
 
-  // Build the call graph once for all advisories
-  const cgResult = await buildCallGraph({ projectRoot: moduleRoot, entrypoints });
+  // ── Per-workspace path (auto-detected entrypoints) ────────────────────────
+  // Process each workspace independently: detect its entrypoints, build a
+  // call graph scoped only to those entrypoints, and resolve advisories for
+  // packages declared in that workspace's deps.
+  //
+  // A package that is declared in a workspace's deps but never imported from
+  // that workspace's entrypoints will receive NOT_REACHABLE for that workspace.
+  // A package that is declared AND imported (reachable) receives PACKAGE_REACHABLE.
 
-  // Determine the workspace name for each finding
-  const workspaceName = model.workspaces[0]?.name ?? "default";
-
+  const epMap = detectEntrypoints(model);
   const findings: Finding[] = [];
 
-  for (const advisory of advisories) {
-    const sites = cgResult.importSites.get(advisory.module) ?? [];
+  // Sort workspaces by name for deterministic output order.
+  const sortedWorkspaces = [...model.workspaces].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
-    // Import-graph-only verdict (Metric V1-JS): does the import graph alone
-    // (ignoring call edges) show the package is reachable?
-    // Exposed as a property on the Finding for comparison reporting.
-    const igReachable = sites.some((s) => cgResult.reachableFiles.has(s.fromFile));
-    const igVerdict = igReachable
-      ? Confidence.CONFIDENCE_PACKAGE_REACHABLE
-      : Confidence.CONFIDENCE_NOT_REACHABLE;
+  for (const ws of sortedWorkspaces) {
+    const wsEps = (epMap.get(ws.name) ?? []).map((e) => e.file).sort();
 
-    // Delegate confidence resolution to the shared function so the shipped
-    // path and the query path are always identical.
-    const { confidence, path } = resolveAdvisoryConfidence(
-      advisory,
-      cgResult,
-      entrypoints
-    );
-
-    // Determine the language from the first reachable import site
-    const importingFile = sites.find((s) => cgResult.reachableFiles.has(s.fromFile))
-      ?.fromFile;
-
-    // Check if the dep is phantom
-    const phantom = cgResult.unknownFrontiers.some(
-      (u) =>
-        u.reason === "phantom-dep" &&
-        sites.some((s) => s.fromFile === u.fromFile)
-    );
-
-    const finding = buildFinding({
-      advisory,
-      confidence,
-      workspace: workspaceName,
-      importingFile,
-      path,
-      phantom,
-      importGraphVerdict: igVerdict,
+    // Build a call graph scoped to this workspace's entrypoints.
+    const cgResult = await buildCallGraph({
+      projectRoot: moduleRoot,
+      entrypoints: wsEps,
     });
 
-    findings.push(finding);
+    // Emit a finding for each advisory whose package is declared in this workspace.
+    // Packages NOT declared in this workspace's deps are skipped for this workspace
+    // (they may appear in another workspace's findings).
+    for (const advisory of uniqueAdvisories) {
+      if (!ws.deps.has(advisory.module)) {
+        // Not declared in this workspace — skip; another workspace owns the finding.
+        continue;
+      }
+
+      const sites = cgResult.importSites.get(advisory.module) ?? [];
+      const igReachable = sites.some((s) => cgResult.reachableFiles.has(s.fromFile));
+      const igVerdict = igReachable
+        ? Confidence.CONFIDENCE_PACKAGE_REACHABLE
+        : Confidence.CONFIDENCE_NOT_REACHABLE;
+
+      const { confidence, path } = resolveAdvisoryConfidence(advisory, cgResult, wsEps);
+
+      const importingFile = sites.find((s) => cgResult.reachableFiles.has(s.fromFile))
+        ?.fromFile;
+
+      const phantom = cgResult.unknownFrontiers.some(
+        (u) =>
+          u.reason === "phantom-dep" &&
+          sites.some((s) => s.fromFile === u.fromFile)
+      );
+
+      findings.push(
+        buildFinding({
+          advisory,
+          confidence,
+          workspace: ws.name,
+          importingFile,
+          path,
+          phantom,
+          importGraphVerdict: igVerdict,
+        })
+      );
+    }
   }
 
   return sortFindings(findings);

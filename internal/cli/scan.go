@@ -89,7 +89,7 @@ func newScanCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "scan [path]",
-		Short: "Scan a Go module for reachable dependency vulnerabilities",
+		Short: "Scan a Go module or JS/TS package for reachable dependency vulnerabilities",
 		Long: `Run the full reachability SCA pipeline against a Go module:
 
   1. Resolve module dependencies from go.mod/go.sum.
