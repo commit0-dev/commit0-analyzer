@@ -1,0 +1,13 @@
+{
+  "name": "corpus-mixed-dual",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/cjs-entry.cjs",
+  "exports": {
+    "import": "./src/esm-entry.js",
+    "require": "./src/cjs-entry.cjs"
+  },
+  "dependencies": {
+    "serialize-javascript": "^3.0.0"
+  }
+}

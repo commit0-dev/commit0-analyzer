@@ -1,0 +1,9 @@
+{
+  "name": "@corpus-two-version-ws/lib",
+  "version": "1.0.0",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "dependencies": {
+    "serialize-javascript": "^6.0.0"
+  }
+}

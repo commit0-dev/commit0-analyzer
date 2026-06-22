@@ -1,0 +1,10 @@
+{
+  "name": "corpus-ts-direct",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "dependencies": {
+    "serialize-javascript": "^3.0.0",
+    "@types/serialize-javascript": "^5.0.0"
+  }
+}

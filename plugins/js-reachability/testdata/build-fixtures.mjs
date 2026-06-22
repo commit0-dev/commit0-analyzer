@@ -1006,6 +1006,577 @@ function buildGateG1() {
   );
 }
 
+// ── Corpus fixture builders ───────────────────────────────────────────────────
+// Each corpus case commits source + labels.json + package.json.
+// This section generates the gitignored lockfiles and node_modules layouts.
+
+const corpus = path.join(__dirname, "corpus");
+
+/** Minimal serialize-javascript stub used across corpus cases. */
+function installSerializeJavascript(root, version = "3.0.0") {
+  const nmSj = path.join(root, "node_modules", "serialize-javascript");
+  mkdir(nmSj);
+  write(
+    path.join(nmSj, "package.json"),
+    JSON.stringify({ name: "serialize-javascript", version, main: "./index.js" }, null, 2) + "\n"
+  );
+  write(
+    path.join(nmSj, "index.js"),
+    [
+      `function serialize(val) { return JSON.stringify(val); }`,
+      `serialize.serialize = serialize;`,
+      `module.exports = serialize;`,
+      ``,
+    ].join("\n")
+  );
+}
+
+/** Minimal npm lockfile entry for serialize-javascript. */
+function sjLockEntry(version = "3.0.0") {
+  return {
+    version,
+    resolved: `https://registry.npmjs.org/serialize-javascript/-/serialize-javascript-${version}.tgz`,
+    integrity: `sha512-corpus-fixture-${version}`,
+  };
+}
+
+// ── corpus/cjs-direct ─────────────────────────────────────────────────────────
+function buildCorpusCjsDirect() {
+  const root = path.join(corpus, "cjs-direct");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-cjs-direct",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-cjs-direct", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/esm-direct ─────────────────────────────────────────────────────────
+function buildCorpusEsmDirect() {
+  const root = path.join(corpus, "esm-direct");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-esm-direct",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-esm-direct", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/mixed-dual ─────────────────────────────────────────────────────────
+function buildCorpusMixedDual() {
+  const root = path.join(corpus, "mixed-dual");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-mixed-dual",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-mixed-dual", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/ts-direct ──────────────────────────────────────────────────────────
+function buildCorpusTsDirect() {
+  const root = path.join(corpus, "ts-direct");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-ts-direct",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-ts-direct", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0", "@types/serialize-javascript": "^5.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+        "node_modules/@types/serialize-javascript": {
+          version: "5.0.4",
+          resolved: "https://registry.npmjs.org/@types/serialize-javascript/-/serialize-javascript-5.0.4.tgz",
+          integrity: "sha512-corpus-types-sj",
+          dev: true,
+        },
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+
+  // minimal @types stub
+  const typesDir = path.join(root, "node_modules", "@types", "serialize-javascript");
+  mkdir(typesDir);
+  write(
+    path.join(typesDir, "package.json"),
+    JSON.stringify({ name: "@types/serialize-javascript", version: "5.0.4" }, null, 2) + "\n"
+  );
+  write(
+    path.join(typesDir, "index.d.ts"),
+    `declare function serialize(val: unknown): string;\nexport = serialize;\n`
+  );
+}
+
+// ── corpus/transitive-ws ──────────────────────────────────────────────────────
+// pnpm workspace: app -> lib -> serialize-javascript
+function buildCorpusTransitiveWs() {
+  const root = path.join(corpus, "transitive-ws");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "pnpm-lock.yaml"),
+    [
+      "lockfileVersion: '6.0'",
+      "",
+      "settings:",
+      "  autoInstallPeers: true",
+      "  excludeLinksFromLockfile: false",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    specifiers: {}",
+      "",
+      "  packages/app:",
+      "    dependencies:",
+      "      '@corpus-transitive-ws/lib':",
+      "        specifier: 'workspace:*'",
+      "        version: link:../lib",
+      "    specifiers:",
+      "      '@corpus-transitive-ws/lib': 'workspace:*'",
+      "",
+      "  packages/lib:",
+      "    dependencies:",
+      "      serialize-javascript:",
+      "        specifier: ^3.0.0",
+      "        version: 3.0.0",
+      "    specifiers:",
+      "      serialize-javascript: ^3.0.0",
+      "",
+      "packages:",
+      "",
+      "  /serialize-javascript@3.0.0:",
+      "    resolution: {integrity: sha512-corpus-transitive-ws}",
+      "    dev: false",
+      "",
+    ].join("\n")
+  );
+
+  // pnpm strict layout: serialize-javascript lives under lib's local node_modules
+  const appNm = path.join(root, "packages", "app", "node_modules");
+  const libNm = path.join(root, "packages", "lib", "node_modules");
+
+  // app -> lib symlink (pnpm workspace link)
+  mkdir(appNm);
+  const appLibLink = path.join(appNm, "@corpus-transitive-ws", "lib");
+  mkdir(path.dirname(appLibLink));
+  // Use a real directory instead of a symlink for test stability
+  if (!fs.existsSync(appLibLink)) {
+    fs.symlinkSync(path.join(root, "packages", "lib"), appLibLink, "dir");
+  }
+
+  // lib's node_modules contains serialize-javascript
+  installSerializeJavascript(path.join(root, "packages", "lib"), "3.0.0");
+  // also install at root level for import resolution fallback
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/not-imported ───────────────────────────────────────────────────────
+function buildCorpusNotImported() {
+  const root = path.join(corpus, "not-imported");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-not-imported",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-not-imported", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0", "lodash": "^4.17.21" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+        "node_modules/lodash": {
+          version: "4.17.21",
+          resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+          integrity: "sha512-corpus-not-imported-lodash",
+        },
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+
+  // lodash is installed but only it is imported by the fixture
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+  write(path.join(nmLodash, "lodash.js"), `module.exports = { identity: (x) => x };\n`);
+  write(
+    path.join(nmLodash, "package.json"),
+    JSON.stringify({ name: "lodash", version: "4.17.21", main: "./lodash.js" }, null, 2) + "\n"
+  );
+}
+
+// ── corpus/imported-unrelated-export ─────────────────────────────────────────
+function buildCorpusImportedUnrelatedExport() {
+  const root = path.join(corpus, "imported-unrelated-export");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-imported-unrelated-export",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-imported-unrelated-export", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/dyn-require-var ────────────────────────────────────────────────────
+function buildCorpusDynRequireVar() {
+  const root = path.join(corpus, "dyn-require-var");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-dyn-require-var",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-dyn-require-var", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/dyn-import-expr ────────────────────────────────────────────────────
+function buildCorpusDynImportExpr() {
+  const root = path.join(corpus, "dyn-import-expr");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-dyn-import-expr",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-dyn-import-expr", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/eval-reached ───────────────────────────────────────────────────────
+function buildCorpusEvalReached() {
+  const root = path.join(corpus, "eval-reached");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-eval-reached",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-eval-reached", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/missing-lockfile ───────────────────────────────────────────────────
+// Intentionally NO lockfile — the corpus builder generates node_modules but
+// leaves no lockfile on disk so the engine's lockfile-missing path fires.
+function buildCorpusMissingLockfile() {
+  const root = path.join(corpus, "missing-lockfile");
+  rmdir(path.join(root, "node_modules"));
+
+  // node_modules exists (installed) but no lockfile — engine detects missing lock
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/pnpm-strict-ws ─────────────────────────────────────────────────────
+function buildCorpusPnpmStrictWs() {
+  const root = path.join(corpus, "pnpm-strict-ws");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "pnpm-lock.yaml"),
+    [
+      "lockfileVersion: '6.0'",
+      "",
+      "settings:",
+      "  autoInstallPeers: true",
+      "  excludeLinksFromLockfile: false",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    specifiers: {}",
+      "",
+      "  packages/app:",
+      "    dependencies:",
+      "      serialize-javascript:",
+      "        specifier: ^3.0.0",
+      "        version: 3.0.0",
+      "      '@corpus-pnpm-strict/utils':",
+      "        specifier: 'workspace:*'",
+      "        version: link:../utils",
+      "    specifiers:",
+      "      serialize-javascript: ^3.0.0",
+      "      '@corpus-pnpm-strict/utils': 'workspace:*'",
+      "",
+      "  packages/utils:",
+      "    specifiers: {}",
+      "",
+      "packages:",
+      "",
+      "  /serialize-javascript@3.0.0:",
+      "    resolution: {integrity: sha512-corpus-pnpm-strict-ws}",
+      "    dev: false",
+      "",
+    ].join("\n")
+  );
+
+  // pnpm .pnpm store layout
+  const storeSj = path.join(root, "node_modules", ".pnpm", "serialize-javascript@3.0.0", "node_modules", "serialize-javascript");
+  mkdir(storeSj);
+  write(
+    path.join(storeSj, "package.json"),
+    JSON.stringify({ name: "serialize-javascript", version: "3.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(
+    path.join(storeSj, "index.js"),
+    [`function serialize(val) { return JSON.stringify(val); }`, `serialize.serialize = serialize;`, `module.exports = serialize;`, ``].join("\n")
+  );
+
+  // app-local symlink to pnpm store
+  const appNm = path.join(root, "packages", "app", "node_modules");
+  rmdir(appNm);
+  mkdir(appNm);
+  const appSjLink = path.join(appNm, "serialize-javascript");
+  if (!fs.existsSync(appSjLink)) {
+    fs.symlinkSync(storeSj, appSjLink, "dir");
+  }
+}
+
+// ── corpus/npm-hoisted-phantom ────────────────────────────────────────────────
+function buildCorpusNpmHoistedPhantom() {
+  const root = path.join(corpus, "npm-hoisted-phantom");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-npm-hoisted-phantom-root",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-npm-hoisted-phantom-root", version: "1.0.0", workspaces: ["packages/*"], dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+        // phantom-vuln-dep is in node_modules but NOT in the root or app package.json deps
+        "packages/app": { name: "@corpus-npm-hoisted-phantom/app", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "packages/lib": { name: "@corpus-npm-hoisted-phantom/lib", version: "1.0.0" },
+      },
+    }, null, 2) + "\n"
+  );
+
+  // Hoisted: serialize-javascript at root node_modules
+  installSerializeJavascript(root, "3.0.0");
+
+  // phantom-vuln-dep: in node_modules but not in any package.json
+  const nmPhantom = path.join(root, "node_modules", "phantom-vuln-dep");
+  mkdir(nmPhantom);
+  write(
+    path.join(nmPhantom, "package.json"),
+    JSON.stringify({ name: "phantom-vuln-dep", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmPhantom, "index.js"), `module.exports = { process: (x) => x };\n`);
+}
+
+// ── corpus/yarn-ws ────────────────────────────────────────────────────────────
+function buildCorpusYarnWs() {
+  const root = path.join(corpus, "yarn-ws");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "yarn.lock"),
+    [
+      "# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.",
+      "# yarn lockfile v1",
+      "",
+      "",
+      "serialize-javascript@^3.0.0:",
+      '  version "3.0.0"',
+      '  resolved "https://registry.yarnpkg.com/serialize-javascript/-/serialize-javascript-3.0.0.tgz#corpus-yarn-ws"',
+      "  integrity sha512-corpus-yarn-ws",
+      "",
+    ].join("\n")
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
+// ── corpus/two-version-ws ─────────────────────────────────────────────────────
+function buildCorpusTwoVersionWs() {
+  const root = path.join(corpus, "two-version-ws");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "pnpm-lock.yaml"),
+    [
+      "lockfileVersion: '6.0'",
+      "",
+      "settings:",
+      "  autoInstallPeers: true",
+      "  excludeLinksFromLockfile: false",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    specifiers: {}",
+      "",
+      "  packages/app:",
+      "    dependencies:",
+      "      serialize-javascript:",
+      "        specifier: ^3.0.0",
+      "        version: 3.0.0",
+      "    specifiers:",
+      "      serialize-javascript: ^3.0.0",
+      "",
+      "  packages/lib:",
+      "    dependencies:",
+      "      serialize-javascript:",
+      "        specifier: ^6.0.0",
+      "        version: 6.0.0",
+      "    specifiers:",
+      "      serialize-javascript: ^6.0.0",
+      "",
+      "packages:",
+      "",
+      "  /serialize-javascript@3.0.0:",
+      "    resolution: {integrity: sha512-corpus-two-version-v3}",
+      "    dev: false",
+      "",
+      "  /serialize-javascript@6.0.0:",
+      "    resolution: {integrity: sha512-corpus-two-version-v6}",
+      "    dev: false",
+      "",
+    ].join("\n")
+  );
+
+  // pnpm store: two versions
+  for (const version of ["3.0.0", "6.0.0"].sort()) {
+    const storeDir = path.join(root, "node_modules", ".pnpm", `serialize-javascript@${version}`, "node_modules", "serialize-javascript");
+    mkdir(storeDir);
+    write(
+      path.join(storeDir, "package.json"),
+      JSON.stringify({ name: "serialize-javascript", version, main: "./index.js" }, null, 2) + "\n"
+    );
+    write(
+      path.join(storeDir, "index.js"),
+      [`function serialize(val) { return JSON.stringify(val); }`, `serialize.serialize = serialize;`, `module.exports = serialize;`, ``].join("\n")
+    );
+  }
+
+  // app-local symlink → v3
+  const appNm = path.join(root, "packages", "app", "node_modules");
+  rmdir(appNm);
+  mkdir(appNm);
+  const appSjLink = path.join(appNm, "serialize-javascript");
+  const storeSjV3 = path.join(root, "node_modules", ".pnpm", "serialize-javascript@3.0.0", "node_modules", "serialize-javascript");
+  if (!fs.existsSync(appSjLink)) {
+    fs.symlinkSync(storeSjV3, appSjLink, "dir");
+  }
+
+  // lib-local symlink → v6
+  const libNm = path.join(root, "packages", "lib", "node_modules");
+  rmdir(libNm);
+  mkdir(libNm);
+  const libSjLink = path.join(libNm, "serialize-javascript");
+  const storeSjV6 = path.join(root, "node_modules", ".pnpm", "serialize-javascript@6.0.0", "node_modules", "serialize-javascript");
+  if (!fs.existsSync(libSjLink)) {
+    fs.symlinkSync(storeSjV6, libSjLink, "dir");
+  }
+}
+
+// ── corpus/dyn-computed-dispatch ──────────────────────────────────────────────
+// Entrypoint dispatches via handlers[name]() — computed member call.
+// No static import of serialize-javascript appears in reachable first-party code,
+// so the engine emits a dynamic-dispatch UNKNOWN frontier. Expected: UNKNOWN.
+function buildCorpusDynComputedDispatch() {
+  const root = path.join(corpus, "dyn-computed-dispatch");
+  rmdir(path.join(root, "node_modules"));
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "corpus-dyn-computed-dispatch",
+      version: "1.0.0",
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        "": { name: "corpus-dyn-computed-dispatch", version: "1.0.0", dependencies: { "serialize-javascript": "^3.0.0" } },
+        "node_modules/serialize-javascript": sjLockEntry("3.0.0"),
+      },
+    }, null, 2) + "\n"
+  );
+
+  installSerializeJavascript(root, "3.0.0");
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -1023,4 +1594,21 @@ export default function setup() {
   buildPnpmPeerSuffix();
   buildResolveFixtures();
   buildGateG1();
+  // Corpus fixtures
+  buildCorpusCjsDirect();
+  buildCorpusEsmDirect();
+  buildCorpusMixedDual();
+  buildCorpusTsDirect();
+  buildCorpusTransitiveWs();
+  buildCorpusNotImported();
+  buildCorpusImportedUnrelatedExport();
+  buildCorpusDynRequireVar();
+  buildCorpusDynImportExpr();
+  buildCorpusEvalReached();
+  buildCorpusMissingLockfile();
+  buildCorpusPnpmStrictWs();
+  buildCorpusNpmHoistedPhantom();
+  buildCorpusYarnWs();
+  buildCorpusTwoVersionWs();
+  buildCorpusDynComputedDispatch();
 }

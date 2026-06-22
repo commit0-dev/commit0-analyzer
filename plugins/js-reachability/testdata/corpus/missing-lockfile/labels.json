@@ -1,0 +1,13 @@
+{
+  "comment": "No lockfile present — the engine detects the import from source analysis and returns PACKAGE_REACHABLE for reachability. Version resolution is incomplete (version range cannot be confirmed against a lockfile-pinned version), but the engine's reachability verdict is still based on the import graph. This case documents engine behavior: reachability is source-based, version matching is lockfile-based. Coverage: incomplete-signal=missing-lockfile.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-missing-lockfile",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE",
+      "note": "Engine correctly detects import from source even without lockfile. The incomplete.lockfile-missing signal surfaces to the host for version-range gating; reachability itself is unambiguously PACKAGE_REACHABLE from the import graph."
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

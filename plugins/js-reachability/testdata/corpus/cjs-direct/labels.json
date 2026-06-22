@@ -1,0 +1,12 @@
+{
+  "comment": "CJS require — direct call into vuln pkg from entrypoint. Coverage: module-system=CJS, reachable=direct.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-cjs-direct",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

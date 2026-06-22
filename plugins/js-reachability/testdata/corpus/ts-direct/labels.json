@@ -1,0 +1,12 @@
+{
+  "comment": "TypeScript with type imports — direct call into vuln pkg. Coverage: module-system=TS-with-types, reachable=direct.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-ts-direct",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["src/index.ts"]
+}

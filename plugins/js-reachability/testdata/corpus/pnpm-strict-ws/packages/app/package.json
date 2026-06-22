@@ -1,0 +1,10 @@
+{
+  "name": "@corpus-pnpm-strict/app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.js",
+  "dependencies": {
+    "serialize-javascript": "^3.0.0",
+    "@corpus-pnpm-strict/utils": "workspace:*"
+  }
+}

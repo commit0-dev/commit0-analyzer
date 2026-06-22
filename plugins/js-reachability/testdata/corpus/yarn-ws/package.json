@@ -1,0 +1,9 @@
+{
+  "name": "corpus-yarn-ws-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "dependencies": {
+    "serialize-javascript": "^3.0.0"
+  }
+}

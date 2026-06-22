@@ -1,0 +1,12 @@
+{
+  "comment": "Package reachable only via eval/Function — dynamic eval creates an UNKNOWN frontier → UNKNOWN. Coverage: unknown=eval-dispatch.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-eval-reached",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "UNKNOWN"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

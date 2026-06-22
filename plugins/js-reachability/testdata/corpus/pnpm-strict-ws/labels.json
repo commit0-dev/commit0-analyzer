@@ -1,0 +1,12 @@
+{
+  "comment": "pnpm strict workspace — vuln pkg in app workspace. Coverage: monorepo=pnpm-strict.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-pnpm-strict-ws",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["packages/app/src/index.js"]
+}

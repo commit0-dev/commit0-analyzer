@@ -1,0 +1,12 @@
+{
+  "comment": "yarn workspace — vuln pkg hoisted to root. Coverage: monorepo=yarn-workspace.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-yarn-ws",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["packages/app/src/index.js"]
+}

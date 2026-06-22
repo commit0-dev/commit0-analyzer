@@ -1,0 +1,19 @@
+{
+  "comment": "npm hoisted workspace with a phantom dep: app uses phantom-dep which is in hoisted node_modules but not declared in app's package.json. Coverage: monorepo=npm-hoisted, phantom-dep case.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-npm-hoisted-real",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    },
+    {
+      "id": "GHSA-corpus-npm-hoisted-phantom",
+      "package": "phantom-vuln-dep",
+      "version": "1.0.0",
+      "expectedTier": "PACKAGE_REACHABLE",
+      "note": "phantom dep: installed via hoisting, not declared in package.json. Engine marks phantom=true in properties."
+    }
+  ],
+  "entrypoints": ["packages/app/src/index.js"]
+}

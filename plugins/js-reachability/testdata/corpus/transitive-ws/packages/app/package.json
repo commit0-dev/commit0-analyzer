@@ -1,0 +1,9 @@
+{
+  "name": "@corpus-transitive-ws/app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.js",
+  "dependencies": {
+    "@corpus-transitive-ws/lib": "workspace:*"
+  }
+}

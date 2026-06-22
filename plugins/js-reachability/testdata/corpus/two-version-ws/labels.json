@@ -1,0 +1,20 @@
+{
+  "comment": "Same dep at two versions across pnpm workspaces: app uses serialize-javascript@3.0.0 (vuln), lib uses serialize-javascript@6.0.0 (patched). Coverage: monorepo=two-versions-same-dep.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-two-version-vuln",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE",
+      "note": "Vuln version used in app workspace"
+    },
+    {
+      "id": "GHSA-corpus-two-version-patched",
+      "package": "serialize-javascript",
+      "version": "6.0.0",
+      "expectedTier": "PACKAGE_REACHABLE",
+      "note": "Patched version used in lib workspace — both are imported so both are reachable"
+    }
+  ],
+  "entrypoints": ["packages/app/src/index.js", "packages/lib/src/index.js"]
+}

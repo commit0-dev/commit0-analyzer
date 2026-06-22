@@ -8,7 +8,9 @@
     "build": "bun build src/main.ts --compile --outfile dist/anst-js-reachability",
     "generate": "npx ts-proto-gen",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "corpus:report": "npx tsx scripts/corpus-report.ts",
+    "jelly:crosscheck": "npx tsx scripts/jelly-crosscheck.ts"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.0",
