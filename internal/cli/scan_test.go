@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -605,6 +606,252 @@ func TestScan_ProbeFailureWithValidCache_IncompleteNotZero(t *testing.T) {
 	// A warning must be printed to stderr.
 	assert.NotEmpty(t, stderr,
 		"probe failure must emit a warning to stderr")
+}
+
+// ─── Phase 3: Multi-source and --source flag tests ───────────────────────────
+
+// buildOSVBundleZip creates an in-memory zip archive containing the corpus CVE
+// advisory in OSV format, suitable for serving as a mock OSV bundle.
+func buildOSVBundleZip(t *testing.T) []byte {
+	t.Helper()
+	corpusCVE, err := os.ReadFile(filepath.Join(snapshotDir(t), "CORPUS-CVE-001.json"))
+	require.NoError(t, err, "CORPUS-CVE-001.json must exist in db-snapshot fixture")
+
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	fw, err := w.Create("CORPUS-CVE-001.json")
+	require.NoError(t, err)
+	_, err = fw.Write(corpusCVE)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+	return buf.Bytes()
+}
+
+// newOSVMockServer creates an httptest.Server that serves the OSV offline bundle
+// for the Go ecosystem. It serves a zip containing the corpus CVE.
+// When bundleFails is true, all requests return HTTP 500.
+func newOSVMockServer(t *testing.T, bundleFails bool) *httptest.Server {
+	t.Helper()
+	zipData := buildOSVBundleZip(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if bundleFails {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		// OSV bundle endpoint: /Go/all.zip
+		if r.URL.Path == "/Go/all.zip" {
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(zipData)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestScan_MultiSource_DefaultBothSources verifies that with the default
+// --source flag (go-vuln-db,osv), both sources are queried and results are
+// merged (same CVE → one advisory, exit 1 for gate failure).
+func TestScan_MultiSource_DefaultBothSources(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	goSrv := newCorpusMockServer(t, false, false)
+	osvSrv := newOSVMockServer(t, false)
+	cacheBaseDir := t.TempDir()
+
+	stdout, stderr, code := runScanBinaryWithEnv(t,
+		[]string{
+			"ANST_VULN_DB_URL=" + goSrv.URL,
+			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"HOME=" + cacheBaseDir,
+			"XDG_CACHE_HOME=" + cacheBaseDir,
+		},
+		"scan",
+		filepath.Join(corpusDir(t), "reachable-cve"),
+		"--format", "sarif",
+		"--fail-on", "high",
+		"--plugin-binary", pluginBin,
+		// --source defaults to "go-vuln-db,osv"; specify explicitly for clarity.
+		"--source", "go-vuln-db,osv",
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+	t.Logf("stdout=%s", stdout)
+
+	require.True(t, json.Valid([]byte(stdout)), "output must be valid JSON (SARIF)")
+	assert.Contains(t, stdout, "CORPUS-CVE-001",
+		"merged advisory must appear in SARIF with both sources active")
+	// The CORPUS-CVE-001 is SYMBOL_REACHABLE / HIGH → gate fails.
+	assert.Equal(t, 1, code,
+		"both-source scan with reachable HIGH finding must exit 1")
+}
+
+// TestScan_MultiSource_OSVFailure_WarnAndIncomplete verifies "degrade, not abort":
+// when the OSV source fails (e.g. network error), the scan:
+//   - Continues using Go-DB findings to gate.
+//   - Emits a warning to stderr mentioning the OSV source.
+//   - Exits 3 (incomplete via EvalFlags.Incomplete), never 0.
+func TestScan_MultiSource_OSVFailure_WarnAndIncomplete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	// Go-DB mock: succeeds normally.
+	goSrv := newCorpusMockServer(t, false, false)
+	// OSV mock: always fails (500).
+	osvSrv := newOSVMockServer(t, true /* bundleFails */)
+	cacheBaseDir := t.TempDir()
+
+	_, stderr, code := runScanBinaryWithEnv(t,
+		[]string{
+			"ANST_VULN_DB_URL=" + goSrv.URL,
+			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"HOME=" + cacheBaseDir,
+			"XDG_CACHE_HOME=" + cacheBaseDir,
+		},
+		"scan",
+		filepath.Join(corpusDir(t), "reachable-cve"),
+		"--format", "sarif",
+		"--fail-on", "high",
+		"--plugin-binary", pluginBin,
+		"--source", "go-vuln-db,osv",
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+
+	// Must NOT be 0: an OSV failure marks the scan incomplete.
+	assert.NotEqual(t, 0, code,
+		"OSV source failure must not produce exit 0 (incomplete)")
+	// Must exit 3 (incomplete, not gate failure — gate failure would be 1 if
+	// Go-DB findings were gating, but incomplete overrides to 3).
+	assert.Equal(t, 3, code,
+		"OSV source failure + incomplete must exit 3")
+
+	// Warning must mention OSV failure.
+	assert.Contains(t, strings.ToLower(stderr), "osv",
+		"stderr must mention OSV source in the warning")
+}
+
+// TestScan_MultiSource_GoDBOnly verifies that --source go-vuln-db queries only
+// the Go-DB source (OSV server must NOT be contacted).
+func TestScan_MultiSource_GoDBOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	goSrv := newCorpusMockServer(t, false, false)
+	cacheBaseDir := t.TempDir()
+
+	// Track whether the OSV server is ever hit — it must NOT be.
+	var osvHit bool
+	osvSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		osvHit = true
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	t.Cleanup(osvSrv.Close)
+
+	stdout, stderr, code := runScanBinaryWithEnv(t,
+		[]string{
+			"ANST_VULN_DB_URL=" + goSrv.URL,
+			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"HOME=" + cacheBaseDir,
+			"XDG_CACHE_HOME=" + cacheBaseDir,
+		},
+		"scan",
+		filepath.Join(corpusDir(t), "reachable-cve"),
+		"--format", "sarif",
+		"--fail-on", "high",
+		"--plugin-binary", pluginBin,
+		"--source", "go-vuln-db",
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+	t.Logf("stdout=%s", stdout)
+
+	// OSV server must not have been contacted.
+	assert.False(t, osvHit,
+		"--source go-vuln-db must not contact the OSV server")
+
+	// Go-DB findings should still gate correctly.
+	require.True(t, json.Valid([]byte(stdout)), "output must be valid JSON (SARIF)")
+	assert.Contains(t, stdout, "CORPUS-CVE-001")
+	assert.Equal(t, 1, code,
+		"go-vuln-db-only scan with reachable HIGH finding must exit 1")
+}
+
+// TestScan_MultiSource_OfflineMissingOSVCache verifies "offline honesty":
+// when --offline is used and the OSV cache has never been populated, the OSV
+// source is skipped and the scan exits 3 (incomplete), never silently clean.
+// Go-DB uses a pinned snapshot so that part succeeds.
+func TestScan_MultiSource_OfflineMissingOSVCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	snap := snapshotDir(t)
+	// Fresh empty cache dir — OSV has never been populated.
+	emptyCacheDir := t.TempDir()
+
+	_, stderr, code := runScanBinaryWithEnv(t,
+		[]string{
+			"HOME=" + emptyCacheDir,
+			"XDG_CACHE_HOME=" + emptyCacheDir,
+		},
+		"scan",
+		filepath.Join(corpusDir(t), "reachable-cve"),
+		"--format", "sarif",
+		"--db-snapshot", snap,
+		"--offline",
+		"--fail-on", "high",
+		"--plugin-binary", pluginBin,
+		"--source", "go-vuln-db,osv",
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+
+	// Must exit 3 (incomplete) — OSV cache missing makes scan incomplete.
+	assert.Equal(t, 3, code,
+		"offline + missing OSV cache must exit 3 (incomplete), never 0")
+
+	// Must print a warning about the missing OSV cache.
+	assert.NotEmpty(t, stderr, "must print a warning about the missing OSV cache")
+	assert.Contains(t, strings.ToLower(stderr), "osv",
+		"warning must mention OSV source being skipped")
+}
+
+// TestScan_MultiSource_InvalidSourceFlag verifies that an unknown --source value
+// causes exit 3 with a clear error message.
+func TestScan_MultiSource_InvalidSourceFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("E2E test requires plugin build; skipping in short mode")
+	}
+
+	pluginBin := buildPluginBinary(t)
+	snap := snapshotDir(t)
+
+	_, stderr, code := runScanBinary(t,
+		"scan",
+		filepath.Join(corpusDir(t), "reachable-cve"),
+		"--format", "sarif",
+		"--db-snapshot", snap,
+		"--offline",
+		"--plugin-binary", pluginBin,
+		"--source", "unknown-source",
+	)
+
+	t.Logf("exit=%d stderr=%q", code, stderr)
+	assert.Equal(t, 3, code,
+		"unknown --source value must produce exit 3")
+	assert.Contains(t, stderr, "unknown-source",
+		"error message must name the invalid source")
 }
 
 // TestScan_DBSnapshotIsReadOnly verifies that --db-snapshot never causes the

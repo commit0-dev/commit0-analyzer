@@ -62,15 +62,26 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 
 ## Advisory Data Scope
 
-Advisory data comes exclusively from the **Go vulnerability database** (`vuln.go.dev`). Only the Go vuln DB reliably carries symbol-level data. OSV.dev and GHSA are roadmap items that add CVE *coverage* (more advisories), not symbol *precision* (the same symbols, from a different source).
+`anst-analyzer` queries two advisory sources by default (configurable via `--source`):
+
+| Source | Coverage | Symbol-level data |
+|---|---|---|
+| `go-vuln-db` (`vuln.go.dev`) | Go modules | Yes — the primary source for symbol-level precision. |
+| `osv` (`osv.dev` offline bundle) | Go (+ future: npm, PyPI, …) | No — package-level only. |
+
+**Honest Go-coverage note:** OSV.dev's "Go" ecosystem dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go modules, OSV adds **near-zero additional advisory coverage** — the merge layer collapses OSV entries back onto existing Go-DB symbol-level advisories. This is by design and expected. OSV is enabled by default because it exercises the multi-source dedup/merge path and makes adding non-Go ecosystems cheap later. The value is **architectural**, not coverage-based.
+
+**Only the Go vuln DB carries symbol-level data.** OSV Go entries are package-level (`SymbolLevel=false`). When the same advisory appears in both sources, the Go-DB (symbol-level) representative is kept and OSV is attributed in `Sources`. No precision is ever invented: merging never fabricates symbol data from a package-level entry.
+
+**Multi-source dedup:** The same CVE appearing from Go-DB + OSV collapses to one merged advisory via alias matching (`{ID} ∪ Aliases` set intersection). The merged advisory carries `Sources: ["go-vuln-db", "osv.dev"]` for auditability. Output is deterministic (stable-sorted by advisory ID).
 
 **Implication:** `anst-analyzer` and `govulncheck` use the same advisory symbol data for Go modules. The differentiation is SARIF `codeFlows`, policy-as-code gating, and the plugin architecture — not symbol resolution precision.
 
 ### Live fetch and caching
 
-`anst-analyzer scan` fetches advisory data from `vuln.go.dev` automatically on first run and caches it locally. Subsequent scans check the DB `modified` timestamp and re-fetch only when the live DB is newer. Use `--update` to force a re-fetch.
+`anst-analyzer scan` fetches advisory data from both enabled sources automatically on first run and caches them locally. Each source is refreshed independently before the per-dependency query loop. Use `--update` to force a re-fetch of all enabled sources.
 
-**Failure handling at the fetch boundary:** A fetch failure (network error, HTTP 5xx, partial download) marks the scan **incomplete** (exit 3), never silently produces a clean pass. If the staleness probe fails but a valid local cache exists, the scan uses the existing cache, prints a warning, and exits 3 (incomplete). See `docs/usage.md` for the three advisory-data modes.
+**Failure handling at the fetch boundary:** A Go vuln DB fetch failure with no usable cache exits 3 (never a silent clean pass). An OSV bundle fetch failure (secondary source) emits a warning to stderr, marks the scan **incomplete** (exit 3), but does not abort — Go-DB findings still gate. If the staleness probe for Go-DB fails but a valid local cache exists, the scan uses the existing cache, prints a warning, and exits 3 (incomplete). See `docs/usage.md` for the advisory-data modes and `--source` details.
 
 ## Entry-Point Detection
 

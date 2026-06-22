@@ -20,16 +20,29 @@ import (
 
 // scanFlags holds all flag values for the scan sub-command.
 type scanFlags struct {
-	format     string
-	policyFile string
-	dbSnapshot string
-	offline    bool
-	update     bool
-	failOn     string
-	goos       string
-	goarch     string
-	tags       string
-	pluginBin  string
+	format         string
+	policyFile     string
+	dbSnapshot     string
+	offline        bool
+	update         bool
+	failOn         string
+	goos           string
+	goarch         string
+	tags           string
+	pluginBin      string
+	source         string // comma-separated source names; default "go-vuln-db,osv"
+	sourceExplicit bool   // true when --source was explicitly set by the user
+}
+
+// sourceAliases maps user-facing --source flag tokens to canonical advisory
+// source names (the SourceXxx constants in the advisory package).
+// "go-vuln-db" is both the flag token and the canonical name (SourceGoVulnDB).
+// "osv" is the short flag token; its canonical name is "osv.dev" (SourceOSV).
+// The full canonical name "osv.dev" is also accepted for forward compatibility.
+var sourceAliases = map[string]string{
+	"go-vuln-db": advisory.SourceGoVulnDB, // SourceGoVulnDB = "go-vuln-db"
+	"osv":        advisory.SourceOSV,      // short alias for "osv.dev"
+	"osv.dev":    advisory.SourceOSV,      // SourceOSV = "osv.dev" (full canonical)
 }
 
 // newScanCmd returns the cobra sub-command for `anst-analyzer scan`.
@@ -67,6 +80,7 @@ Exit codes:
 				return fmt.Errorf("resolve module root %q: %w", moduleRoot, err)
 			}
 
+			flags.sourceExplicit = cmd.Flags().Changed("source")
 			code := runScan(cmd.Context(), abs, flags)
 			if code != policy.ExitPass {
 				os.Exit(code)
@@ -86,6 +100,8 @@ Exit codes:
 	fs.StringVar(&flags.goarch, "goarch", "", "GOARCH override for build config")
 	fs.StringVar(&flags.tags, "tags", "", "comma-separated build tags")
 	fs.StringVar(&flags.pluginBin, "plugin-binary", "", "path to pre-built go-reachability plugin binary (skip build)")
+	fs.StringVar(&flags.source, "source", "go-vuln-db,osv",
+		"comma-separated advisory sources to query: go-vuln-db, osv (default: both)")
 
 	return cmd
 }
@@ -101,44 +117,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	// ── 2. Load advisory cache ────────────────────────────────────────────────
-	//
-	// Three distinct modes:
-	//   a) --db-snapshot <dir>  → pin to that dir (read-only, never fetched).
-	//   b) --offline            → read the writable cache dir; no network.
-	//   c) default (online)     → refresh the writable cache dir from vuln.go.dev.
-	//
-	// Note: previously the code passed the writable cache dir as SnapshotPin,
-	// which silently disabled all fetching. The fix is to use Dir (writable) for
-	// the default path and SnapshotPin only when --db-snapshot is given.
-	var cacheCfg advisory.CacheConfig
-	cacheCfg.StalenessWarning = advisory.DefaultStalenessWarning
-
-	if flags.dbSnapshot != "" {
-		// Pinned snapshot: read-only, manifest-verified, never fetched.
-		cacheCfg.SnapshotPin = flags.dbSnapshot
-		cacheCfg.Offline = true // pins are always read-only
-	} else {
-		// Writable cache dir (online default or --offline).
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", err)
-			return policy.ExitOperationalError
-		}
-		cacheCfg.Dir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
-		cacheCfg.Offline = flags.offline
-		if !flags.offline {
-			// Online mode: wire the fetcher for Refresh.
-			// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL.
-			// This seam is used in hermetic tests to inject a mock server;
-			// it must not be set in production deployments.
-			f := advisory.NewFetcher()
-			if override := os.Getenv("ANST_VULN_DB_URL"); override != "" {
-				f.BaseURL = override
-			}
-			cacheCfg.Fetcher = f
-			cacheCfg.ForceUpdate = flags.update
-		}
+	// ── 2. Validate --source flag ─────────────────────────────────────────────
+	selectedSources, sourceErr := parseSourceFlag(flags.source)
+	if sourceErr != nil {
+		fmt.Fprintf(os.Stderr, "anst-analyzer scan: --source: %v\n", sourceErr)
+		return policy.ExitOperationalError
 	}
 
 	// ── 3. Resolve module dependencies ────────────────────────────────────────
@@ -148,48 +131,156 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	// ── 4. Online refresh before the per-dep Get loop ─────────────────────────
+	// ── 4. Build advisory sources and refresh ─────────────────────────────────
 	//
-	// Refresh is a no-op for pinned snapshots, offline mode, and when no Fetcher
-	// is configured. In online mode it populates / refreshes the writable Dir for
-	// the resolved module set so that subsequent Get calls are network-free.
+	// Each enabled source is cache-backed (Go-DB via Cache; OSV via
+	// OSVBundleSource). Both honour --offline (no Refresh) and --db-snapshot
+	// (Go-DB snapshot pin; OSV falls back to its existing cache dir offline).
 	//
-	// Failure handling ("unknown ≠ safe"):
-	//   - RefreshFallbackWarning: probe failed but valid local cache exists →
-	//     print warning and mark scan incomplete (not a silent clean pass).
-	//   - Any other error (no cache + fetch failed) → exit 3.
-	cache := advisory.NewCache(cacheCfg)
-	incomplete := false
-
-	if err := cache.Refresh(ctx, modPaths(deps)); err != nil {
-		var fallback *advisory.RefreshFallbackWarning
-		if errors.As(err, &fallback) {
-			// Degraded mode: probe failed but existing cache is usable.
-			// Surface the warning and mark incomplete so the scan never exits 0.
-			fmt.Fprintf(os.Stderr, "warning: %s\n", fallback.Warning)
-			incomplete = true
-		} else {
-			// Hard failure: no usable cache and fetch failed — abort.
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory refresh: %v\n", err)
-			return policy.ExitOperationalError
-		}
+	// Refresh is called once per enabled source before the per-dep query loop so
+	// that Query calls are network-free. A secondary-source Refresh failure → warn
+	// + incomplete (never abort); Go-DB Refresh failure → abort (primary source).
+	//
+	// Three advisory-data modes:
+	//   a) --db-snapshot <dir>  → pin Go-DB to that dir (read-only, never fetched).
+	//   b) --offline            → read existing caches; no network.
+	//   c) default (online)     → refresh both caches from upstream.
+	cacheDir, cacheErr := os.UserCacheDir()
+	if cacheErr != nil {
+		fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+		return policy.ExitOperationalError
 	}
 
-	// ── 5. Query advisory service for each dep ────────────────────────────────
+	incomplete := false
+	var namedSources []advisory.NamedSource
+
+	// ── 4a. Go vuln DB source ─────────────────────────────────────────────────
+	if selectedSources[advisory.SourceGoVulnDB] {
+		var cacheCfg advisory.CacheConfig
+		cacheCfg.StalenessWarning = advisory.DefaultStalenessWarning
+
+		if flags.dbSnapshot != "" {
+			// Pinned snapshot: read-only, manifest-verified, never fetched.
+			cacheCfg.SnapshotPin = flags.dbSnapshot
+			cacheCfg.Offline = true
+		} else {
+			cacheCfg.Dir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
+			cacheCfg.Offline = flags.offline
+			if !flags.offline {
+				// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL (test seam).
+				f := advisory.NewFetcher()
+				if override := os.Getenv("ANST_VULN_DB_URL"); override != "" {
+					f.BaseURL = override
+				}
+				cacheCfg.Fetcher = f
+				cacheCfg.ForceUpdate = flags.update
+			}
+		}
+
+		goCache := advisory.NewCache(cacheCfg)
+
+		// Refresh Go-DB (no-op for pinned/offline/no-fetcher).
+		// Failure handling ("unknown ≠ safe"):
+		//   - RefreshFallbackWarning: probe failed but valid cache exists → warn + incomplete.
+		//   - Other error (no cache + fetch failed) → abort (primary source).
+		if refreshErr := goCache.Refresh(ctx, modPaths(deps)); refreshErr != nil {
+			var fallback *advisory.RefreshFallbackWarning
+			if errors.As(refreshErr, &fallback) {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", fallback.Warning)
+				incomplete = true
+			} else {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory refresh: %v\n", refreshErr)
+				return policy.ExitOperationalError
+			}
+		}
+
+		namedSources = append(namedSources, advisory.NamedSource{
+			Name: advisory.SourceGoVulnDB,
+			S:    goCache,
+		})
+	}
+
+	// ── 4b. OSV bundle source ─────────────────────────────────────────────────
+	if selectedSources[advisory.SourceOSV] {
+		osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+
+		osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
+		// ANST_OSV_DB_URL overrides the default OSV GCS base URL (test seam).
+		// BaseURL is an exported field on OSVBundleSource for exactly this purpose.
+		if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+			osvSrc.BaseURL = override
+		}
+		osvSrc.ForceUpdate = flags.update
+
+		// Refresh OSV (secondary source): failure → warn + incomplete, not abort.
+		// --offline and --db-snapshot skip the Refresh; OSV falls back to its
+		// existing cache dir if populated, or returns empty (nil,nil) if not.
+		// A missing OSV cache in offline mode is recorded as incomplete (not silent).
+		if !flags.offline && flags.dbSnapshot == "" {
+			if refreshErr := osvSrc.Refresh(ctx, advisory.EcosystemGo); refreshErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: OSV source refresh failed (%s): %v; scan marked incomplete\n",
+					advisory.SourceOSV, refreshErr)
+				incomplete = true
+				// Do not add OSV to sources when its refresh failed — it has no usable cache.
+				goto skipOSV
+			}
+		} else if flags.offline || flags.dbSnapshot != "" {
+			// Offline/snapshot mode: check whether the OSV cache exists.
+			// If missing:
+			//   - When --source was explicitly set to include osv → warn + incomplete
+			//     ("unknown ≠ safe": the user specifically requested OSV coverage).
+			//   - When --source was not explicitly set (OSV is the default) → silently
+			//     skip. This preserves backward compat for callers using --db-snapshot
+			//     (a Go-DB-only mode) who never populated an OSV cache.
+			if !osvCacheDirExists(osvCacheDir, advisory.EcosystemGo) {
+				if flags.sourceExplicit {
+					fmt.Fprintf(os.Stderr,
+						"warning: OSV cache not populated at %s (run without --offline to fetch); OSV source skipped, scan marked incomplete\n",
+						filepath.Join(osvCacheDir, advisory.EcosystemGo))
+					incomplete = true
+				}
+				goto skipOSV
+			}
+		}
+
+		namedSources = append(namedSources, advisory.NamedSource{
+			Name: advisory.SourceOSV,
+			S:    osvSrc,
+		})
+	skipOSV:
+	}
+
+	// ── 5. Query advisory sources for each dep ────────────────────────────────
+	multiSrc := advisory.NewMultiSource(namedSources...)
+
 	var protoAdvs []*anstv1.Advisory
 	for _, dep := range deps {
-		advs, err := cache.Get(ctx, advisory.Package{Ecosystem: advisory.EcosystemGo, Name: dep.Path}, dep.Version)
-		var staleWarn *advisory.StalenessWarningError
-		if err != nil && !errors.As(err, &staleWarn) {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
-				dep.Path, dep.Version, err)
+		pkg := advisory.Package{Ecosystem: advisory.EcosystemGo, Name: dep.Path}
+		advs, queryErr := multiSrc.Query(ctx, pkg, dep.Version)
+
+		// A *SourcesIncompleteError means one or more sources failed for this dep.
+		// Warn + mark incomplete, but still gate on the advisories that succeeded.
+		var srcIncomplete *advisory.SourcesIncompleteError
+		if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
+			for i, name := range srcIncomplete.FailedSources {
+				fmt.Fprintf(os.Stderr, "warning: advisory source %q failed for %s@%s: %v\n",
+					name, dep.Path, dep.Version, srcIncomplete.Errors[i])
+			}
 			incomplete = true
-			continue
+		} else if queryErr != nil {
+			// A non-StalenessWarning, non-SourcesIncomplete error (e.g. cache corrupt).
+			var staleWarn *advisory.StalenessWarningError
+			if errors.As(queryErr, &staleWarn) {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
+				advs = staleWarn.Advisories
+			} else {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
+					dep.Path, dep.Version, queryErr)
+				incomplete = true
+				continue
+			}
 		}
-		if staleWarn != nil {
-			fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
-			advs = staleWarn.Advisories
-		}
+
 		for i := range advs {
 			protoAdvs = append(protoAdvs, advs[i].ToProto())
 		}
@@ -465,6 +556,37 @@ func extractJSONStringField(s, key string) string {
 		return ""
 	}
 	return rest[:end]
+}
+
+// parseSourceFlag validates and parses the --source comma list into a set of
+// enabled canonical source names. Accepts both the short flag tokens (e.g. "osv")
+// and the full canonical names (e.g. "osv.dev"). Returns an error when any
+// token is unrecognised or the resulting set is empty.
+func parseSourceFlag(flag string) (map[string]bool, error) {
+	enabled := make(map[string]bool)
+	for _, raw := range strings.Split(flag, ",") {
+		token := strings.TrimSpace(raw)
+		if token == "" {
+			continue
+		}
+		canonical, ok := sourceAliases[token]
+		if !ok {
+			return nil, fmt.Errorf("unknown source %q: must be one of go-vuln-db, osv", token)
+		}
+		enabled[canonical] = true
+	}
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("at least one source must be enabled; got %q", flag)
+	}
+	return enabled, nil
+}
+
+// osvCacheDirExists returns true when the per-ecosystem subdirectory inside
+// osvRoot exists and is a directory. Used to detect an unpopulated OSV cache
+// in offline mode so we can warn + mark incomplete rather than silently skip.
+func osvCacheDirExists(osvRoot, ecosystem string) bool {
+	info, err := os.Stat(filepath.Join(osvRoot, ecosystem))
+	return err == nil && info.IsDir()
 }
 
 // buildPlugin compiles the go-reachability plugin into a temp directory.

@@ -302,6 +302,13 @@ func (c *Cache) get(ctx context.Context, pkg Package, version string) ([]Advisor
 	return advs, nil
 }
 
+// Query implements Source by delegating to Get. It allows Cache to be used
+// directly as a Source in a MultiSource composition without a wrapper type.
+// The method signature matches Source.Query exactly.
+func (c *Cache) Query(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
+	return c.Get(ctx, pkg, version)
+}
+
 // ─── Online refresh ───────────────────────────────────────────────────────────
 
 // Refresh ensures the writable cache Dir is populated and up-to-date for the

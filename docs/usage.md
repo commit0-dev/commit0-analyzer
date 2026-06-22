@@ -38,6 +38,7 @@ Scans a Go module for reachable dependency vulnerabilities.
 | `--offline` | `false` | Disable network access; use existing writable cache or `--db-snapshot` |
 | `--update` | `false` | Force re-fetch of advisory data even when the cached version is current |
 | `--fail-on` | `high` | Minimum severity to fail: `low`, `medium`, `high`, `critical` |
+| `--source` | `go-vuln-db,osv` | Comma-separated advisory sources: `go-vuln-db`, `osv` (see below) |
 | `--goos` | _(host GOOS)_ | GOOS override for build config |
 | `--goarch` | _(host GOARCH)_ | GOARCH override for build config |
 | `--tags` | _(none)_ | Comma-separated build tags |
@@ -53,35 +54,59 @@ Scans a Go module for reachable dependency vulnerabilities.
 
 Code `2` is intentionally unused (reserved by Go's runtime panic exit and govulncheck).
 
+#### Advisory Sources
+
+`anst-analyzer` queries one or more advisory sources per scan. Use `--source` to select which sources are active:
+
+| Source token | Description |
+|---|---|
+| `go-vuln-db` | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
+| `osv` | OSV.dev offline bundle (`osv-vulnerabilities.storage.googleapis.com/Go/all.zip`). Package-level data for Go; primarily valuable as an **architectural seam** for future non-Go ecosystems (npm, PyPI, …). |
+
+**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot).
+
+**Honest coverage note:** For Go modules, OSV.dev's "Go" ecosystem dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). OSV adds **near-zero additional coverage** for Go — the merge layer will mostly dedup OSV entries back onto the existing Go-DB symbol-level advisories. The value of enabling OSV for Go is **architectural**: it exercises the multi-source merge path and makes adding non-Go ecosystems cheap later.
+
+**Cache directories:**
+- Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
+- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/` (Linux) / `~/Library/Caches/anst-analyzer/osv/Go/` (macOS).
+
 #### Advisory DB Modes
 
 `anst-analyzer scan` operates in three distinct advisory-data modes:
 
 | Mode | Flags | Behaviour |
 |------|-------|-----------|
-| **Online** (default) | _(none)_ | Fetches advisories from `vuln.go.dev` into a writable local cache (`$XDG_CACHE_HOME/anst-analyzer/vuln-db` on Linux/macOS). Only re-fetches when the DB has a newer `modified` timestamp than the cached version. |
-| **Offline** | `--offline` | Reads the existing writable cache; never contacts the network. Fails clearly (exit 3) when the cache is absent or unverifiable. |
-| **Pinned snapshot** | `--db-snapshot <dir>` | Reads a pre-built snapshot directory; never fetches or mutates it. Verified against its manifest digest on every scan. Use this for reproducible CI pipelines. |
+| **Online** (default) | _(none)_ | Fetches advisories from both enabled sources into writable local caches. Only re-fetches when the upstream data is newer than the cached version. |
+| **Offline** | `--offline` | Reads existing caches; never contacts the network. If `--source` explicitly includes `osv` and the OSV cache is absent, the scan is marked **incomplete** (exit 3). |
+| **Pinned snapshot** | `--db-snapshot <dir>` | Pins the Go vuln DB to a pre-built snapshot directory (read-only, manifest-verified). OSV is silently skipped when its cache is absent (backward-compatible; use `--source go-vuln-db` to be explicit). |
 
-**First-run note:** The first `scan` without `--db-snapshot` downloads advisory data from `vuln.go.dev`. This adds network latency once per advisory-DB version update. Subsequent scans reuse the local cache and only check the DB `modified` timestamp.
+**First-run note:** The first `scan` without `--db-snapshot` downloads advisory data from `vuln.go.dev` and the OSV bundle. This adds network latency once per advisory-DB version update. Subsequent scans reuse the local caches.
 
-**Failure handling:** A fetch failure marks the scan **incomplete** (exit 3), never a silent pass. If the staleness probe fails but a valid local cache exists, the scan uses the existing cache, prints a warning to stderr, and exits 3 (incomplete). A full fetch failure with no cache also exits 3.
+**Failure handling:** A fetch failure marks the scan **incomplete** (exit 3), never a silent pass. Secondary-source failures (e.g. OSV download error) warn to stderr and mark the scan incomplete but do **not** abort — the primary (Go vuln DB) findings still gate. A Go vuln DB failure with no usable cache exits 3.
 
 #### Examples
 
 ```sh
-# Online mode (default): fetch from vuln.go.dev on first run, use cache thereafter.
+# Online mode (default): fetch from both sources on first run, use caches thereafter.
 anst-analyzer scan
 
-# Force a re-fetch even when the cached version is current.
+# Query only the Go vuln DB (skip OSV).
+anst-analyzer scan --source go-vuln-db
+
+# Force a re-fetch of all enabled sources even when caches are current.
 anst-analyzer scan --update
 
-# Offline mode: use existing local cache, no network access.
+# Offline mode: use existing local caches, no network access.
 anst-analyzer scan --offline
 
-# Pinned snapshot for reproducible CI (read-only, never fetched).
+# Offline with only Go vuln DB (OSV cache not needed).
+anst-analyzer scan --offline --source go-vuln-db
+
+# Pinned snapshot for reproducible CI (Go-DB read-only, never fetched).
 anst-analyzer scan /path/to/mymodule \
   --db-snapshot /path/to/vuln-db-snapshot \
+  --source go-vuln-db \
   --offline
 
 # JSON output, gate on CRITICAL only.
@@ -93,9 +118,11 @@ anst-analyzer scan --format table --policy policy.yaml
 # Offline determinism: two runs with same inputs produce byte-identical SARIF.
 GOPROXY=off anst-analyzer scan /path/to/module \
   --db-snapshot /pinned/snapshot \
+  --source go-vuln-db \
   --offline > run1.sarif
 GOPROXY=off anst-analyzer scan /path/to/module \
   --db-snapshot /pinned/snapshot \
+  --source go-vuln-db \
   --offline > run2.sarif
 diff run1.sarif run2.sarif   # must be empty
 ```
