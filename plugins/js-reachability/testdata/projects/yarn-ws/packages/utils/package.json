@@ -1,0 +1,7 @@
+{
+  "name": "@yarn-ws/utils",
+  "version": "1.0.0",
+  "dependencies": {
+    "semver": "^7.6.0"
+  }
+}

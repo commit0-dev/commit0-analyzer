@@ -14,7 +14,8 @@
     "@bufbuild/protobuf": "^2.12.0",
     "@grpc/grpc-js": "^1.12.0",
     "@grpc/proto-loader": "^0.7.15",
-    "oxc-parser": "0.72.3"
+    "oxc-parser": "0.72.3",
+    "yaml": "2.7.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

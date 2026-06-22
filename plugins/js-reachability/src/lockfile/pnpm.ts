@@ -1,0 +1,211 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { parse as parseYaml } from "yaml";
+import type { IncompleteEntry, LockfileGraph, ResolvedPackage } from "../project/model.js";
+
+export interface PnpmParseResult {
+  graph: LockfileGraph;
+  /** Importer map: workspace-relative-dir → { depName → resolved version string } */
+  importers: Map<string, Map<string, string>>;
+  /** True when the lockfile exists but could not be parsed. */
+  corrupt: boolean;
+  /**
+   * Incomplete entries for packages whose on-disk store path could not be
+   * resolved (e.g. dangling symlink / missing .pnpm store entry). M4.
+   */
+  incomplete: import("../project/model.js").IncompleteEntry[];
+}
+
+/**
+ * Parse pnpm-lock.yaml (lockfileVersion 5, 6, 7).
+ *
+ * The `packages` block uses content-addressed keys of the form:
+ *   /name@version                    (lockfileVersion ≤ 6)
+ *   /name@version(peer@ver)          (peer-dep suffix — must be stripped before key lookup)
+ *   name@version                     (lockfileVersion 7+, no leading slash)
+ *
+ * The `importers` block records per-workspace resolved versions:
+ *   importers.<wsRelDir>.dependencies.<dep>.version → "4.17.21" or "4.17.21(react@18)"
+ *
+ * Resolution strategy (C1 fix):
+ *   For each workspace we read importers.<wsRelDir>.dependencies.<dep>.version,
+ *   strip the peer suffix, and look up "/name@version" in packages. This gives the
+ *   EXACT version per workspace instead of first-name-match across all packages.
+ *
+ * On-disk location in the virtual store:
+ *   <root>/node_modules/.pnpm/<name>@<version>/node_modules/<name>
+ *
+ * We follow the symlink (realpath) so callers get the canonical path.
+ * On missing lockfile returns an empty/clean result — never throws.
+ * On corrupt lockfile returns corrupt=true with empty graph.
+ */
+export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> {
+  const empty: PnpmParseResult = {
+    graph: new Map(),
+    importers: new Map(),
+    corrupt: false,
+    incomplete: [],
+  };
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(root, "pnpm-lock.yaml"), "utf8");
+  } catch {
+    return empty;
+  }
+
+  let lock: Record<string, unknown>;
+  try {
+    lock = (parseYaml(raw) as Record<string, unknown>) ?? {};
+  } catch {
+    // File exists but YAML is unparseable
+    return { ...empty, corrupt: true };
+  }
+
+  const graph: LockfileGraph = new Map();
+  const incomplete: IncompleteEntry[] = [];
+
+  // ── 1. Parse packages block ───────────────────────────────────────────────
+  const packagesRaw = lock["packages"] as Record<string, unknown> | undefined;
+  if (packagesRaw && typeof packagesRaw === "object") {
+    for (const rawKey of Object.keys(packagesRaw)) {
+      // Normalise: ensure leading slash
+      const key = rawKey.startsWith("/") ? rawKey : `/${rawKey}`;
+
+      // Parse name and version, stripping peer-dep suffix (C2 fix)
+      const parsed = parsePackageKey(key);
+      if (!parsed) continue;
+
+      const { name, version } = parsed;
+
+      // Build the canonical store path
+      const storeEntry = `${name}@${version}`;
+      const storeDir = path.join(
+        root,
+        "node_modules",
+        ".pnpm",
+        storeEntry,
+        "node_modules",
+        name
+      );
+
+      let resolvedDir = storeDir;
+      try {
+        resolvedDir = await fs.realpath(storeDir);
+      } catch {
+        // M4: store entry absent or dangling symlink — surface as incomplete
+        // so callers know the dir path is a fabricated fallback, not real.
+        incomplete.push({
+          scope: `${name}@${version}`,
+          reason: `pnpm store path not found or dangling symlink: ${storeDir}`,
+        });
+      }
+
+      const pkg: ResolvedPackage = { name, version, dir: resolvedDir };
+      // Store under the normalised key (with leading slash, including peer suffix)
+      graph.set(key, pkg);
+    }
+  }
+
+  // ── 2. Parse importers block ──────────────────────────────────────────────
+  // Produces a map: wsRelDir → (depName → resolvedVersion string without peer suffix)
+  // This is the C1 fix: per-workspace exact version from importers.
+  const importersMap: Map<string, Map<string, string>> = new Map();
+
+  const importersRaw = lock["importers"] as
+    | Record<string, unknown>
+    | undefined;
+  if (importersRaw && typeof importersRaw === "object") {
+    for (const [wsDir, wsData] of Object.entries(importersRaw)) {
+      const depMap = new Map<string, string>();
+
+      const wsObj = wsData as Record<string, unknown> | undefined;
+      if (!wsObj) continue;
+
+      // Merge all dep categories that get installed
+      const depCategories = [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+      ] as const;
+      for (const category of depCategories) {
+        const deps = wsObj[category] as
+          | Record<string, unknown>
+          | undefined;
+        if (!deps || typeof deps !== "object") continue;
+
+        for (const [depName, depData] of Object.entries(deps)) {
+          const info = depData as Record<string, unknown> | undefined;
+          if (!info) continue;
+
+          const versionRaw = info["version"] as string | undefined;
+          if (!versionRaw) continue;
+
+          // Strip peer suffix from version string: "4.17.21(react@18.0.0)" → "4.17.21"
+          const version = stripPeerSuffix(versionRaw);
+
+          // Skip link: entries — those are local workspace references, not external deps
+          if (version.startsWith("link:")) continue;
+
+          depMap.set(depName, version);
+        }
+      }
+      importersMap.set(wsDir, depMap);
+    }
+  }
+
+  // Sort incomplete deterministically
+  incomplete.sort((a, b) => a.scope.localeCompare(b.scope));
+
+  return { graph, importers: importersMap, corrupt: false, incomplete };
+}
+
+/**
+ * Strip the peer-dependency context suffix from a pnpm version string.
+ * "4.17.21(react@18.0.0)" → "4.17.21"
+ * "4.17.21"               → "4.17.21"  (no-op)
+ */
+function stripPeerSuffix(v: string): string {
+  const parenIdx = v.indexOf("(");
+  return parenIdx >= 0 ? v.slice(0, parenIdx) : v;
+}
+
+/**
+ * Extract package name and version from a pnpm package key.
+ * Handles peer-dep suffixes (C2 fix) and scoped names.
+ *
+ * Key forms:
+ *   /lodash@4.17.21
+ *   /lodash@4.17.21(react@18.0.0)
+ *   /@scope/pkg@1.0.0
+ *   /@scope/pkg@1.0.0(peer@2.0.0)
+ */
+export function parsePackageKey(
+  key: string
+): { name: string; version: string } | null {
+  // Strip leading slash
+  let withoutSlash = key.startsWith("/") ? key.slice(1) : key;
+
+  // Strip peer-dep suffix: strip everything from the first "(" that is NOT
+  // inside the package name (i.e., after the version part starts).
+  // The name never contains "(", so we can safely strip from the first "(".
+  const parenIdx = withoutSlash.indexOf("(");
+  if (parenIdx >= 0) {
+    withoutSlash = withoutSlash.slice(0, parenIdx);
+  }
+
+  // Now withoutSlash is "name@version" or "@scope/name@version"
+  // Find the "@" that separates version from name:
+  //   For scoped packages like @scope/pkg@1.0.0, the first "@" is part of the name.
+  //   We want the LAST "@" that comes after the package name boundary.
+  //   Since package names may not contain "@" except as the leading scope indicator,
+  //   the version "@" is the last "@" in the string.
+  const atIdx = withoutSlash.lastIndexOf("@");
+  if (atIdx <= 0) return null;
+
+  const name = withoutSlash.slice(0, atIdx);
+  const version = withoutSlash.slice(atIdx + 1);
+
+  if (!name || !version) return null;
+  return { name, version };
+}
