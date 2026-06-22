@@ -34,10 +34,26 @@ export interface Workspace {
   localDeps: string[];
 }
 
+/**
+ * Category of incomplete signal. Error-level kinds (lockfile-corrupt) must
+ * always mark the scan incomplete regardless of declared dep count. Advisory
+ * kinds (dep-unresolved, lockfile-missing) are suppressible when no deps are
+ * declared, because there is nothing to resolve.
+ */
+export type IncompleteKind =
+  | "lockfile-corrupt"    // lockfile present but unparseable — always an error
+  | "lockfile-missing"    // no lockfile found for a manager that uses one
+  | "dep-unresolved"      // declared runtime dep not found in lockfile graph
+  | "manager-unknown"     // could not detect package manager
+  | "workspace-glob-empty" // workspace glob matched no packages
+  | "other";              // catch-all for unexpected incomplete causes
+
 /** Diagnostic entry — signals that a scope could not be fully resolved. */
 export interface IncompleteEntry {
   scope: string;
   reason: string;
+  /** Category used by the CLI to decide whether the signal suppresses a clean exit. */
+  kind: IncompleteKind;
 }
 
 /** Resolved project model: manager, workspaces, and unresolved scopes. */

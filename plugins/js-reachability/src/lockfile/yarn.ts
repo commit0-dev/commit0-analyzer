@@ -20,11 +20,10 @@ export interface YarnParseResult {
  *
  * Berry (v2+) uses a YAML-based format with a "__metadata" block.
  * We detect berry by the presence of `__metadata:` and parse versions from it,
- * but surface an incomplete entry because PnP path resolution is out of scope
- * (H1 fix).
+ * but surface an incomplete entry because PnP path resolution is out of scope.
  *
  * A corrupt lockfile (exists but unrecognizable structure — e.g. no headers found
- * and no __metadata) returns corrupt=true (H2 fix).
+ * and no __metadata) returns corrupt=true.
  *
  * Returns a YarnParseResult. On missing file returns empty/clean. Never throws.
  */
@@ -109,9 +108,9 @@ function parseV1Lockfile(root: string, raw: string): YarnParseResult {
     i++;
   }
 
-  // H2: if the file existed but we found no valid blocks, it is corrupt.
+  // If the file existed but we found no valid blocks, it is corrupt.
   // A file with only comments/blanks is considered corrupt since a valid
-  // yarn.lock always has at least the header comment + one block.
+  // yarn.lock always has at least the header comment plus one block.
   const hasContent = raw
     .split("\n")
     .some((l) => l.trim() !== "" && !l.startsWith("#"));
@@ -126,8 +125,8 @@ function parseV1Lockfile(root: string, raw: string): YarnParseResult {
 /**
  * Parse yarn berry (v2+) lockfile.
  * Berry uses YAML with package blocks keyed by specifier strings.
- * We extract version from each block; PnP path resolution is out of scope.
- * Surfaces an incomplete entry to signal this limitation (H1 fix).
+ * We extract version from each block; PnP path resolution is out of scope,
+ * so an incomplete entry is surfaced to signal the limitation.
  */
 function parseBerryLockfile(root: string, raw: string): YarnParseResult {
   const graph: LockfileGraph = new Map();
@@ -185,7 +184,8 @@ function parseBerryLockfile(root: string, raw: string): YarnParseResult {
     i++;
   }
 
-  // H1: always surface an incomplete entry for berry PnP
+  // Berry PnP path resolution is out of scope: surface an incomplete entry so
+  // callers know on-disk dirs may not reflect the actual PnP installation.
   const incomplete: IncompleteEntry[] = [
     {
       scope: root,
@@ -193,6 +193,7 @@ function parseBerryLockfile(root: string, raw: string): YarnParseResult {
         "Yarn berry (v2+) detected: PnP path resolution is out of scope; " +
         "package versions are resolved from the lockfile but on-disk dirs " +
         "may not reflect the actual PnP installation.",
+      kind: "other",
     },
   ];
 

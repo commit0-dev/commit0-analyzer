@@ -41,6 +41,7 @@ export async function detectManager(root: string): Promise<DetectResult> {
         reason:
           `No recognized lockfile found in ${root}. ` +
           "Expected pnpm-lock.yaml, yarn.lock, package-lock.json, or npm-shrinkwrap.json.",
+        kind: "manager-unknown",
       },
     ],
   };

@@ -3,11 +3,11 @@
  *
  * Three subcommand modes:
  *   serve       (default) — start the gRPC plugin server for the host
- *   --list-deps           — list npm dependencies (stub; filled in Phase 3)
- *   --analyze             — run standalone analysis (stub; filled in Phase 5)
+ *   --list-deps           — enumerate npm dependencies from the project model
+ *   --analyze             — run standalone reachability analysis
  *
- * Each mode delegates to its own module so later phases can extend those
- * modules without touching this file.
+ * Each mode delegates to its own module so the entry point stays stable
+ * as individual modes evolve.
  */
 
 // Sidecar shim must be the first import so the oxc .node resolution is

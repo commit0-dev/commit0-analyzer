@@ -60,15 +60,16 @@ type osvImport struct {
 
 // ─── OSV parser ──────────────────────────────────────────────────────────────
 
-// parseOSVRecord parses a single OSV JSON record into an internal Advisory.
-// It extracts:
+// parseOSVRecord parses a single OSV JSON record into an internal Advisory
+// for the specified ecosystem. It extracts:
 //   - version ranges from affected[].ranges[] (SEMVER type only)
 //   - symbols from affected[].ecosystem_specific.imports[].symbols
 //   - SymbolLevel=true when any import entry has at least one symbol
 //
-// The returned Advisory has Sources=["go-vuln-db"].
-// Only "Go" ecosystem entries are processed; others are silently skipped.
-func parseOSVRecord(data []byte) (*Advisory, error) {
+// Only affected entries whose Package.Ecosystem matches the supplied ecosystem
+// (case-insensitive) are processed; others are silently skipped.
+// The returned Advisory has Sources=["go-vuln-db"] (overridden by dirSource.query).
+func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 	var rec osvRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return nil, fmt.Errorf("advisory: parse OSV record: %w", err)
@@ -82,7 +83,7 @@ func parseOSVRecord(data []byte) (*Advisory, error) {
 	}
 
 	for _, aff := range rec.Affected {
-		if !strings.EqualFold(aff.Package.Ecosystem, "go") {
+		if !strings.EqualFold(aff.Package.Ecosystem, ecosystem) {
 			continue
 		}
 
@@ -194,7 +195,7 @@ func (d *dirSource) query(ctx context.Context, pkg Package, version string) ([]A
 			return nil, fmt.Errorf("advisory: read %q: %w", entry.Name(), err)
 		}
 
-		adv, err := parseOSVRecord(data)
+		adv, err := parseOSVRecord(data, pkg.Ecosystem)
 		if err != nil {
 			// Corrupt advisory: skip with a warning rather than failing the
 			// entire query. The caller gets a partial result but not a hard error
@@ -211,10 +212,27 @@ func (d *dirSource) query(ctx context.Context, pkg Package, version string) ([]A
 			continue
 		}
 
-		if adv.Module != pkg.Name {
+		// For npm, names are case-insensitive and OSV records store them lowercase.
+		// Normalise both sides before comparing so that mixed-case lockfile entries
+		// (e.g. "Lodash") match OSV records that store "lodash".
+		// For all other ecosystems the comparison is exact (Go module paths are
+		// case-sensitive).
+		advModule := adv.Module
+		queryName := pkg.Name
+		if pkg.Ecosystem == EcosystemNPM {
+			advModule = normalizeNPMPackageName(advModule)
+			queryName = normalizeNPMPackageName(queryName)
+		}
+		if advModule != queryName {
 			continue
 		}
-		if adv.AffectsVersion(version) {
+		// Normalise the query version to the canonical "vX.Y.Z" form expected by
+		// versionInRange / golang.org/x/mod/semver. Go module versions already carry
+		// the "v" prefix; npm lockfile versions are bare semver (e.g. "1.5.0") and
+		// need it added. The canonical() helper adds "v" when absent and is a no-op
+		// for already-canonical versions.
+		queryVersion := canonical(version)
+		if adv.AffectsVersion(queryVersion) {
 			adv.Ecosystem = pkg.Ecosystem
 			// Override Sources with the caller's attribution tag so that the
 			// same parseOSVRecord result can carry different provenance depending

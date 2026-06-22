@@ -1,6 +1,6 @@
 /**
  * --analyze mode: standalone reachability analysis.
- * Stub — implementation added in Phase 5.
+ * Not yet implemented — exits 1 with a clear error message.
  */
 
 export function run(): void {

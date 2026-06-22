@@ -633,7 +633,7 @@ func TestScan_ProbeFailureWithValidCache_IncompleteNotZero(t *testing.T) {
 		"probe failure must emit a warning to stderr")
 }
 
-// ─── Phase 3: Multi-source and --source flag tests ───────────────────────────
+// ─── Multi-source and --source flag tests ────────────────────────────────────
 
 // buildOSVBundleZip creates an in-memory zip archive containing the corpus CVE
 // advisory in OSV format, suitable for serving as a mock OSV bundle.

@@ -363,6 +363,22 @@ func (s *OSVBundleSource) Query(ctx context.Context, pkg Package, version string
 
 // ─── Version normalisation ────────────────────────────────────────────────────
 
+// normalizeNPMPackageName converts an npm package name to the lowercase canonical
+// form used in OSV records. The npm registry treats names as case-insensitive and
+// stores them in lowercase; OSV npm records follow the same convention.
+//
+// Scoped packages (@scope/name) are preserved with the "@" prefix and "/" separator,
+// both components lowercased. Unscoped names are simply lowercased.
+//
+// Examples:
+//
+//	"Lodash"           → "lodash"
+//	"@Scope/Example"   → "@scope/example"
+//	""                 → ""
+func normalizeNPMPackageName(name string) string {
+	return strings.ToLower(name)
+}
+
 // normalizeOSVVersion converts a version string into the form used in OSV records
 // for the given ecosystem.
 //

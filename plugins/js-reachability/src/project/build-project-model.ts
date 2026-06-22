@@ -34,7 +34,7 @@ function resolveNpmDep(
 }
 
 /**
- * Resolve a pnpm dep using the importer map (C1 fix).
+ * Resolve a pnpm dep using the per-workspace importer map.
  *
  * The importer block records the EXACT resolved version per workspace:
  *   importers["packages/app"].dependencies["lodash"].version = "4.16.6"
@@ -103,9 +103,9 @@ function allDeclaredDeps(manifest: Workspace["manifest"]): {
 
 /**
  * Check if a specifier looks like a workspace reference.
- * M2 fix: bare "*" only counts as a workspace ref when the dep name is a
- * known sibling workspace — a plain "*" version range in a non-workspace dep
- * should not be treated as a local dep skip.
+ * Bare "*" only counts as a workspace ref when the dep name is a known sibling
+ * workspace — a plain "*" version range in a non-workspace dep must not be
+ * treated as a local dep reference.
  */
 function isWorkspaceRef(specifier: string, depName: string, wsNames: Set<string>): boolean {
   if (specifier.startsWith("workspace:") || specifier.startsWith("file:")) {
@@ -148,6 +148,7 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
     incomplete.push({
       scope: root,
       reason: `Lockfile parse error: ${String(err)}`,
+      kind: "other",
     });
   }
 
@@ -159,7 +160,7 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
     const { required, optional } = allDeclaredDeps(ws.manifest);
     const wsRelDir = path.relative(root, ws.dir);
 
-    // Process required deps — unresolvable ones → incomplete (C3 fix)
+    // Process required deps — unresolvable ones → incomplete
     for (const [depName, specifier] of Object.entries(required)) {
       // Local (sibling) workspace reference
       if (wsNames.has(depName) || isWorkspaceRef(specifier, depName, wsNames)) {
@@ -193,17 +194,18 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
       if (resolved) {
         ws.deps.set(depName, resolved);
       } else {
-        // C3 fix: emit incomplete whenever a required dep cannot be resolved,
-        // regardless of whether the graph is empty or non-empty.
-        // Empty graph → manager unknown/lockfile absent → each dep is unresolvable.
+        // Emit incomplete whenever a required dep cannot be resolved, regardless
+        // of whether the graph is empty or non-empty. Empty graph means the
+        // manager is unknown or the lockfile is absent — each dep is unresolvable.
         incomplete.push({
           scope: `${ws.name}:${depName}`,
           reason: `Could not resolve "${depName}@${specifier}" in lockfile.`,
+          kind: "dep-unresolved",
         });
       }
     }
 
-    // Process optional deps — resolution failure is NOT surfaced as incomplete (M1)
+    // Process optional deps — resolution failure is NOT surfaced as incomplete
     // because optional deps may legitimately be absent on the current platform.
     for (const [depName, specifier] of Object.entries(optional)) {
       if (wsNames.has(depName) || isWorkspaceRef(specifier, depName, wsNames)) {
@@ -235,7 +237,7 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
       if (resolved) {
         ws.deps.set(depName, resolved);
       }
-      // No incomplete for unresolved optional deps (M1)
+      // No incomplete for unresolved optional deps
     }
 
     // Sort localDeps deterministically

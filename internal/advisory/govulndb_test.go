@@ -24,7 +24,7 @@ func loadFixture(t *testing.T, name string) []byte {
 func TestParseOSV_SymbolLevel(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
 
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GO-2024-0001", adv.ID)
@@ -53,7 +53,7 @@ func TestParseOSV_SymbolLevel(t *testing.T) {
 func TestParseOSV_PackageLevel(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0002.json")
 
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GO-2024-0002", adv.ID)
@@ -65,7 +65,7 @@ func TestParseOSV_PackageLevel(t *testing.T) {
 // affected range is matched.
 func TestVersionRangeFiltering_AffectedVersion(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	// v1.0.0 is in [0, 1.2.3) — should be affected.
@@ -76,7 +76,7 @@ func TestVersionRangeFiltering_AffectedVersion(t *testing.T) {
 // fixed boundary is NOT matched.
 func TestVersionRangeFiltering_FixedVersion(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	// v1.2.3 is the fixed version — should NOT be affected.
@@ -89,7 +89,7 @@ func TestVersionRangeFiltering_FixedVersion(t *testing.T) {
 // with a non-zero introduced boundary.
 func TestVersionRangeFiltering_IntroducedVersion(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0003.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	// v0.9.0 is before introduced — should NOT be affected.
@@ -144,7 +144,7 @@ func TestGoVulnDBClient_Query(t *testing.T) {
 func TestParseOSV_WithdrawnTimestamp(t *testing.T) {
 	data := loadFixture(t, "GO-2025-3408.json")
 
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GO-2025-3408", adv.ID)
@@ -205,7 +205,7 @@ func TestGoVulnDBClient_Query_NonWithdrawnStillReturned(t *testing.T) {
 // TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	proto := adv.ToProto()

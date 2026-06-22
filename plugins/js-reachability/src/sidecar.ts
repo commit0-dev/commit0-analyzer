@@ -16,8 +16,8 @@
  *   dirname(process.execPath)/oxc-binding/<filename>
  *
  * The shim must be imported (side-effect import) before any code that loads
- * oxc. In Phase 1 no oxc parsing happens, but the wiring is in place so the
- * binary build is correct for Phase 3 onwards.
+ * oxc, so that native addon resolution is already patched when oxc is first
+ * required.
  *
  * Platform/arch mapping follows the oxc-parser npm package convention:
  *   darwin + arm64  → darwin-arm64

@@ -11,7 +11,7 @@ export interface PnpmParseResult {
   corrupt: boolean;
   /**
    * Incomplete entries for packages whose on-disk store path could not be
-   * resolved (e.g. dangling symlink / missing .pnpm store entry). M4.
+   * resolved (e.g. dangling symlink / missing .pnpm store entry).
    */
   incomplete: import("../project/model.js").IncompleteEntry[];
 }
@@ -27,7 +27,7 @@ export interface PnpmParseResult {
  * The `importers` block records per-workspace resolved versions:
  *   importers.<wsRelDir>.dependencies.<dep>.version → "4.17.21" or "4.17.21(react@18)"
  *
- * Resolution strategy (C1 fix):
+ * Resolution strategy:
  *   For each workspace we read importers.<wsRelDir>.dependencies.<dep>.version,
  *   strip the peer suffix, and look up "/name@version" in packages. This gives the
  *   EXACT version per workspace instead of first-name-match across all packages.
@@ -72,7 +72,7 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
       // Normalise: ensure leading slash
       const key = rawKey.startsWith("/") ? rawKey : `/${rawKey}`;
 
-      // Parse name and version, stripping peer-dep suffix (C2 fix)
+      // Parse name and version, stripping any peer-dep suffix
       const parsed = parsePackageKey(key);
       if (!parsed) continue;
 
@@ -93,11 +93,12 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
       try {
         resolvedDir = await fs.realpath(storeDir);
       } catch {
-        // M4: store entry absent or dangling symlink — surface as incomplete
+        // Store entry absent or dangling symlink — surface as incomplete
         // so callers know the dir path is a fabricated fallback, not real.
         incomplete.push({
           scope: `${name}@${version}`,
           reason: `pnpm store path not found or dangling symlink: ${storeDir}`,
+          kind: "dep-unresolved",
         });
       }
 
@@ -108,8 +109,9 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
   }
 
   // ── 2. Parse importers block ──────────────────────────────────────────────
-  // Produces a map: wsRelDir → (depName → resolvedVersion string without peer suffix)
-  // This is the C1 fix: per-workspace exact version from importers.
+  // Produces a map: wsRelDir → (depName → resolvedVersion string without peer suffix).
+  // Per-workspace exact versions from the importers block prevent version collisions
+  // when two workspaces depend on different versions of the same package.
   const importersMap: Map<string, Map<string, string>> = new Map();
 
   const importersRaw = lock["importers"] as
@@ -172,7 +174,7 @@ function stripPeerSuffix(v: string): string {
 
 /**
  * Extract package name and version from a pnpm package key.
- * Handles peer-dep suffixes (C2 fix) and scoped names.
+ * Handles peer-dep suffixes and scoped names.
  *
  * Key forms:
  *   /lodash@4.17.21

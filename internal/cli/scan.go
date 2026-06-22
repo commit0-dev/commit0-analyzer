@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -31,6 +32,7 @@ type scanFlags struct {
 	goarch         string
 	tags           string
 	pluginBin      string
+	jsPluginBin    string // path to pre-built js-reachability plugin binary (skip build)
 	source         string // comma-separated source names; default "go-vuln-db,osv"
 	sourceExplicit bool   // true when --source was explicitly set by the user
 	language       string // "auto"|"go"|"js"; default "auto"
@@ -136,6 +138,7 @@ Exit codes:
 	fs.StringVar(&flags.goarch, "goarch", "", "GOARCH override for build config")
 	fs.StringVar(&flags.tags, "tags", "", "comma-separated build tags")
 	fs.StringVar(&flags.pluginBin, "plugin-binary", "", "path to pre-built go-reachability plugin binary (skip build)")
+	fs.StringVar(&flags.jsPluginBin, "js-plugin-binary", "", "path to pre-built js-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.source, "source", "go-vuln-db,osv",
 		"comma-separated advisory sources to query: go-vuln-db, osv (default: both)")
 	fs.StringVar(&flags.language, "language", "auto",
@@ -356,6 +359,142 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 	}
 
+	// ── 5b. npm advisory resolution (JS ecosystem) ───────────────────────────
+	//
+	// When JS is in scope, obtain the lockfile-resolved dep list from the JS
+	// plugin via --list-deps (a fast local-only subprocess). Then query advisories
+	// for each (workspace, pkg, version) through the same MultiSource / OSV bundle
+	// plumbing as the Go path. Advisory resolution is centralized here in the CLI
+	// so that --source, --offline, --db-snapshot, and --update all apply uniformly.
+	//
+	// go-vuln-db source returns (nil,nil) for npm (it covers only "Go") —
+	// confirmed by goVulnDBClient.Query checking pkg.Ecosystem != EcosystemGo.
+	// OSV source uses the "npm" bundle (npm/all.zip from the OSV GCS bucket).
+	if scanJS {
+		// Resolve the JS plugin binary path (same as the manifest lookup used later
+		// for registering the gRPC plugin, but needed now for --list-deps).
+		jsPluginBin := flags.jsPluginBin
+		if jsPluginBin == "" {
+			if d := jsDistDir(); d != "" {
+				jsPluginBin = filepath.Join(d, "anst-js-reachability")
+			}
+		}
+		if jsPluginBin == "" {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available for --list-deps: cannot locate dist directory\n")
+			return policy.ExitOperationalError
+		}
+		if _, statErr := os.Stat(jsPluginBin); statErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin binary not found at %s: %v\n", jsPluginBin, statErr)
+			return policy.ExitOperationalError
+		}
+
+		// Get the dep list from the project model.
+		npmDeps, modelIncomplete, listErr := listNPMDeps(ctx, jsPluginBin, moduleRoot)
+		if listErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: list npm deps: %v\n", listErr)
+			return policy.ExitOperationalError
+		}
+		if modelIncomplete {
+			fmt.Fprintf(os.Stderr, "warning: npm project model is incomplete (some deps could not be resolved); scan marked incomplete\n")
+			incomplete = true
+		}
+
+		// OSV is the only source with npm coverage. go-vuln-db covers only the Go
+		// ecosystem and returns no advisories for npm. When JS deps are present but
+		// no npm-capable source is selected, the scan has zero advisory coverage for
+		// those deps — unknown ≠ safe, so warn and mark incomplete.
+		npmCapableSourceSelected := selectedSources[advisory.SourceOSV]
+		if len(npmDeps) > 0 && !npmCapableSourceSelected {
+			fmt.Fprintf(os.Stderr,
+				"warning: JS npm deps found but no npm-capable advisory source is selected "+
+					"(osv.dev covers npm; go-vuln-db does not); "+
+					"npm packages were not checked for vulnerabilities; scan marked incomplete\n")
+			incomplete = true
+		}
+
+		if len(npmDeps) > 0 && npmCapableSourceSelected {
+			// Build an OSV source for npm; reuse the same cacheDir as the Go OSV path.
+			cacheDir, cacheErr := os.UserCacheDir()
+			if cacheErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				return policy.ExitOperationalError
+			}
+			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+
+			osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
+			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+				osvSrc.BaseURL = override
+			}
+			osvSrc.ForceUpdate = flags.update
+
+			// Refresh OSV npm bundle (secondary source → failure warns + marks incomplete).
+			addNPMOSV := true
+			if !flags.offline && flags.dbSnapshot == "" {
+				if refreshErr := osvSrc.Refresh(ctx, advisory.EcosystemNPM); refreshErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: OSV npm source refresh failed (%s): %v; scan marked incomplete\n",
+						advisory.SourceOSV, refreshErr)
+					incomplete = true
+					addNPMOSV = false
+				}
+			} else {
+				// Offline/snapshot mode: check whether the npm OSV cache exists.
+				if !osvCacheDirExists(osvCacheDir, advisory.EcosystemNPM) {
+					if flags.sourceExplicit {
+						fmt.Fprintf(os.Stderr,
+							"warning: OSV npm cache not populated at %s (run without --offline to fetch); OSV npm source skipped, scan marked incomplete\n",
+							filepath.Join(osvCacheDir, advisory.EcosystemNPM))
+						incomplete = true
+					}
+					addNPMOSV = false
+				}
+			}
+
+			if addNPMOSV {
+				npmNamedSources := []advisory.NamedSource{
+					{Name: advisory.SourceOSV, S: osvSrc},
+				}
+				// go-vuln-db source is intentionally excluded: it returns (nil,nil) for
+				// npm automatically, but we avoid the lookup overhead for clarity.
+				npmMultiSrc := advisory.NewMultiSource(npmNamedSources...)
+
+				for _, dep := range npmDeps {
+					// Normalize the npm package name to lowercase to match OSV records.
+					// OSV stores npm package names lowercase; lockfile names may differ.
+					normalizedName := strings.ToLower(dep.Name)
+					pkg := advisory.Package{Ecosystem: advisory.EcosystemNPM, Name: normalizedName}
+					advs, queryErr := npmMultiSrc.Query(ctx, pkg, dep.Version)
+
+					var srcIncomplete *advisory.SourcesIncompleteError
+					if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
+						for i, name := range srcIncomplete.FailedSources {
+							fmt.Fprintf(os.Stderr, "warning: advisory source %q failed for %s@%s (workspace %s): %v\n",
+								name, dep.Name, dep.Version, dep.Workspace, srcIncomplete.Errors[i])
+						}
+						incomplete = true
+					} else if queryErr != nil {
+						var staleWarn *advisory.StalenessWarningError
+						if errors.As(queryErr, &staleWarn) {
+							fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
+							advs = staleWarn.Advisories
+						} else {
+							fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
+								dep.Name, dep.Version, queryErr)
+							incomplete = true
+							continue
+						}
+					}
+
+					for i := range advs {
+						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						if advs[i].ID != "" {
+							sourcesByID[advs[i].ID] = advs[i].Sources
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// ── 6. Build AnalyzeRequest ───────────────────────────────────────────────
 	req := &anstv1.AnalyzeRequest{
 		ModuleRoot: moduleRoot,
@@ -408,7 +547,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	}
 
 	if scanJS {
-		m, buildErr := buildJSPluginManifest()
+		m, buildErr := buildJSPluginManifest(flags.jsPluginBin)
 		if buildErr != nil {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available: %v\n", buildErr)
 			return policy.ExitOperationalError
@@ -548,6 +687,81 @@ func loadPolicyFromFlags(flags scanFlags) (*policy.Policy, error) {
 	// Synthesise a minimal policy from --fail-on flag.
 	yamlSrc := fmt.Sprintf("fail-on: %s\n", flags.failOn)
 	return policy.LoadPolicy([]byte(yamlSrc))
+}
+
+// npmDep is a resolved npm package dependency from the JS project model.
+type npmDep struct {
+	Ecosystem string `json:"ecosystem"` // always "npm"
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Workspace string `json:"workspace"`
+}
+
+// listDepsOutput is the JSON shape emitted by the JS plugin's --list-deps mode.
+type listDepsOutput struct {
+	Deps       []npmDep         `json:"deps"`
+	Incomplete []incompleteEntry `json:"incomplete"`
+	// DeclaredDepCount is the total number of declared runtime deps across all
+	// workspaces before resolution. The CLI uses this together with each entry's
+	// Kind to determine whether to mark the scan incomplete.
+	DeclaredDepCount int `json:"declaredDepCount"`
+}
+
+// incompleteEntry mirrors the IncompleteEntry shape from the JS plugin model.
+type incompleteEntry struct {
+	Scope  string `json:"scope"`
+	Reason string `json:"reason"`
+	// Kind categorizes the incomplete signal. "lockfile-corrupt" is error-level
+	// and always marks the scan incomplete. Other kinds are suppressed when
+	// DeclaredDepCount is 0 (no runtime deps to resolve, so no real coverage gap).
+	Kind string `json:"kind"`
+}
+
+// listNPMDeps execs the JS plugin binary in --list-deps mode and returns the
+// resolved npm dependency list for the project rooted at moduleRoot.
+// It also returns whether the project model is incomplete.
+//
+// The incomplete signal is kind-aware:
+//   - "lockfile-corrupt" entries always mark the model incomplete — a corrupt
+//     lockfile is an error regardless of how many runtime deps are declared.
+//     Suppressing it when declaredDepCount=0 would produce a false-negative for
+//     projects with only devDependencies and a corrupt lockfile.
+//   - All other incomplete kinds are suppressed when declaredDepCount=0, because
+//     a missing lockfile on a project with no declared runtime deps is not a
+//     concern (there is nothing that could be unresolvable).
+//
+// On any subprocess or parse failure it returns an error (never silently empty).
+func listNPMDeps(ctx context.Context, pluginBin, moduleRoot string) ([]npmDep, bool, error) {
+	cmd := exec.CommandContext(ctx, pluginBin, "--list-deps", moduleRoot)
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, false, fmt.Errorf("js plugin --list-deps: %w\n%s", err, exitErr.Stderr)
+		}
+		return nil, false, fmt.Errorf("js plugin --list-deps: %w", err)
+	}
+
+	var result listDepsOutput
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, false, fmt.Errorf("js plugin --list-deps: parse output: %w", err)
+	}
+
+	// Determine model-level incompleteness by kind:
+	//   lockfile-corrupt → always incomplete (error-level signal).
+	//   all other kinds  → incomplete only when there are declared deps to resolve.
+	modelIncomplete := false
+	for _, entry := range result.Incomplete {
+		if entry.Kind == "lockfile-corrupt" {
+			modelIncomplete = true
+			break
+		}
+	}
+	if !modelIncomplete && result.DeclaredDepCount > 0 && len(result.Incomplete) > 0 {
+		modelIncomplete = true
+	}
+
+	return result.Deps, modelIncomplete, nil
 }
 
 // modDep is a resolved module dependency (path + version).
@@ -753,14 +967,23 @@ func jsSidecarName() string {
 // buildJSPluginManifest constructs a Manifest for the js-reachability plugin
 // by locating its two-file distribution (main binary + napi sidecar) under
 // plugins/js-reachability/dist/ and computing SHA-256 pins for both files.
-// Returns an error when the distribution has not been built yet.
-func buildJSPluginManifest() (*host.Manifest, error) {
-	distDir := jsDistDir()
-	if distDir == "" {
-		return nil, fmt.Errorf("cannot locate js-reachability dist directory")
-	}
+// When overrideBin is non-empty it is used as the main binary path directly
+// (the dist directory is derived from its parent). Returns an error when the
+// distribution has not been built yet.
+func buildJSPluginManifest(overrideBin string) (*host.Manifest, error) {
+	var mainBin string
+	var distDir string
 
-	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	if overrideBin != "" {
+		mainBin = overrideBin
+		distDir = filepath.Dir(overrideBin)
+	} else {
+		distDir = jsDistDir()
+		if distDir == "" {
+			return nil, fmt.Errorf("cannot locate js-reachability dist directory")
+		}
+		mainBin = filepath.Join(distDir, "anst-js-reachability")
+	}
 	if _, err := os.Stat(mainBin); err != nil {
 		return nil, fmt.Errorf("js-reachability plugin not built: %s not found (run 'make build-js-plugin'): %w", mainBin, err)
 	}

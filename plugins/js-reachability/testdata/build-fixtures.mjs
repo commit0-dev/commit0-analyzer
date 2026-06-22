@@ -371,6 +371,19 @@ function buildCorruptLock() {
   );
 }
 
+// ── corrupt-lock-dev-only ────────────────────────────────────────────────────
+// npm project with an unparseable package-lock.json and only devDependencies
+// (zero runtime deps) — exercises that a corrupt lockfile marks the scan
+// incomplete even when there is nothing to resolve.
+
+function buildCorruptLockDevOnly() {
+  const root = path.join(projects, "corrupt-lock-dev-only");
+  write(
+    path.join(root, "package-lock.json"),
+    "{ this is not valid json !!!\n"
+  );
+}
+
 // ── corrupt-pnpm ─────────────────────────────────────────────────────────────
 // pnpm project with an unparseable pnpm-lock.yaml
 
@@ -840,6 +853,7 @@ export default function setup() {
   buildPnpmWs();
   buildPnpmMultiVersion();
   buildCorruptLock();
+  buildCorruptLockDevOnly();
   buildCorruptPnpm();
   buildCorruptYarn();
   buildMissingDepPnpm();

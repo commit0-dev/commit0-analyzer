@@ -33,6 +33,7 @@ export async function parseLockfile(
           scope: root,
           reason:
             "package-lock.json exists but could not be parsed (corrupt or invalid JSON).",
+          kind: "lockfile-corrupt",
         });
       }
       return { graph: result.graph, incomplete, importers: emptyImporters };
@@ -44,6 +45,7 @@ export async function parseLockfile(
           scope: root,
           reason:
             "pnpm-lock.yaml exists but could not be parsed (corrupt or invalid YAML).",
+          kind: "lockfile-corrupt",
         });
       }
       incomplete.push(...result.incomplete);
@@ -56,6 +58,7 @@ export async function parseLockfile(
           scope: root,
           reason:
             "yarn.lock exists but could not be parsed (corrupt or unrecognized format).",
+          kind: "lockfile-corrupt",
         });
       }
       incomplete.push(...result.incomplete);

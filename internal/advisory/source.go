@@ -6,6 +6,10 @@ import "context"
 // schema value used by https://vuln.go.dev and https://osv.dev.
 const EcosystemGo = "Go"
 
+// EcosystemNPM is the canonical ecosystem tag for npm packages, matching the
+// OSV schema value used by https://osv.dev (the npm/all.zip bundle).
+const EcosystemNPM = "npm"
+
 // Package identifies a package within a specific language ecosystem.
 // It is the unit of identity passed to Source.Query so that a single source
 // implementation can serve multiple ecosystems or decline to handle ecosystems

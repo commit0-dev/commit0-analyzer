@@ -31,6 +31,7 @@ async function expandGlob(
       incomplete.push({
         scope: pattern,
         reason: `Workspace pattern "${pattern}" matches no directory in ${root}.`,
+        kind: "workspace-glob-empty",
       });
     }
     return [];
@@ -50,6 +51,7 @@ async function expandGlob(
     incomplete.push({
       scope: pattern,
       reason: `Workspace pattern "${pattern}" base directory "${baseDir}" not found.`,
+      kind: "workspace-glob-empty",
     });
     return [];
   }
@@ -58,6 +60,7 @@ async function expandGlob(
     incomplete.push({
       scope: pattern,
       reason: `Workspace glob "${pattern}" matched no directories under ${baseDir}.`,
+      kind: "workspace-glob-empty",
     });
   }
 
@@ -133,6 +136,7 @@ export async function discoverWorkspaces(
     incomplete.push({
       scope: root,
       reason: `Could not read package.json at ${root}.`,
+      kind: "other",
     });
     return { workspaces: [], incomplete };
   }
@@ -158,6 +162,7 @@ export async function discoverWorkspaces(
       incomplete.push({
         scope: dir,
         reason: `No package.json found in workspace directory ${dir}.`,
+        kind: "other",
       });
       continue;
     }
