@@ -254,6 +254,10 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	multiSrc := advisory.NewMultiSource(namedSources...)
 
 	var protoAdvs []*anstv1.Advisory
+	// sourcesByID records the merged source attribution for each advisory so it
+	// can be stamped onto findings (the Finding carries only an advisory ref, not
+	// the advisory's Sources, so we propagate it here for visible attribution).
+	sourcesByID := map[string][]string{}
 	for _, dep := range deps {
 		pkg := advisory.Package{Ecosystem: advisory.EcosystemGo, Name: dep.Path}
 		advs, queryErr := multiSrc.Query(ctx, pkg, dep.Version)
@@ -283,6 +287,9 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 		for i := range advs {
 			protoAdvs = append(protoAdvs, advs[i].ToProto())
+			if advs[i].ID != "" {
+				sourcesByID[advs[i].ID] = advs[i].Sources
+			}
 		}
 	}
 
@@ -360,6 +367,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// risk is surfaced by the reachable-only gate, not the severity threshold.
 	stampDefaultSeverity(findings)
 
+	// ── 7c. Stamp source attribution ──────────────────────────────────────────
+	// Make the multi-source merge visible: record which source(s) reported each
+	// finding's advisory into properties["sources"] (e.g. "go-vuln-db,osv.dev").
+	stampSources(findings, sourcesByID)
+
 	// ── 8. Render output ──────────────────────────────────────────────────────
 	if renderErr := renderFindings(flags.format, findings); renderErr != nil {
 		fmt.Fprintf(os.Stderr, "anst-analyzer scan: render: %v\n", renderErr)
@@ -396,6 +408,27 @@ func stampDefaultSeverity(findings []*anstv1.Finding) {
 			f.Severity = anstv1.Severity_SEVERITY_HIGH
 		}
 		// UNKNOWN and NOT_REACHABLE keep SEVERITY_UNSPECIFIED.
+	}
+}
+
+// stampSources records, for each finding, which advisory source(s) reported the
+// underlying advisory, into properties["sources"] (e.g. "go-vuln-db,osv.dev").
+// The Finding carries only an advisory reference, so without this the merged
+// multi-source attribution would not be visible in JSON/SARIF/table output.
+// Synthetic findings (e.g. a plugin crash, which have no advisory) are skipped.
+func stampSources(findings []*anstv1.Finding, sourcesByID map[string][]string) {
+	for _, f := range findings {
+		if f.GetAdvisory() == nil {
+			continue
+		}
+		srcs := sourcesByID[f.GetAdvisory().GetId()]
+		if len(srcs) == 0 {
+			continue
+		}
+		if f.Properties == nil {
+			f.Properties = map[string]string{}
+		}
+		f.Properties["sources"] = strings.Join(srcs, ",")
 	}
 }
 
