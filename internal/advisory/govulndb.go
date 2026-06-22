@@ -150,34 +150,30 @@ func extractVersionRange(events []osvEvent) VersionRange {
 	return vr
 }
 
-// ─── Go vuln DB client ───────────────────────────────────────────────────────
+// ─── Shared dir-backed reader ─────────────────────────────────────────────────
 
-// goVulnDBClient implements Source against a local directory of OSV JSON files.
-// Each file must be named "<advisory-id>.json" (e.g. "GO-2024-0001.json").
+// dirSource reads a directory of OSV JSON files and queries them offline.
+// It is the shared query engine used by both goVulnDBClient (Go vuln DB cache)
+// and OSVBundleSource (OSV offline bundle cache). The only difference between
+// the two is how files arrive in the directory; the query logic is identical.
 //
-// The hot query path is fully offline: it reads from dbDir and never makes
-// network calls. Network fetching is handled by Cache (cache.go), which
-// populates dbDir from https://vuln.go.dev before handing it to this client.
-type goVulnDBClient struct {
-	dbDir string
+// sources is the attribution tag injected into each returned Advisory.Sources —
+// callers pass their own tag (e.g. []string{SourceGoVulnDB} or []string{SourceOSV}).
+type dirSource struct {
+	dir     string
+	sources []string
 }
 
-// Query implements Source. It scans every OSV file in dbDir, parses it, and
-// returns advisories that match pkg.Name and whose version ranges include version.
-// The scan is O(n) in the number of advisory files; the cache layer is expected
-// to keep that set small (one directory per module, or a pre-filtered index).
+// query scans every *.json file in d.dir, parses each OSV record, and returns
+// advisories that match pkg.Name and whose version ranges include version.
+// Withdrawn advisories are excluded. Corrupt files are skipped (no hard error).
 //
-// Returns (nil, nil) when pkg.Ecosystem is not EcosystemGo — this client is
-// Go-only and silently passes on other ecosystems so a compose layer can route.
-func (c *goVulnDBClient) Query(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
-	// This source only handles Go modules.
-	if pkg.Ecosystem != EcosystemGo {
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(c.dbDir)
+// The scan is O(n) in the number of advisory files; callers are expected to
+// keep that set small (one cache directory per module or per ecosystem bundle).
+func (d *dirSource) query(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
+	entries, err := os.ReadDir(d.dir)
 	if err != nil {
-		return nil, fmt.Errorf("advisory: read db dir %q: %w", c.dbDir, err)
+		return nil, fmt.Errorf("advisory: read db dir %q: %w", d.dir, err)
 	}
 
 	var results []Advisory
@@ -188,12 +184,12 @@ func (c *goVulnDBClient) Query(ctx context.Context, pkg Package, version string)
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		// Skip the manifest file.
+		// Skip the manifest file — it is not an OSV advisory.
 		if entry.Name() == ManifestFilename {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(c.dbDir, entry.Name()))
+		data, err := os.ReadFile(filepath.Join(d.dir, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("advisory: read %q: %w", entry.Name(), err)
 		}
@@ -220,9 +216,39 @@ func (c *goVulnDBClient) Query(ctx context.Context, pkg Package, version string)
 		}
 		if adv.AffectsVersion(version) {
 			adv.Ecosystem = pkg.Ecosystem
+			// Override Sources with the caller's attribution tag so that the
+			// same parseOSVRecord result can carry different provenance depending
+			// on which source's cache dir was scanned.
+			adv.Sources = append([]string(nil), d.sources...)
 			results = append(results, *adv)
 		}
 	}
 
 	return results, nil
+}
+
+// ─── Go vuln DB client ───────────────────────────────────────────────────────
+
+// goVulnDBClient implements Source against a local directory of OSV JSON files.
+// Each file must be named "<advisory-id>.json" (e.g. "GO-2024-0001.json").
+//
+// The hot query path is fully offline: it reads from dbDir and never makes
+// network calls. Network fetching is handled by Cache (cache.go), which
+// populates dbDir from https://vuln.go.dev before handing it to this client.
+type goVulnDBClient struct {
+	dbDir string
+}
+
+// Query implements Source. It delegates directory scanning to the shared
+// dirSource, which handles version-range filtering, withdrawn exclusion, and
+// module-name matching. Returns (nil, nil) when pkg.Ecosystem is not
+// EcosystemGo — this client is Go-only.
+func (c *goVulnDBClient) Query(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
+	// This source only handles Go modules.
+	if pkg.Ecosystem != EcosystemGo {
+		return nil, nil
+	}
+
+	ds := &dirSource{dir: c.dbDir, sources: []string{SourceGoVulnDB}}
+	return ds.query(ctx, pkg, version)
 }
