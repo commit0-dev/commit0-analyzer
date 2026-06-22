@@ -1083,6 +1083,78 @@ function buildNoEntrypointWs() {
   write(path.join(nm, "index.js"), `module.exports = function () {};\n`);
 }
 
+// ── default-index-ws ──────────────────────────────────────────────────────────
+// A package with NO main/exports but an index.js at the root that imports and
+// calls a vulnerable dependency. Node resolves the entry to index.js by default,
+// so the engine must detect it and report PACKAGE_REACHABLE (not UNKNOWN).
+
+function buildDefaultIndexWs() {
+  const root = path.join(projects, "default-index-ws");
+
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "default-index-ws",
+        version: "1.0.0",
+        // NO main / module / exports / bin — Node defaults the entry to index.js
+        dependencies: { "serialize-javascript": "^3.0.0" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  write(
+    path.join(root, "index.js"),
+    [
+      `const serialize = require("serialize-javascript");`,
+      `module.exports = (data) => serialize(data);`,
+      ``,
+    ].join("\n")
+  );
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "default-index-ws",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "default-index-ws",
+            version: "1.0.0",
+            dependencies: { "serialize-javascript": "^3.0.0" },
+          },
+          "node_modules/serialize-javascript": {
+            version: "3.0.0",
+            resolved:
+              "https://registry.npmjs.org/serialize-javascript/-/serialize-javascript-3.0.0.tgz",
+            integrity: "sha512-stub",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+  const nm = path.join(root, "node_modules", "serialize-javascript");
+  mkdir(nm);
+  write(
+    path.join(nm, "package.json"),
+    JSON.stringify(
+      { name: "serialize-javascript", version: "3.0.0", main: "./index.js" },
+      null,
+      2
+    ) + "\n"
+  );
+  write(path.join(nm, "index.js"), `module.exports = function () {};\n`);
+}
+
 // ── Corpus fixture builders ───────────────────────────────────────────────────
 // Each corpus case commits source + labels.json + package.json.
 // This section generates the gitignored lockfiles and node_modules layouts.
@@ -1857,6 +1929,7 @@ export default function setup() {
   buildResolveFixtures();
   buildGateG1();
   buildNoEntrypointWs();
+  buildDefaultIndexWs();
   // Corpus fixtures
   buildCorpusCjsDirect();
   buildCorpusEsmDirect();

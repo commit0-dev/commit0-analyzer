@@ -152,3 +152,25 @@ describe("analyze() no entrypoint → UNKNOWN, never NOT_REACHABLE", () => {
     expect(f!.confidence).not.toBe(Confidence.CONFIDENCE_NOT_REACHABLE);
   });
 });
+
+// ── Default index entry: package with no main but index.js → analyzable ───────
+// Node resolves a package with no main/exports to index.js. The engine must
+// detect that default entry and report PACKAGE_REACHABLE, not UNKNOWN.
+
+const defaultIndex = path.resolve(
+  __dirname,
+  "../../../testdata/projects/default-index-ws"
+);
+
+describe("analyze() default index.js entry → PACKAGE_REACHABLE", () => {
+  it("detects index.js as the entry when no main/exports is declared", async () => {
+    const findings = await analyze({
+      moduleRoot: defaultIndex,
+      entrypoints: [], // force auto-detection → should find index.js
+      advisories: [{ ...baseAdvisory }],
+    });
+    const f = findings.find((f) => f.module === "serialize-javascript");
+    expect(f).toBeDefined();
+    expect(f!.confidence).toBe(Confidence.CONFIDENCE_PACKAGE_REACHABLE);
+  });
+});

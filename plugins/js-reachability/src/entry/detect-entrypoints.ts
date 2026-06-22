@@ -160,6 +160,10 @@ function collectMainEntry(ws: Workspace): EntrypointInfo | null {
     if (resolved) return { file: resolved, kind: "main" };
   }
 
+  // Node defaults the package entry to index.* when no main/exports is declared.
+  const defaultIndex = resolveDefaultIndex(ws.dir);
+  if (defaultIndex) return { file: defaultIndex, kind: "main" };
+
   return null;
 }
 
@@ -180,9 +184,33 @@ function collectLibraryEntries(ws: Workspace): EntrypointInfo[] {
   if (typeof main === "string" && main.length > 0) {
     const resolved = resolveManifestPath(ws.dir, main);
     if (resolved) eps.push({ file: resolved, kind: "main" });
+    return eps;
   }
 
+  // Node defaults the package entry to index.* when no main/exports is declared.
+  const defaultIndex = resolveDefaultIndex(ws.dir);
+  if (defaultIndex) eps.push({ file: defaultIndex, kind: "main" });
+
   return eps;
+}
+
+// Node resolves a package with no "main"/"exports" to an index file at the
+// package root. Only an existing file qualifies — this is a real entrypoint, not
+// a manifest-declared path that may precede a build.
+function resolveDefaultIndex(wsDir: string): string | null {
+  const INDEX_NAMES = [
+    "index.js",
+    "index.cjs",
+    "index.mjs",
+    "index.ts",
+    "index.tsx",
+    "index.jsx",
+  ];
+  for (const name of INDEX_NAMES) {
+    const abs = path.join(wsDir, name);
+    if (fs.existsSync(abs)) return abs;
+  }
+  return null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
