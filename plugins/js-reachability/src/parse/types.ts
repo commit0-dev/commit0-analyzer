@@ -28,6 +28,19 @@ export interface ImportRecord {
 
   /** 1-based column number (character offset from start of line). */
   column: number;
+
+  /**
+   * Named bindings extracted from this import statement, when statically
+   * determinable. Populated for:
+   *   - ESM named imports: `import { a, b } from "pkg"` → ["a", "b"]
+   *   - CJS destructured requires: `const { a } = require("pkg")` → ["a"]
+   *   - Default import: `import def from "pkg"` → ["default"]
+   *   - Namespace import: `import * as ns from "pkg"` → ["*"]
+   *
+   * Undefined (not an empty array) when binding information cannot be
+   * determined statically (e.g. `const x = require("pkg")`).
+   */
+  bindings?: string[];
 }
 
 // ── Export record ─────────────────────────────────────────────────────────────
@@ -50,6 +63,31 @@ export interface ExportRecord {
   column: number;
 }
 
+// ── Dynamic dispatch site ─────────────────────────────────────────────────────
+
+/**
+ * A non-import dynamic dispatch construct detected in a source file.
+ * These cannot be statically resolved to a target and must emit UNKNOWN
+ * frontiers so the reachability engine never returns NOT_REACHABLE when such
+ * a construct sits on the only candidate path.
+ */
+export interface DynamicDispatchSite {
+  /**
+   * What kind of dynamic construct was detected.
+   * - "eval"            — direct eval() or indirect eval via a variable
+   * - "Function-ctor"   — new Function(...) / Function(...) constructor
+   * - "computed-call"   — obj[expr]() computed member call
+   * - "aliased-require" — require bound to a variable then called (const r=require; r(x))
+   */
+  kind: "eval" | "Function-ctor" | "computed-call" | "aliased-require";
+  /** Human-readable description for the UNKNOWN marker detail. */
+  detail: string;
+  /** 1-based line of the dispatch construct. */
+  line: number;
+  /** 1-based column of the dispatch construct. */
+  column: number;
+}
+
 // ── ParsedModule ─────────────────────────────────────────────────────────────
 
 /** Successful parse result for a single source file. */
@@ -66,6 +104,12 @@ export interface ParsedModuleOk {
    * Drives the default condition set for resolution.
    */
   sourceType: "module" | "commonjs" | "unknown";
+  /**
+   * Non-import dynamic dispatch constructs (eval, computed calls, aliased
+   * require, Function constructor). Each becomes a "dynamic-dispatch"
+   * UNKNOWN marker in the call graph when the file is reachable.
+   */
+  dynamicDispatchSites: DynamicDispatchSite[];
 }
 
 /** Failed parse — becomes an UNKNOWN marker; never propagated as an error. */

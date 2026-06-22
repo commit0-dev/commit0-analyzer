@@ -30,6 +30,7 @@ import {
   type AnalyzeRequest,
 } from "./gen/anst/v1/plugin.js";
 import type { Finding } from "./gen/anst/v1/plugin.js";
+import { analyze } from "./engine/analyze.js";
 
 // Proto file contents are embedded at compile time so the binary is fully
 // self-contained (no dependency on files alongside the binary).
@@ -71,8 +72,24 @@ const analyzerImpl: AnalyzerServer = {
   analyze(
     call: grpc.ServerWritableStream<AnalyzeRequest, Finding>,
   ): void {
-    // Walking skeleton: no findings yet. Close cleanly with zero results.
-    call.end();
+    const req = call.request;
+    analyze({
+      moduleRoot: req.moduleRoot,
+      entrypoints: req.entrypoints,
+      advisories: req.advisories,
+    })
+      .then((findings) => {
+        // Stream findings eagerly — do not buffer.
+        for (const f of findings) {
+          call.write(f);
+        }
+        call.end();
+      })
+      .catch((err: unknown) => {
+        call.destroy(
+          Object.assign(new Error(String(err)), { code: grpc.status.INTERNAL }),
+        );
+      });
   },
 };
 

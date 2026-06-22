@@ -19,7 +19,8 @@ export type UnknownReason =
   | "parse-error"           // file could not be parsed (syntax error, missing file)
   | "missing-file"          // file resolved but does not exist on disk
   | "unknown-condition"     // exports/imports map: condition not matched + no default
-  | "phantom-dep";          // importable but not declared in the manifest
+  | "phantom-dep"           // importable but not declared in the manifest
+  | "dynamic-dispatch";     // eval/Function/computed-member-call/aliased-require in reachable code
 
 /** A single UNKNOWN event at a source location. */
 export interface UnknownMarker {

@@ -101,12 +101,28 @@ function extractImports(
     for (const si of moduleInfo.staticImports) {
       const specifier: string = si.moduleRequest?.value ?? si.moduleRequest?.source ?? "";
       const offset: number = si.start ?? 0;
+
+      // Extract named bindings from the import entries so downstream symbol
+      // resolution can verify whether a specific named export is used.
+      const bindings: string[] = [];
+      for (const entry of si.entries ?? []) {
+        const kind = entry.importName?.kind;
+        if (kind === "Name") {
+          bindings.push(entry.importName.name as string);
+        } else if (kind === "Default") {
+          bindings.push("default");
+        } else if (kind === "NamespaceObject") {
+          bindings.push("*");
+        }
+      }
+
       imports.push({
         specifier: specifier || null,
         isDynamic: false,
         importKind: "static-esm",
         line: offsetToLine(source, offset),
         column: offsetToColumn(source, offset),
+        bindings: bindings.length > 0 ? bindings : undefined,
       });
     }
   }
@@ -141,6 +157,32 @@ function extractImports(
   }
 
   // 3. CJS require() calls — walk AST looking for CallExpression(callee=require)
+  //
+  // We also collect named bindings when the require() is the init of a
+  // destructured VariableDeclarator (e.g. `const { a, b } = require("pkg")`).
+  // To do this in a single pass, we build a map from CallExpression.start →
+  // bindings[] by examining VariableDeclarator parent nodes first.
+  const requireBindingsByOffset = new Map<number, string[]>();
+  walk(program, (node: AstNode) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id?.type === "ObjectPattern" &&
+      node.init?.type === "CallExpression" &&
+      node.init?.callee?.type === "Identifier" &&
+      node.init?.callee?.name === "require"
+    ) {
+      const callStart: number = node.init.start ?? -1;
+      const names: string[] = [];
+      for (const prop of node.id.properties ?? []) {
+        const keyName: string | undefined = prop.key?.name ?? prop.key?.value;
+        if (keyName) names.push(keyName);
+      }
+      if (names.length > 0) {
+        requireBindingsByOffset.set(callStart, names);
+      }
+    }
+  });
+
   walk(program, (node: AstNode) => {
     if (
       node.type === "CallExpression" &&
@@ -150,6 +192,7 @@ function extractImports(
       const args = node.arguments ?? [];
       const firstArg = args[0];
       const offset: number = node.start ?? 0;
+      const bindings = requireBindingsByOffset.get(offset);
 
       if (firstArg?.type === "Literal" && typeof firstArg.value === "string") {
         imports.push({
@@ -158,6 +201,7 @@ function extractImports(
           importKind: "cjs-require",
           line: offsetToLine(source, offset),
           column: offsetToColumn(source, offset),
+          bindings,
         });
       } else if (firstArg !== undefined) {
         // Dynamic require(variable/expression)
@@ -198,6 +242,120 @@ function extractImports(
   });
 
   return imports;
+}
+
+// ── Dynamic dispatch detection ────────────────────────────────────────────────
+
+import type { DynamicDispatchSite } from "./types.js";
+
+/**
+ * Detect non-import dynamic dispatch constructs in the parsed AST.
+ *
+ * Constructs detected (per spec M1):
+ *   - eval(...)            — direct eval call
+ *   - new Function(...)    — Function constructor (arbitrary code execution)
+ *   - obj[expr]()          — computed member call (unknown method)
+ *   - aliased require      — require bound to a variable then invoked
+ *     (const req = require; req(name))
+ *
+ * Each match becomes a DynamicDispatchSite that the call-graph builder
+ * converts to a "dynamic-dispatch" UNKNOWN marker for any reachable file.
+ *
+ * Note: apply/call on unknown callee (`fn.apply(...)`) would require tracking
+ * whether `fn` is statically knowable — left for a future pass. The four
+ * constructs above cover the required M1 cases (eval, Function, computed
+ * member, aliased-require).
+ */
+function extractDynamicDispatch(
+  program: AstNode,
+  source: string
+): DynamicDispatchSite[] {
+  const sites: DynamicDispatchSite[] = [];
+
+  // Collect names that are assigned `require` at the module level so we can
+  // detect aliased-require calls (const req = require; req(name)).
+  const requireAliases = new Set<string>();
+  walk(program, (node: AstNode) => {
+    if (
+      node.type === "VariableDeclarator" &&
+      node.id?.type === "Identifier" &&
+      node.init?.type === "Identifier" &&
+      node.init?.name === "require"
+    ) {
+      requireAliases.add(node.id.name as string);
+    }
+  });
+
+  walk(program, (node: AstNode) => {
+    if (node.type !== "CallExpression") return;
+
+    const offset: number = node.start ?? 0;
+    const line = offsetToLine(source, offset);
+    const column = offsetToColumn(source, offset);
+    const callee = node.callee;
+
+    // eval(...)
+    if (callee?.type === "Identifier" && callee.name === "eval") {
+      sites.push({ kind: "eval", detail: `eval() at ${line}:${column}`, line, column });
+      return;
+    }
+
+    // new Function(...) — the CallExpression wrapping a NewExpression(Function)
+    if (
+      callee?.type === "NewExpression" &&
+      callee.callee?.type === "Identifier" &&
+      callee.callee?.name === "Function"
+    ) {
+      sites.push({
+        kind: "Function-ctor",
+        detail: `new Function() at ${line}:${column}`,
+        line,
+        column,
+      });
+      return;
+    }
+
+    // Function(...) called directly (without new)
+    if (callee?.type === "Identifier" && callee.name === "Function") {
+      sites.push({
+        kind: "Function-ctor",
+        detail: `Function() at ${line}:${column}`,
+        line,
+        column,
+      });
+      return;
+    }
+
+    // obj[expr]() — computed member call
+    if (callee?.type === "MemberExpression" && callee.computed === true) {
+      sites.push({
+        kind: "computed-call",
+        detail: `computed member call at ${line}:${column}`,
+        line,
+        column,
+      });
+      return;
+    }
+
+    // aliased-require: req(name) where req is known to alias require
+    if (
+      callee?.type === "Identifier" &&
+      requireAliases.has(callee.name as string)
+    ) {
+      sites.push({
+        kind: "aliased-require",
+        detail: `aliased require (${callee.name}) at ${line}:${column}`,
+        line,
+        column,
+      });
+      return;
+    }
+  });
+
+  // Sort for determinism
+  sites.sort((a, b) => a.line - b.line || a.column - b.column);
+
+  return sites;
 }
 
 // ── Export extraction ────────────────────────────────────────────────────────
@@ -385,6 +543,7 @@ export async function parseModuleWithOxc(file: string): Promise<ParsedModule> {
 
   const imports = extractImports(program, source, moduleInfo);
   const exports_ = extractExports(program, source, moduleInfo);
+  const dynamicDispatchSites = extractDynamicDispatch(program, source);
 
   // Determine final sourceType
   const isModule = moduleInfo?.hasModuleSyntax === true ||
@@ -419,5 +578,6 @@ export async function parseModuleWithOxc(file: string): Promise<ParsedModule> {
     imports,
     exports: dedupedExports,
     sourceType,
+    dynamicDispatchSites,
   };
 }

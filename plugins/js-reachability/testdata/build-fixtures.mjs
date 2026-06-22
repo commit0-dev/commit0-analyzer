@@ -844,6 +844,168 @@ function buildResolveFixtures() {
   write(path.join(nmDeclaredFlat, "index.js"), `module.exports = {};` + "\n");
 }
 
+// ── gate-g1 ───────────────────────────────────────────────────────────────────
+// Gate G1-JS fixture: a minimal npm project that exercises the four labeled
+// confidence tiers required by Phase 5.
+//
+// Packages installed:
+//   serialize-javascript@3.0.0  — real npm advisory GHSA-h9rv-jmmf-4pgx
+//   lodash@4.17.21              — installed but NEVER imported (tier b)
+//
+// Source files:
+//   src/index.js        — imports and calls serialize-javascript (tier a)
+//   src/dyn-require.js  — dynamic require(variable) path (tier c)
+//   src/symbol-caller.js — imports the named export 'serialize' directly (tier d)
+
+function buildGateG1() {
+  const root = path.join(projects, "gate-g1");
+
+  // ── package.json (static — must already exist as committed file) ──────────
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "gate-g1",
+        version: "1.0.0",
+        private: true,
+        main: "./src/index.js",
+        dependencies: {
+          "serialize-javascript": "^3.0.0",
+          lodash: "^4.17.21",
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ── Source files ──────────────────────────────────────────────────────────
+
+  // tier (a): imports and calls serialize-javascript
+  write(
+    path.join(root, "src", "index.js"),
+    [
+      `const serialize = require("serialize-javascript");`,
+      ``,
+      `function run(data) {`,
+      `  return serialize(data);`,
+      `}`,
+      ``,
+      `module.exports = { run };`,
+      ``,
+    ].join("\n")
+  );
+
+  // tier (c): dynamic require — the specifier is a variable, not a literal
+  write(
+    path.join(root, "src", "dyn-require.js"),
+    [
+      `function loadPlugin(name) {`,
+      `  // non-literal specifier → UNKNOWN frontier`,
+      `  return require(name);`,
+      `}`,
+      ``,
+      `module.exports = { loadPlugin };`,
+      ``,
+    ].join("\n")
+  );
+
+  // tier (d): imports the named export 'serialize' via ESM destructure
+  // so the engine can trace it as a symbol-level call
+  write(
+    path.join(root, "src", "symbol-caller.js"),
+    [
+      `const { serialize } = require("serialize-javascript");`,
+      ``,
+      `function callIt(data) {`,
+      `  return serialize(data);`,
+      `}`,
+      ``,
+      `module.exports = { callIt };`,
+      ``,
+    ].join("\n")
+  );
+
+  // ── package-lock.json (gitignored) ────────────────────────────────────────
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "gate-g1",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "gate-g1",
+            version: "1.0.0",
+            dependencies: {
+              "serialize-javascript": "^3.0.0",
+              lodash: "^4.17.21",
+            },
+          },
+          "node_modules/serialize-javascript": {
+            version: "3.0.0",
+            resolved:
+              "https://registry.npmjs.org/serialize-javascript/-/serialize-javascript-3.0.0.tgz",
+            integrity: "sha512-gate-g1-fixture",
+          },
+          "node_modules/lodash": {
+            version: "4.17.21",
+            resolved:
+              "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            integrity: "sha512-gate-g1-lodash",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ── node_modules layout (gitignored) ──────────────────────────────────────
+  rmdir(path.join(root, "node_modules"));
+
+  // serialize-javascript — the vulnerable package being tested
+  const nmSerialize = path.join(root, "node_modules", "serialize-javascript");
+  mkdir(nmSerialize);
+  write(
+    path.join(nmSerialize, "package.json"),
+    JSON.stringify(
+      { name: "serialize-javascript", version: "3.0.0", main: "./index.js" },
+      null,
+      2
+    ) + "\n"
+  );
+  // Minimal implementation that exports 'serialize' as the main export AND
+  // as a named property so both default and destructured imports resolve.
+  write(
+    path.join(nmSerialize, "index.js"),
+    [
+      `function serialize(val) { return JSON.stringify(val); }`,
+      `serialize.serialize = serialize;`,
+      `module.exports = serialize;`,
+      ``,
+    ].join("\n")
+  );
+
+  // lodash — installed but never imported by any fixture source file (tier b)
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  write(
+    path.join(nmLodash, "package.json"),
+    JSON.stringify(
+      { name: "lodash", version: "4.17.21", main: "./lodash.js" },
+      null,
+      2
+    ) + "\n"
+  );
+  write(
+    path.join(nmLodash, "lodash.js"),
+    `module.exports = {};` + "\n"
+  );
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -860,4 +1022,5 @@ export default function setup() {
   buildBerryYarn();
   buildPnpmPeerSuffix();
   buildResolveFixtures();
+  buildGateG1();
 }
