@@ -18,10 +18,12 @@ type Symbol struct {
 // VersionRange represents a single semver range event pair.
 // Both Introduced and Fixed are canonical semver strings (e.g. "v1.2.3").
 // An empty Introduced means "since the beginning" (v0.0.0).
-// An empty Fixed means "unfixed" (still vulnerable).
+// An empty Fixed and empty LastAffected means "unfixed" (still vulnerable).
+// At most one of Fixed and LastAffected is set per range.
 type VersionRange struct {
-	Introduced string // inclusive lower bound; empty = v0.0.0
-	Fixed      string // exclusive upper bound; empty = no fix yet
+	Introduced   string // inclusive lower bound; empty = v0.0.0
+	Fixed        string // exclusive upper bound; empty = no fix yet
+	LastAffected string // inclusive upper bound (OSV last_affected); empty = not used
 }
 
 // Advisory is the internal representation of a resolved vulnerability advisory.
@@ -62,12 +64,24 @@ type Advisory struct {
 	DBSourceVersion string // version string reported by the DB (e.g. "2024-06-01T00:00:00Z")
 }
 
-// AffectsVersion reports whether the advisory affects the given semver version.
-// version must be a canonical "vX.Y.Z" string. Returns false on any parse error
-// (conservative: treat unparseable versions as unknown upstream, not here).
+// AffectsVersion reports whether the advisory affects the given version.
+//
+// Routing is ecosystem-aware:
+//   - npm: uses node-semver semantics via npmVersionInRange (bare versions, no "v"
+//     prefix required, correct prerelease and 4-part-version handling).
+//   - All other ecosystems (Go, etc.): uses the existing Go semver path via
+//     versionInRange, which requires a canonical "vX.Y.Z" string.
+//
+// Returns false on any parse error (conservative: unknown → not matched).
 func (a *Advisory) AffectsVersion(version string) bool {
 	for _, r := range a.VersionRanges {
-		if versionInRange(version, r) {
+		var matched bool
+		if a.Ecosystem == EcosystemNPM {
+			matched = npmVersionInRange(version, r)
+		} else {
+			matched = versionInRange(version, r)
+		}
+		if matched {
 			return true
 		}
 	}
@@ -118,9 +132,12 @@ func formatVersionRanges(ranges []VersionRange) string {
 		if introduced == "" {
 			introduced = "0"
 		}
-		if r.Fixed != "" {
+		switch {
+		case r.Fixed != "":
 			out += "[" + introduced + "," + r.Fixed + ")"
-		} else {
+		case r.LastAffected != "":
+			out += "[" + introduced + "," + r.LastAffected + "]"
+		default:
 			out += ">=" + introduced
 		}
 	}

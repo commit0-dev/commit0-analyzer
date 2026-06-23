@@ -485,13 +485,17 @@ func (idx *advisoryIndex) lookup(pkg Package, version string, sources []string) 
 	if len(candidates) == 0 {
 		return nil
 	}
+	// canonical adds the "v" prefix required by the Go semver path; npmVersionInRange
+	// strips it again, so this is harmless for npm but required for Go.
 	queryVersion := canonical(version)
 	var results []Advisory
 	for i := range candidates {
 		// Copy so the cached index is never mutated by per-query stamping.
 		adv := candidates[i]
+		// Set Ecosystem before version matching so AffectsVersion routes to the
+		// correct semver implementation (npm vs. Go).
+		adv.Ecosystem = pkg.Ecosystem
 		if adv.AffectsVersion(queryVersion) {
-			adv.Ecosystem = pkg.Ecosystem
 			adv.Sources = append([]string(nil), sources...)
 			results = append(results, adv)
 		}

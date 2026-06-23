@@ -43,8 +43,9 @@ type osvRange struct {
 }
 
 type osvEvent struct {
-	Introduced string `json:"introduced,omitempty"`
-	Fixed      string `json:"fixed,omitempty"`
+	Introduced   string `json:"introduced,omitempty"`
+	Fixed        string `json:"fixed,omitempty"`
+	LastAffected string `json:"last_affected,omitempty"`
 }
 
 type osvEcosystemSpecific struct {
@@ -97,12 +98,12 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 			if !strings.EqualFold(r.Type, "semver") {
 				continue
 			}
-			vr := extractVersionRange(r.Events)
-			if vr.Introduced != "" || vr.Fixed != "" {
-				adv.VersionRanges = append(adv.VersionRanges, vr)
+			vrs := extractVersionRanges(r.Events)
+			if len(vrs) > 0 {
+				adv.VersionRanges = append(adv.VersionRanges, vrs...)
 			} else {
-				// At least one event existed but produced no useful range
-				// — include an open-ended range (all versions affected).
+				// No events or no ranges produced — include an open-ended range
+				// (all versions affected).
 				adv.VersionRanges = append(adv.VersionRanges, VersionRange{})
 			}
 		}
@@ -129,26 +130,45 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 	return adv, nil
 }
 
-// extractVersionRange converts a flat OSV events list into a single VersionRange.
-// OSV interleaves introduced/fixed events; we take the last introduced and last
-// fixed we encounter (MVP: single contiguous range per SEMVER block).
-func extractVersionRange(events []osvEvent) VersionRange {
-	var vr VersionRange
+// extractVersionRanges converts a flat OSV events list into a slice of VersionRanges,
+// one per introduced → (fixed | last_affected) pair. Events are processed in order
+// per the OSV spec: introduced opens a range, fixed closes it exclusively, and
+// last_affected closes it inclusively. Multiple pairs in one events block produce
+// multiple disjoint ranges — all are returned. An introduced event with no closing
+// event becomes an open-ended range [introduced, ∞).
+func extractVersionRanges(events []osvEvent) []VersionRange {
+	var ranges []VersionRange
+	var current *VersionRange
 	for _, e := range events {
 		if e.Introduced != "" {
-			// "0" in OSV means "since the beginning" — normalise to empty so our
-			// versionInRange treats it as unbounded lower.
-			if e.Introduced == "0" {
-				vr.Introduced = ""
-			} else {
-				vr.Introduced = e.Introduced
+			// Flush any open range without a close event.
+			if current != nil {
+				ranges = append(ranges, *current)
 			}
+			introduced := e.Introduced
+			// "0" in OSV means "since the beginning" — normalise to empty so
+			// versionInRange treats it as unbounded lower.
+			if introduced == "0" {
+				introduced = ""
+			}
+			current = &VersionRange{Introduced: introduced}
 		}
-		if e.Fixed != "" {
-			vr.Fixed = e.Fixed
+		if e.Fixed != "" && current != nil {
+			current.Fixed = e.Fixed
+			ranges = append(ranges, *current)
+			current = nil
+		}
+		if e.LastAffected != "" && current != nil {
+			current.LastAffected = e.LastAffected
+			ranges = append(ranges, *current)
+			current = nil
 		}
 	}
-	return vr
+	// Flush a trailing open-ended range (introduced with no fixed/last_affected).
+	if current != nil {
+		ranges = append(ranges, *current)
+	}
+	return ranges
 }
 
 // ─── Shared dir-backed reader ─────────────────────────────────────────────────
@@ -226,14 +246,16 @@ func (d *dirSource) query(ctx context.Context, pkg Package, version string) ([]A
 		if advModule != queryName {
 			continue
 		}
-		// Normalise the query version to the canonical "vX.Y.Z" form expected by
-		// versionInRange / golang.org/x/mod/semver. Go module versions already carry
-		// the "v" prefix; npm lockfile versions are bare semver (e.g. "1.5.0") and
-		// need it added. The canonical() helper adds "v" when absent and is a no-op
-		// for already-canonical versions.
+		// Set Ecosystem before version matching so AffectsVersion can route to
+		// the correct semver implementation (npm vs. Go).
+		adv.Ecosystem = pkg.Ecosystem
+
+		// Normalise the query version for the Go semver path (canonical adds the
+		// "v" prefix required by golang.org/x/mod/semver). For npm, AffectsVersion
+		// routes to npmVersionInRange which strips any "v" prefix itself, so
+		// canonical() is a no-op there but harmless.
 		queryVersion := canonical(version)
 		if adv.AffectsVersion(queryVersion) {
-			adv.Ecosystem = pkg.Ecosystem
 			// Override Sources with the caller's attribution tag so that the
 			// same parseOSVRecord result can carry different provenance depending
 			// on which source's cache dir was scanned.

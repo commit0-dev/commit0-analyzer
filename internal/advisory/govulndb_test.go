@@ -202,6 +202,149 @@ func TestGoVulnDBClient_Query_NonWithdrawnStillReturned(t *testing.T) {
 	assert.Equal(t, "GO-2024-0001", advisories[0].ID)
 }
 
+// TestExtractVersionRanges_MultiPair verifies that an events array with multiple
+// introduced/fixed pairs produces one VersionRange per pair (none dropped).
+// OSV semantics: [{introduced:0},{fixed:1.2.0},{introduced:2.0.0},{fixed:2.1.0}]
+// → two disjoint ranges [0,1.2.0) and [2.0.0,2.1.0).
+func TestExtractVersionRanges_MultiPair(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "0"},
+		{Fixed: "1.2.0"},
+		{Introduced: "2.0.0"},
+		{Fixed: "2.1.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 2, "two disjoint ranges expected")
+	assert.Equal(t, VersionRange{Introduced: "", Fixed: "1.2.0"}, got[0])
+	assert.Equal(t, VersionRange{Introduced: "2.0.0", Fixed: "2.1.0"}, got[1])
+}
+
+// TestExtractVersionRanges_LastAffectedInclusive verifies that a last_affected event
+// closes the range with an inclusive upper bound.
+func TestExtractVersionRanges_LastAffectedInclusive(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "0"},
+		{LastAffected: "1.2.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 1)
+	assert.Equal(t, VersionRange{Introduced: "", LastAffected: "1.2.0"}, got[0])
+}
+
+// TestExtractVersionRanges_SinglePairUnchanged verifies that a simple single-pair
+// events list still produces exactly one VersionRange (regression guard).
+func TestExtractVersionRanges_SinglePairUnchanged(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "0"},
+		{Fixed: "1.5.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 1)
+	assert.Equal(t, VersionRange{Introduced: "", Fixed: "1.5.0"}, got[0])
+}
+
+// TestExtractVersionRanges_OpenEnded verifies that an introduced event with no
+// closing fixed/last_affected produces an open-ended range.
+func TestExtractVersionRanges_OpenEnded(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "1.0.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 1)
+	assert.Equal(t, VersionRange{Introduced: "1.0.0"}, got[0])
+}
+
+// TestAffectsVersion_MultiPair_Go verifies that Advisory.AffectsVersion correctly
+// handles two disjoint ranges for the Go ecosystem:
+//   - 1.1.0 is in [0, 1.2.0)        → affected
+//   - 1.5.0 is between the ranges    → NOT affected
+//   - 2.0.5 is in [2.0.0, 2.1.0)    → affected
+//   - 2.5.0 is past the upper range  → NOT affected
+func TestAffectsVersion_MultiPair_Go(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemGo,
+		VersionRanges: []VersionRange{
+			{Introduced: "", Fixed: "1.2.0"},
+			{Introduced: "2.0.0", Fixed: "2.1.0"},
+		},
+	}
+
+	assert.True(t, adv.AffectsVersion("v1.1.0"), "v1.1.0 in [0,1.2.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v1.5.0"), "v1.5.0 between ranges must NOT be affected")
+	assert.True(t, adv.AffectsVersion("v2.0.5"), "v2.0.5 in [2.0.0,2.1.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v2.5.0"), "v2.5.0 past upper range must NOT be affected")
+}
+
+// TestAffectsVersion_LastAffected_Go verifies inclusive upper bound semantics for the
+// Go ecosystem: last_affected version itself IS affected, one patch above is NOT.
+func TestAffectsVersion_LastAffected_Go(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemGo,
+		VersionRanges: []VersionRange{
+			{Introduced: "", LastAffected: "1.2.0"},
+		},
+	}
+
+	assert.True(t, adv.AffectsVersion("v1.2.0"), "v1.2.0 (last_affected) must be affected (inclusive)")
+	assert.False(t, adv.AffectsVersion("v1.2.1"), "v1.2.1 above last_affected must NOT be affected")
+	assert.True(t, adv.AffectsVersion("v1.0.0"), "v1.0.0 below last_affected must be affected")
+}
+
+// TestAffectsVersion_MultiPair_ParsedFromOSV verifies end-to-end parsing of a
+// multi-pair OSV JSON record for the Go ecosystem.
+func TestAffectsVersion_MultiPair_ParsedFromOSV(t *testing.T) {
+	// Synthesize an OSV record with two disjoint ranges in a single SEMVER block.
+	rawJSON := []byte(`{
+		"id": "TEST-MULTI-0001",
+		"affected": [{
+			"package": {"ecosystem": "Go", "name": "github.com/example/multipkg"},
+			"ranges": [{
+				"type": "SEMVER",
+				"events": [
+					{"introduced": "0"},
+					{"fixed": "1.2.0"},
+					{"introduced": "2.0.0"},
+					{"fixed": "2.1.0"}
+				]
+			}]
+		}]
+	}`)
+
+	adv, err := parseOSVRecord(rawJSON, EcosystemGo)
+	require.NoError(t, err)
+	require.Len(t, adv.VersionRanges, 2, "two disjoint ranges must be parsed")
+
+	assert.True(t, adv.AffectsVersion("v1.1.0"), "v1.1.0 in [0,1.2.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v1.5.0"), "v1.5.0 between ranges must NOT be affected")
+	assert.True(t, adv.AffectsVersion("v2.0.5"), "v2.0.5 in [2.0.0,2.1.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v2.5.0"), "v2.5.0 past upper range must NOT be affected")
+}
+
+// TestAffectsVersion_LastAffected_ParsedFromOSV verifies end-to-end parsing of a
+// last_affected bound from OSV JSON for the Go ecosystem.
+func TestAffectsVersion_LastAffected_ParsedFromOSV(t *testing.T) {
+	rawJSON := []byte(`{
+		"id": "TEST-LASTAFFECTED-0001",
+		"affected": [{
+			"package": {"ecosystem": "Go", "name": "github.com/example/lastpkg"},
+			"ranges": [{
+				"type": "SEMVER",
+				"events": [
+					{"introduced": "0"},
+					{"last_affected": "1.2.0"}
+				]
+			}]
+		}]
+	}`)
+
+	adv, err := parseOSVRecord(rawJSON, EcosystemGo)
+	require.NoError(t, err)
+	require.Len(t, adv.VersionRanges, 1)
+
+	assert.True(t, adv.AffectsVersion("v1.2.0"), "v1.2.0 (last_affected inclusive) must be affected")
+	assert.False(t, adv.AffectsVersion("v1.2.1"), "v1.2.1 above last_affected must NOT be affected")
+}
+
 // TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
