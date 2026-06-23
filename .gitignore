@@ -99,3 +99,6 @@ worktrees/
 
 # Phase 8 acceptance scratch (cloned real repos, OSV snapshot, scan outputs)
 testdata/acceptance/
+
+# plugin-local agent memory (not source)
+plugins/js-reachability/.claude/

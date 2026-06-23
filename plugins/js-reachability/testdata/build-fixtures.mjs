@@ -2169,6 +2169,193 @@ function buildNpmOptionalPlatform() {
   // platform-only-linux and platform-absent-match-npm dirs intentionally not created
 }
 
+// ── depsource-fixtures ────────────────────────────────────────────────────────
+// Fake installed-package dirs for resolveDepSource tests.
+// All live under projects/depsource-fixtures/node_modules/<name>.
+//
+// (a) esm-source       — exports["."] → ./dist/index.js (readable multi-line ESM)
+// (b) minified-dist    — main → ./dist/bundle.js (single-line minified bundle)
+// (c) types-only       — no runtime entry, types field only
+// (d) cjs-main         — main → ./lib/index.js (readable multi-line CJS)
+// (e) exports-conditions — exports["."] with import/require conditions
+
+function buildDepSourceFixtures() {
+  const root = path.join(projects, "depsource-fixtures");
+  const nm = path.join(root, "node_modules");
+  rmdir(nm);
+
+  // (a) esm-source: exports map pointing to readable ESM
+  const esmSrc = path.join(nm, "esm-source");
+  mkdir(path.join(esmSrc, "dist"));
+  write(
+    path.join(esmSrc, "package.json"),
+    JSON.stringify(
+      {
+        name: "esm-source",
+        version: "1.0.0",
+        exports: { ".": "./dist/index.js" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  // Multi-line readable ESM — clearly NOT minified
+  write(
+    path.join(esmSrc, "dist", "index.js"),
+    [
+      `// esm-source entry`,
+      `export function add(a, b) {`,
+      `  return a + b;`,
+      `}`,
+      ``,
+      `export function subtract(a, b) {`,
+      `  return a - b;`,
+      `}`,
+      ``,
+      `export function multiply(a, b) {`,
+      `  return a * b;`,
+      `}`,
+      ``,
+      `export const version = "1.0.0";`,
+      ``,
+    ].join("\n")
+  );
+
+  // (b) minified-dist: main pointing to a single-line minified bundle
+  const minDist = path.join(nm, "minified-dist");
+  mkdir(path.join(minDist, "dist"));
+  write(
+    path.join(minDist, "package.json"),
+    JSON.stringify(
+      { name: "minified-dist", version: "2.0.0", main: "./dist/bundle.js" },
+      null,
+      2
+    ) + "\n"
+  );
+  // Single very long line — typical minified output (>500 chars avg line length)
+  const minifiedCode =
+    `!function(e,t){"object"==typeof exports&&"object"==typeof module?module.exports=t():"function"==typeof define&&define.amd?define([],t):` +
+    `"object"==typeof exports?exports.minifiedDist=t():e.minifiedDist=t()}(this,(function(){` +
+    `"use strict";function n(e,t){return e+t}function r(e,t){return e-t}function o(e,t){return e*t}` +
+    `function i(e,t){return e/t}function a(e){return Math.abs(e)}function s(e){return Math.sqrt(e)}` +
+    `function u(e,t){return Math.pow(e,t)}function c(e){return Math.floor(e)}function l(e){return Math.ceil(e)}` +
+    `function f(e){return Math.round(e)}function p(e,t){return Math.min(e,t)}function d(e,t){return Math.max(e,t)}` +
+    `function h(e){return e.toString(16)}function g(e){return parseInt(e,16)}function m(e){return e.toString(2)}` +
+    `function v(e){return parseInt(e,2)}function y(e,t){return e<<t}function b(e,t){return e>>t}` +
+    `function w(e,t){return e&t}function x(e,t){return e|t}function k(e,t){return e^t}function E(e){return~e}` +
+    `function S(e){return!e}function T(e){return!!e}function _(e,t){return e&&t}function O(e,t){return e||t}` +
+    `function C(e,t,n){return e?t:n}function A(e){return Array.isArray(e)}function R(e){return"string"==typeof e}` +
+    `function N(e){return"number"==typeof e}function I(e){return"boolean"==typeof e}function P(e){return null===e}` +
+    `function j(e){return void 0===e}function M(e){return"function"==typeof e}function L(e){return"object"==typeof e&&null!==e}` +
+    `return{add:n,sub:r,mul:o,div:i,abs:a,sqrt:s,pow:u,floor:c,ceil:l,round:f,min:p,max:d,toHex:h,fromHex:g,` +
+    `toBin:m,fromBin:v,shl:y,shr:b,band:w,bor:x,bxor:k,bnot:E,not:S,bool:T,and:_,or:O,tern:C,isArr:A,isStr:R,` +
+    `isNum:N,isBool:I,isNull:P,isUndef:j,isFn:M,isObj:L}}));`;
+  write(path.join(minDist, "dist", "bundle.js"), minifiedCode + "\n");
+
+  // (c) types-only: no runtime files, only .d.ts
+  const typesOnly = path.join(nm, "types-only");
+  mkdir(typesOnly);
+  write(
+    path.join(typesOnly, "package.json"),
+    JSON.stringify(
+      {
+        name: "types-only",
+        version: "1.0.0",
+        types: "./index.d.ts",
+        // intentionally no main, module, or exports
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  write(
+    path.join(typesOnly, "index.d.ts"),
+    `export declare function helper(x: unknown): string;\n`
+  );
+  // no index.js — runtime entry is absent
+
+  // (d) cjs-main: main pointing to readable CJS
+  const cjsMain = path.join(nm, "cjs-main");
+  mkdir(path.join(cjsMain, "lib"));
+  write(
+    path.join(cjsMain, "package.json"),
+    JSON.stringify(
+      { name: "cjs-main", version: "1.2.3", main: "./lib/index.js" },
+      null,
+      2
+    ) + "\n"
+  );
+  write(
+    path.join(cjsMain, "lib", "index.js"),
+    [
+      `"use strict";`,
+      ``,
+      `function format(value) {`,
+      `  if (typeof value !== "string") {`,
+      `    throw new TypeError("expected string");`,
+      `  }`,
+      `  return value.trim().toLowerCase();`,
+      `}`,
+      ``,
+      `function parse(input) {`,
+      `  return input.split(",").map(format);`,
+      `}`,
+      ``,
+      `module.exports = { format, parse };`,
+      ``,
+    ].join("\n")
+  );
+
+  // (e) exports-conditions: exports map with import and require conditions
+  const expCond = path.join(nm, "exports-conditions");
+  mkdir(path.join(expCond, "esm"));
+  mkdir(path.join(expCond, "cjs"));
+  write(
+    path.join(expCond, "package.json"),
+    JSON.stringify(
+      {
+        name: "exports-conditions",
+        version: "3.0.0",
+        exports: {
+          ".": {
+            import: "./esm/index.js",
+            require: "./cjs/index.js",
+            default: "./cjs/index.js",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  // ESM entry — readable multi-line
+  write(
+    path.join(expCond, "esm", "index.js"),
+    [
+      `// ESM entry for exports-conditions`,
+      `export function compute(x) {`,
+      `  return x * 2;`,
+      `}`,
+      ``,
+      `export function identity(x) {`,
+      `  return x;`,
+      `}`,
+      ``,
+    ].join("\n")
+  );
+  // CJS entry — also readable
+  write(
+    path.join(expCond, "cjs", "index.js"),
+    [
+      `"use strict";`,
+      `function compute(x) { return x * 2; }`,
+      `function identity(x) { return x; }`,
+      `module.exports = { compute, identity };`,
+      ``,
+    ].join("\n")
+  );
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -2212,4 +2399,5 @@ export default function setup() {
   buildYarnWsNested();
   buildPnpmOptionalPlatform();
   buildNpmOptionalPlatform();
+  buildDepSourceFixtures();
 }
