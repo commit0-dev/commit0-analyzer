@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { IncompleteEntry, LockfileGraph, ResolvedPackage } from "../project/model.js";
+import { isPlatformExcluded } from "./platform-filter.js";
 
 export interface PnpmParseResult {
   graph: LockfileGraph;
@@ -39,7 +40,16 @@ export interface PnpmParseResult {
  * On missing lockfile returns an empty/clean result — never throws.
  * On corrupt lockfile returns corrupt=true with empty graph.
  */
-export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> {
+/** Optional host descriptor for deterministic platform filtering in tests. */
+export interface HostDescriptor {
+  platform?: string;
+  arch?: string;
+}
+
+export async function parsePnpmLockfile(
+  root: string,
+  host?: HostDescriptor
+): Promise<PnpmParseResult> {
   const empty: PnpmParseResult = {
     graph: new Map(),
     importers: new Map(),
@@ -90,6 +100,16 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
 
       const { name, version } = parsed;
 
+      // Read platform constraints from the lockfile entry.
+      const entry = packagesRaw[rawKey] as Record<string, unknown> | undefined;
+      const entryOptional = entry?.["optional"] === true;
+      const entryOs = Array.isArray(entry?.["os"])
+        ? (entry["os"] as string[])
+        : undefined;
+      const entryCpu = Array.isArray(entry?.["cpu"])
+        ? (entry["cpu"] as string[])
+        : undefined;
+
       // Build the canonical store path. pnpm encodes the scope separator "/" as
       // "+" in the .pnpm store directory name (e.g. @actions/core@3.0.1 lives at
       // .pnpm/@actions+core@3.0.1/), while the inner node_modules/<name> keeps the
@@ -129,6 +149,17 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
         }
       }
       if (!resolved) {
+        // Suppress dep-unresolved for optional packages whose os/cpu constraints
+        // exclude the current host: they are legitimately not installed.
+        const platformSkip =
+          entryOptional &&
+          isPlatformExcluded(entryOs, entryCpu, host?.platform, host?.arch);
+        if (platformSkip) {
+          // Platform-excluded optional package: do not insert a fabricated dir
+          // into the graph so no downstream stage tries to read a path that
+          // does not exist on the current platform.
+          continue;
+        }
         // Store entry absent or dangling symlink — surface as incomplete
         // so callers know the dir path is a fabricated fallback, not real.
         incomplete.push({

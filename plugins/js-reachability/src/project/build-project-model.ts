@@ -8,8 +8,9 @@ import type {
 } from "./model.js";
 import { detectManager } from "./detect-manager.js";
 import { discoverWorkspaces } from "./discover-workspaces.js";
-import { parseLockfile, type LockfileParseResult } from "../lockfile/index.js";
+import { parseLockfile, type LockfileParseResult, type HostDescriptor } from "../lockfile/index.js";
 import type { PnpmParseResult } from "../lockfile/pnpm.js";
+import { isPlatformExcluded } from "../lockfile/platform-filter.js";
 
 /**
  * Find the resolved package for a declared dependency inside a workspace.
@@ -121,8 +122,14 @@ function isWorkspaceRef(specifier: string, depName: string, wsNames: Set<string>
 /**
  * Assemble the full ProjectModel for a project root.
  * Never throws — all errors surface as incomplete[] entries.
+ *
+ * The optional `host` descriptor is used for deterministic platform filtering
+ * (primarily in tests). Production callers omit it; process.platform/arch are used.
  */
-export async function buildProjectModel(root: string): Promise<ProjectModel> {
+export async function buildProjectModel(
+  root: string,
+  host?: HostDescriptor
+): Promise<ProjectModel> {
   const incomplete: IncompleteEntry[] = [];
 
   // 1. Detect package manager
@@ -139,10 +146,12 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
   // 3. Parse lockfile
   let graph: LockfileGraph = new Map();
   let importers: PnpmParseResult["importers"] = new Map();
+  let optionalPlatformConstraints = new Map<string, { os?: string[]; cpu?: string[] }>();
   try {
-    const lockResult: LockfileParseResult = await parseLockfile(root, manager);
+    const lockResult: LockfileParseResult = await parseLockfile(root, manager, host);
     graph = lockResult.graph;
     importers = lockResult.importers;
+    optionalPlatformConstraints = lockResult.optionalPlatformConstraints;
     incomplete.push(...lockResult.incomplete);
   } catch (err) {
     incomplete.push({
@@ -159,6 +168,10 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
   for (const ws of workspaces) {
     const { required, optional } = allDeclaredDeps(ws.manifest);
     const wsRelDir = path.relative(root, ws.dir);
+
+    // Effective host values for platform exclusion checks (injectable for tests).
+    const hostPlatform = host?.platform ?? process.platform;
+    const hostArch = host?.arch ?? process.arch;
 
     // Process required deps — unresolvable ones → incomplete
     for (const [depName, specifier] of Object.entries(required)) {
@@ -205,8 +218,9 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
       }
     }
 
-    // Process optional deps — resolution failure is NOT surfaced as incomplete
-    // because optional deps may legitimately be absent on the current platform.
+    // Process optional deps — resolution failure is silenced only when the dep
+    // is platform-excluded on the current host. A host-runnable optional dep that
+    // is absent (not in the lockfile / node_modules) still emits dep-unresolved.
     for (const [depName, specifier] of Object.entries(optional)) {
       if (wsNames.has(depName) || isWorkspaceRef(specifier, depName, wsNames)) {
         if (wsNames.has(depName) && !ws.localDeps.includes(depName)) {
@@ -236,8 +250,37 @@ export async function buildProjectModel(root: string): Promise<ProjectModel> {
       );
       if (resolved) {
         ws.deps.set(depName, resolved);
+      } else {
+        // Determine whether this optional dep is excluded on the current host.
+        // For npm: look up platform constraints from the lockfile entry.
+        // For pnpm: platform-excluded packages are already skipped in the parser
+        //           (they don't appear in the graph), so missing-from-graph means
+        //           either platform-excluded (handled by pnpm parser) or truly absent.
+        //           We only need to emit dep-unresolved for npm here.
+        if (manager === "npm") {
+          const localKey = `${wsRelDir ? wsRelDir + "/" : ""}node_modules/${depName}`;
+          const hoistedKey = `node_modules/${depName}`;
+          const constraints =
+            optionalPlatformConstraints.get(localKey) ??
+            optionalPlatformConstraints.get(hoistedKey);
+          const platformExcluded =
+            constraints !== undefined &&
+            isPlatformExcluded(constraints.os, constraints.cpu, hostPlatform, hostArch);
+          if (!platformExcluded) {
+            incomplete.push({
+              scope: `${ws.name}:${depName}`,
+              reason: `Could not resolve optional "${depName}@${specifier}" in lockfile.`,
+              kind: "dep-unresolved",
+            });
+          }
+        }
+        // For pnpm/yarn: platform-excluded optionals are already suppressed at the
+        // lockfile-parse stage; remaining unresolved optionals surface dep-unresolved
+        // only if they appeared in the lockfile but the store path was fabricated.
+        // Those are already in incomplete[] from the parser. Unresolved optionals
+        // that never appeared in the lockfile at all are silently ignored (the
+        // package manager itself decided not to install them).
       }
-      // No incomplete for unresolved optional deps
     }
 
     // Sort localDeps deterministically

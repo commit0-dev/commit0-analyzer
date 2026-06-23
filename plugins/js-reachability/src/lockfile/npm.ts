@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { LockfileGraph, ResolvedPackage } from "../project/model.js";
+import type { HostDescriptor } from "./pnpm.js";
+export type { HostDescriptor };
 
 interface NpmLockPackages {
   [key: string]: {
@@ -8,6 +10,9 @@ interface NpmLockPackages {
     name?: string;
     resolved?: string;
     link?: boolean;
+    optional?: boolean;
+    os?: string[];
+    cpu?: string[];
     dependencies?: Record<string, string>;
   };
 }
@@ -21,6 +26,12 @@ export interface NpmParseResult {
   graph: LockfileGraph;
   /** True when the lockfile file exists but could not be parsed. */
   corrupt: boolean;
+  /**
+   * Map of lockfile key → platform constraints for optional entries.
+   * Used by buildProjectModel to decide whether an absent optional dep
+   * is platform-excluded (safe to skip) or genuinely missing.
+   */
+  optionalPlatformConstraints: Map<string, { os?: string[]; cpu?: string[] }>;
 }
 
 /**
@@ -34,8 +45,15 @@ export interface NpmParseResult {
  * Returns a result with the parsed graph and a corrupt flag.
  * Never throws.
  */
-export async function parseNpmLockfile(root: string): Promise<NpmParseResult> {
+export async function parseNpmLockfile(
+  root: string,
+  _host?: HostDescriptor
+): Promise<NpmParseResult> {
   const graph: LockfileGraph = new Map();
+  const optionalPlatformConstraints = new Map<
+    string,
+    { os?: string[]; cpu?: string[] }
+  >();
 
   let raw: string;
   let filename = "package-lock.json";
@@ -47,7 +65,7 @@ export async function parseNpmLockfile(root: string): Promise<NpmParseResult> {
     try {
       raw = await fs.readFile(path.join(root, filename), "utf8");
     } catch {
-      return { graph, corrupt: false }; // no lockfile — not corrupt, just absent
+      return { graph, corrupt: false, optionalPlatformConstraints }; // no lockfile — not corrupt, just absent
     }
   }
 
@@ -55,11 +73,11 @@ export async function parseNpmLockfile(root: string): Promise<NpmParseResult> {
   try {
     lock = JSON.parse(raw) as NpmLockfile;
   } catch {
-    return { graph, corrupt: true }; // file exists but unparseable
+    return { graph, corrupt: true, optionalPlatformConstraints }; // file exists but unparseable
   }
 
   if (!lock.packages || typeof lock.packages !== "object") {
-    return { graph, corrupt: false };
+    return { graph, corrupt: false, optionalPlatformConstraints };
   }
 
   for (const [key, entry] of Object.entries(lock.packages)) {
@@ -74,6 +92,15 @@ export async function parseNpmLockfile(root: string): Promise<NpmParseResult> {
     const nmIdx = key.lastIndexOf("node_modules/");
     const pkgName = key.slice(nmIdx + "node_modules/".length);
 
+    // Record platform constraints for optional entries so callers can determine
+    // whether an absent optional dep is platform-excluded or genuinely missing.
+    if (entry.optional === true) {
+      optionalPlatformConstraints.set(key, {
+        os: entry.os,
+        cpu: entry.cpu,
+      });
+    }
+
     const resolved: ResolvedPackage = {
       name: entry.name ?? pkgName,
       version: entry.version,
@@ -82,5 +109,5 @@ export async function parseNpmLockfile(root: string): Promise<NpmParseResult> {
     graph.set(key, resolved);
   }
 
-  return { graph, corrupt: false };
+  return { graph, corrupt: false, optionalPlatformConstraints };
 }

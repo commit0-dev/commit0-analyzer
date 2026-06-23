@@ -1982,6 +1982,193 @@ function buildYarnWsNested() {
   writePkg(nmLodash, "lodash", "4.17.21");
 }
 
+// ── pnpm-optional-platform ───────────────────────────────────────────────────
+// pnpm project with optional deps that carry os/cpu constraints.
+//
+// Packages in lockfile (no store dirs except lodash):
+//   lodash@4.17.21        – required, store present → resolves clean
+//   platform-only-linux@1.0.0 – optional, os:[linux] → excluded on darwin, store ABSENT → no dep-unresolved
+//   platform-only-x64@1.0.0   – optional, cpu:[x64]  → excluded on arm64, store ABSENT → no dep-unresolved
+//   platform-absent-match@1.0.0 – optional, os:[darwin] cpu:[arm64] → MATCHES host, store ABSENT → dep-unresolved
+//   required-absent@1.0.0  – required (not optional), store ABSENT → dep-unresolved
+
+function buildPnpmOptionalPlatform() {
+  const root = path.join(projects, "pnpm-optional-platform");
+
+  write(
+    path.join(root, "pnpm-lock.yaml"),
+    [
+      "lockfileVersion: '6.0'",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    dependencies:",
+      "      lodash:",
+      "        specifier: ^4.17.21",
+      "        version: 4.17.21",
+      "      required-absent:",
+      "        specifier: ^1.0.0",
+      "        version: 1.0.0",
+      "    optionalDependencies:",
+      "      platform-only-linux:",
+      "        specifier: ^1.0.0",
+      "        version: 1.0.0",
+      "      platform-only-x64:",
+      "        specifier: ^1.0.0",
+      "        version: 1.0.0",
+      "      platform-absent-match:",
+      "        specifier: ^1.0.0",
+      "        version: 1.0.0",
+      "",
+      "packages:",
+      "",
+      "  /lodash@4.17.21:",
+      "    resolution: {integrity: sha512-abc}",
+      "    dev: false",
+      "",
+      "  /platform-only-linux@1.0.0:",
+      "    resolution: {integrity: sha512-linux}",
+      "    os:",
+      "      - linux",
+      "    optional: true",
+      "    dev: false",
+      "",
+      "  /platform-only-x64@1.0.0:",
+      "    resolution: {integrity: sha512-x64}",
+      "    cpu:",
+      "      - x64",
+      "    optional: true",
+      "    dev: false",
+      "",
+      "  /platform-absent-match@1.0.0:",
+      "    resolution: {integrity: sha512-match}",
+      "    os:",
+      "      - darwin",
+      "    cpu:",
+      "      - arm64",
+      "    optional: true",
+      "    dev: false",
+      "",
+      "  /required-absent@1.0.0:",
+      "    resolution: {integrity: sha512-req}",
+      "    dev: false",
+      "",
+    ].join("\n")
+  );
+
+  rmdir(path.join(root, "node_modules"));
+
+  // Only lodge lodash store dir — everything else is intentionally absent
+  const storeLodash = path.join(
+    root,
+    "node_modules",
+    ".pnpm",
+    "lodash@4.17.21",
+    "node_modules",
+    "lodash"
+  );
+  mkdir(storeLodash);
+  writePkg(storeLodash, "lodash", "4.17.21");
+}
+
+// ── npm-optional-platform ─────────────────────────────────────────────────────
+// npm project with optional deps that carry os/cpu constraints in the lockfile.
+//
+// Packages in lockfile packages map:
+//   lodash@4.17.21             – required, installed → resolves clean
+//   platform-only-linux@1.0.0  – optional, os:[linux], NOT installed → no dep-unresolved on non-linux hosts
+//   platform-absent-match-npm@1.0.0 – optional, os:[darwin] cpu:[arm64], NOT in lockfile packages
+//                                       → absent from graph entirely; os/cpu constraints stored separately
+//                                       This dep is in package.json optionalDeps but NOT in lockfile
+//                                       packages map, so resolveNpmDep returns undefined.
+//                                       → dep-unresolved on darwin/arm64 (matches host, but absent)
+//                                       → no dep-unresolved on linux/x64 (excluded on that host)
+// required-absent is in dependencies but absent from the lockfile packages map → dep-unresolved
+//
+// The optionalPlatformConstraints map is populated by parseNpmLockfile for
+// platform-only-linux (which IS in the lockfile) so buildProjectModel can decide
+// whether to suppress dep-unresolved for it.
+// For platform-absent-match-npm (NOT in lockfile packages), constraints come from
+// a separate "optionalConstraintsHints" section added to the lockfile root "" entry's
+// optionalDependencies — but since npm doesn't record constraints there, we use
+// a separate mechanism: the lockfile's packages map entry with optional+os+cpu IS the
+// authoritative source. When absent from packages map entirely, constraints are unknown.
+//
+// Implementation note: for the test to exercise platform-absent-match-npm, it must be
+// present in package.json optionalDependencies AND in the lockfile root "" entry's
+// optionalDependencies, but NOT in the packages map. The optionalPlatformConstraints
+// are populated from packages entries, so this dep won't have entries there — but
+// we add a special "node_modules/platform-absent-match-npm" entry to the packages map
+// with optional+os+cpu so the resolver can find the constraints. The package IS in the
+// graph (from the lockfile packages entry), so resolveNpmDep returns it → it resolves.
+//
+// REVISED SCENARIO: platform-absent-match-npm is in the lockfile packages map but NOT
+// installed (no physical dir). The npm graph contains it (resolves from lockfile).
+// This means the model sees it as resolved, so no dep-unresolved fires for it regardless.
+//
+// TRUE HIGH-3 SCENARIO: "missing-from-npm-lockfile" is in package.json optionalDeps
+// but completely ABSENT from the lockfile packages map. With no constraint info available,
+// this is "unknown" state. Under unknown ≠ safe rule, dep-unresolved must fire.
+// We can't use platform constraints to suppress it since there are none recorded.
+// HOWEVER: the current code unconditionally suppresses ALL optional npm dep misses.
+// The fix: emit dep-unresolved for optional deps absent from lockfile entirely (unknown platform).
+
+function buildNpmOptionalPlatform() {
+  const root = path.join(projects, "npm-optional-platform");
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "npm-optional-platform",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "npm-optional-platform",
+            version: "1.0.0",
+            dependencies: { lodash: "^4.17.21", "required-absent": "^1.0.0" },
+            optionalDependencies: {
+              "platform-only-linux": "^1.0.0",
+              "platform-absent-match-npm": "^1.0.0",
+            },
+          },
+          "node_modules/lodash": {
+            version: "4.17.21",
+            resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+            integrity: "sha512-abc",
+          },
+          // platform-only-linux: os:[linux], in lockfile packages + installed on linux,
+          // but node_modules dir absent on non-linux hosts. Has constraint info → suppress on linux.
+          "node_modules/platform-only-linux": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/platform-only-linux/-/platform-only-linux-1.0.0.tgz",
+            integrity: "sha512-linux",
+            optional: true,
+            os: ["linux"],
+          },
+          // platform-absent-match-npm: NOT in the lockfile packages map at all.
+          // In package.json optionalDependencies but no lockfile entry → resolveNpmDep
+          // returns undefined and optionalPlatformConstraints has no entry for it.
+          // With no constraint info, unknown ≠ safe: dep-unresolved must fire on any host.
+          //
+          // required-absent is NOT in the lockfile packages map at all → dep-unresolved
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+  const nmLodash = path.join(root, "node_modules", "lodash");
+  mkdir(nmLodash);
+  writePkg(nmLodash, "lodash", "4.17.21");
+  // platform-only-linux and platform-absent-match-npm dirs intentionally not created
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -2023,4 +2210,6 @@ export default function setup() {
   buildNpmWsGlobEmptyDir();
   buildNpmWsUnresolvedDep();
   buildYarnWsNested();
+  buildPnpmOptionalPlatform();
+  buildNpmOptionalPlatform();
 }
