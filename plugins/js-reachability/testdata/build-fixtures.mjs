@@ -296,6 +296,77 @@ function buildPnpmWs() {
   writePkg(storeSemver, "semver", "7.6.0");
 }
 
+// ── pnpm-scoped-store ─────────────────────────────────────────────────────────
+// A pnpm project with a SCOPED dependency and a peer-dep-suffixed scoped
+// dependency. pnpm encodes the scope "/" as "+" in the .pnpm store directory
+// name and appends "_<encoded-peers>" for peer-resolved packages. Both must
+// resolve in the virtual store (regression for scoped-dep resolution).
+
+function buildPnpmScopedStore() {
+  const root = path.join(projects, "pnpm-scoped-store");
+
+  write(
+    path.join(root, "pnpm-lock.yaml"),
+    [
+      "lockfileVersion: '6.0'",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    dependencies:",
+      "      '@scope/pkg':",
+      "        specifier: ^1.0.0",
+      "        version: 1.0.0",
+      "      '@scope/peered':",
+      "        specifier: ^1.0.0",
+      "        version: 1.0.0(react@18.0.0)",
+      "    specifiers:",
+      "      '@scope/pkg': ^1.0.0",
+      "      '@scope/peered': ^1.0.0",
+      "",
+      "packages:",
+      "",
+      "  /@scope/pkg@1.0.0:",
+      "    resolution: {integrity: sha512-a}",
+      "    dev: false",
+      "",
+      "  /@scope/peered@1.0.0(react@18.0.0):",
+      "    resolution: {integrity: sha512-b}",
+      "    dev: false",
+      "",
+    ].join("\n")
+  );
+
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "pnpm-scoped-store",
+        version: "1.0.0",
+        dependencies: { "@scope/pkg": "^1.0.0", "@scope/peered": "^1.0.0" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+
+  // Scoped store dir: @scope+pkg@1.0.0
+  const storePkg = path.join(
+    root, "node_modules", ".pnpm", "@scope+pkg@1.0.0", "node_modules", "@scope", "pkg"
+  );
+  mkdir(storePkg);
+  writePkg(storePkg, "@scope/pkg", "1.0.0");
+
+  // Peer-suffixed scoped store dir: @scope+peered@1.0.0_react@18.0.0
+  const storePeered = path.join(
+    root, "node_modules", ".pnpm", "@scope+peered@1.0.0_react@18.0.0", "node_modules", "@scope", "peered"
+  );
+  mkdir(storePeered);
+  writePkg(storePeered, "@scope/peered", "1.0.0");
+}
+
 // ── pnpm-multi-version ────────────────────────────────────────────────────────
 // pnpm workspace: packages/app (lodash 4.16.6) + packages/lib (lodash 4.17.21)
 // .pnpm store: both versions
@@ -1930,6 +2001,7 @@ export default function setup() {
   buildGateG1();
   buildNoEntrypointWs();
   buildDefaultIndexWs();
+  buildPnpmScopedStore();
   // Corpus fixtures
   buildCorpusCjsDirect();
   buildCorpusEsmDirect();

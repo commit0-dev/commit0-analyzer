@@ -103,3 +103,34 @@ describe("parsePnpmLockfile – corrupt lockfile", () => {
     expect(corrupt).toBe(true);
   });
 });
+
+describe("parsePnpmLockfile – scoped + peer-suffixed store dirs", () => {
+  it("resolves a scoped dependency whose store dir encodes the scope slash as +", async () => {
+    const { graph, incomplete } = await parsePnpmLockfile(
+      path.join(fixtures, "pnpm-scoped-store")
+    );
+    const entry = graph.get("/@scope/pkg@1.0.0");
+    expect(entry?.version).toBe("1.0.0");
+    // The resolved dir must be the real on-disk store path, not flagged unresolved.
+    expect(entry?.dir).toContain(path.join("@scope+pkg@1.0.0"));
+    expect(
+      incomplete.some(
+        (e) => e.kind === "dep-unresolved" && e.scope.includes("@scope/pkg")
+      )
+    ).toBe(false);
+  });
+
+  it("resolves a peer-dep-suffixed scoped dependency via the _<peers> store dir", async () => {
+    const { graph, incomplete } = await parsePnpmLockfile(
+      path.join(fixtures, "pnpm-scoped-store")
+    );
+    const entry = graph.get("/@scope/peered@1.0.0(react@18.0.0)");
+    expect(entry?.version).toBe("1.0.0");
+    expect(entry?.dir).toContain("@scope+peered@1.0.0_react@18.0.0");
+    expect(
+      incomplete.some(
+        (e) => e.kind === "dep-unresolved" && e.scope.includes("@scope/peered")
+      )
+    ).toBe(false);
+  });
+});

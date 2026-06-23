@@ -65,6 +65,18 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
   const graph: LockfileGraph = new Map();
   const incomplete: IncompleteEntry[] = [];
 
+  // List the .pnpm virtual store once so we can fall back to peer-dep-suffixed
+  // directory names: pnpm appends "_<encoded-peers>" to a package's store dir
+  // when it has resolved peer dependencies (e.g. the store dir for
+  // @babel/helper-module-transforms@7.29.7 is @babel+helper-module-transforms@7.29.7_@babel+core@7.29.7).
+  const pnpmStoreRoot = path.join(root, "node_modules", ".pnpm");
+  let storeEntries: string[] = [];
+  try {
+    storeEntries = (await fs.readdir(pnpmStoreRoot)).sort();
+  } catch {
+    // No virtual store on disk (not installed / hoisted) — the fallback no-ops.
+  }
+
   // ── 1. Parse packages block ───────────────────────────────────────────────
   const packagesRaw = lock["packages"] as Record<string, unknown> | undefined;
   if (packagesRaw && typeof packagesRaw === "object") {
@@ -78,8 +90,12 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
 
       const { name, version } = parsed;
 
-      // Build the canonical store path
-      const storeEntry = `${name}@${version}`;
+      // Build the canonical store path. pnpm encodes the scope separator "/" as
+      // "+" in the .pnpm store directory name (e.g. @actions/core@3.0.1 lives at
+      // .pnpm/@actions+core@3.0.1/), while the inner node_modules/<name> keeps the
+      // original slash. Without this encoding every scoped dependency fails to
+      // resolve in the virtual store.
+      const storeEntry = `${name.replace(/\//g, "+")}@${version}`;
       const storeDir = path.join(
         root,
         "node_modules",
@@ -90,9 +106,29 @@ export async function parsePnpmLockfile(root: string): Promise<PnpmParseResult> 
       );
 
       let resolvedDir = storeDir;
+      let resolved = false;
       try {
         resolvedDir = await fs.realpath(storeDir);
+        resolved = true;
       } catch {
+        // Exact store dir missing — pnpm may have suffixed it with a peer-dep
+        // context ("<storeEntry>_<encoded-peers>"). Fall back to the first such
+        // variant; they all materialise the same package version on disk.
+        const peerMatch = storeEntries.find((e) =>
+          e.startsWith(`${storeEntry}_`)
+        );
+        if (peerMatch) {
+          try {
+            resolvedDir = await fs.realpath(
+              path.join(pnpmStoreRoot, peerMatch, "node_modules", name)
+            );
+            resolved = true;
+          } catch {
+            // fall through to incomplete
+          }
+        }
+      }
+      if (!resolved) {
         // Store entry absent or dangling symlink — surface as incomplete
         // so callers know the dir path is a fabricated fallback, not real.
         incomplete.push({
