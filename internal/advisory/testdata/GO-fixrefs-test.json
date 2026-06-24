@@ -5,7 +5,7 @@
   "published": "2024-01-15T00:00:00Z",
   "aliases": ["CVE-2024-99999"],
   "summary": "Test advisory for fix-reference extraction",
-  "details": "Used to verify that only FIX-typed references are surfaced on Advisory.FixRefs.",
+  "details": "Used to verify that GitHub commit URLs are surfaced on Advisory.FixRefs regardless of reference type, while non-commit URLs are excluded.",
   "affected": [
     {
       "package": {
@@ -29,7 +29,8 @@
   "references": [
     {"type": "WEB",      "url": "https://example.com/blog/vuln-notice"},
     {"type": "ADVISORY", "url": "https://pkg.go.dev/vuln/GO-FIXREFS-TEST"},
-    {"type": "FIX",      "url": "https://github.com/example/fixrefpkg/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
-    {"type": "FIX",      "url": "https://github.com/example/fixrefpkg/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    {"type": "WEB",      "url": "https://github.com/example/fixrefpkg/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {"type": "FIX",      "url": "https://github.com/example/fixrefpkg/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"type": "FIX",      "url": "https://github.com/example/fixrefpkg/pull/42"}
   ]
 }

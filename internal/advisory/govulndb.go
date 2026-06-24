@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -144,13 +145,25 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 	return adv, nil
 }
 
-// extractFixRefs returns the deduplicated, sorted set of URLs from the OSV
-// references slice whose Type field equals "FIX" (case-insensitive).
-// Always returns a non-nil slice (empty when no FIX references are present).
+// gitHubCommitRefRE matches a GitHub commit URL (the form ghfetch can fetch).
+// We key on the URL SHAPE rather than the reference Type because GHSA records
+// in the OSV bundle overwhelmingly label fix-commit links as "WEB", not "FIX":
+// across the npm bundle only one record used type "FIX" while ~3,200 advisories
+// carry a commit URL under "WEB". Filtering by type would discard nearly all of
+// them, so we collect commit-shaped URLs regardless of reference type.
+var gitHubCommitRefRE = regexp.MustCompile(
+	`^https://github\.com/[^/]+/[^/]+/commit/[0-9a-fA-F]{7,40}(\.patch|\.diff)?$`,
+)
+
+// extractFixRefs returns the deduplicated, sorted set of GitHub commit URLs
+// found in the OSV references slice, across all reference types (see
+// gitHubCommitRefRE for why type is ignored). These are the fix commits a later
+// phase fetches to extract the vulnerable symbols a fix touched. Always returns
+// a non-nil slice (empty when no commit references are present).
 func extractFixRefs(refs []osvReference) []string {
 	seen := make(map[string]struct{}, len(refs))
 	for _, r := range refs {
-		if strings.EqualFold(r.Type, "FIX") && r.URL != "" {
+		if r.URL != "" && gitHubCommitRefRE.MatchString(r.URL) {
 			seen[r.URL] = struct{}{}
 		}
 	}
