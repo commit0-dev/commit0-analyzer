@@ -142,7 +142,15 @@ func LoadPolicy(data []byte) (*Policy, error) {
 //   - NOT_REACHABLE → NOT eligible (only excludable tier)
 //
 // Without reachable-only: all findings are eligible regardless of confidence.
+//
+// Dev-only exclusion: a finding tagged properties["dev_only"]="true" is never
+// gate-eligible, regardless of confidence or severity. Dev-only dependencies exist
+// only in the development toolchain and are not present in the runtime execution
+// path; they are surfaced for audit purposes but must not cause CI gate failures.
 func (p *Policy) isGateEligible(f *anstv1.Finding) bool {
+	if f.GetProperties()["dev_only"] == "true" {
+		return false
+	}
 	if p.ReachableOnly {
 		// Use the contract wrapper to enforce the suppression invariant.
 		// IsSuppressible() is true ONLY for NOT_REACHABLE.

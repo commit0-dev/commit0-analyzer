@@ -2761,6 +2761,384 @@ function buildHoistedDynamicPkg() {
   );
 }
 
+// ── dep-closure-fixture ───────────────────────────────────────────────────────
+// Fixture for computeWorkspaceClosure unit tests.
+//
+// Topology:
+//   runtime deps (ws.deps):   pkg-a (declares pkg-b), pkg-e (no deps)
+//   dev deps (ws.devDeps):    pkg-c (declares pkg-d and pkg-e)
+//
+// Expected runtime closure: pkg-a, pkg-b (transitive via pkg-a), pkg-e
+// Expected dev-only closure: pkg-c, pkg-d (pkg-e excluded — already in runtime)
+//
+// Package versions chosen to be distinct to verify the walk reads the right
+// package.json (pkg-b@2.0.0, pkg-e@3.0.0).
+
+function buildDepClosureFixture() {
+  const root = path.join(projects, "dep-closure-fixture");
+
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "dep-closure-fixture",
+        version: "1.0.0",
+        private: true,
+        dependencies: {
+          "pkg-a": "^1.0.0",
+          "pkg-e": "^3.0.0",
+        },
+        devDependencies: {
+          "pkg-c": "^1.0.0",
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "dep-closure-fixture",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "dep-closure-fixture",
+            version: "1.0.0",
+            dependencies: { "pkg-a": "^1.0.0", "pkg-e": "^3.0.0" },
+            devDependencies: { "pkg-c": "^1.0.0" },
+          },
+          "node_modules/pkg-a": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/pkg-a/-/pkg-a-1.0.0.tgz",
+            integrity: "sha512-closure-fixture-a",
+          },
+          "node_modules/pkg-b": {
+            version: "2.0.0",
+            resolved: "https://registry.npmjs.org/pkg-b/-/pkg-b-2.0.0.tgz",
+            integrity: "sha512-closure-fixture-b",
+          },
+          "node_modules/pkg-c": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/pkg-c/-/pkg-c-1.0.0.tgz",
+            integrity: "sha512-closure-fixture-c",
+            dev: true,
+          },
+          "node_modules/pkg-d": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/pkg-d/-/pkg-d-1.0.0.tgz",
+            integrity: "sha512-closure-fixture-d",
+            dev: true,
+          },
+          "node_modules/pkg-e": {
+            version: "3.0.0",
+            resolved: "https://registry.npmjs.org/pkg-e/-/pkg-e-3.0.0.tgz",
+            integrity: "sha512-closure-fixture-e",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+
+  // pkg-a: declares pkg-b as a dependency
+  const nmPkgA = path.join(root, "node_modules", "pkg-a");
+  mkdir(nmPkgA);
+  write(
+    path.join(nmPkgA, "package.json"),
+    JSON.stringify(
+      { name: "pkg-a", version: "1.0.0", main: "./index.js", dependencies: { "pkg-b": "^2.0.0" } },
+      null,
+      2
+    ) + "\n"
+  );
+  write(path.join(nmPkgA, "index.js"), `module.exports = {};\n`);
+
+  // pkg-b: no deps (transitive via pkg-a)
+  const nmPkgB = path.join(root, "node_modules", "pkg-b");
+  mkdir(nmPkgB);
+  write(
+    path.join(nmPkgB, "package.json"),
+    JSON.stringify({ name: "pkg-b", version: "2.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmPkgB, "index.js"), `module.exports = {};\n`);
+
+  // pkg-c: dev dep, declares pkg-d and pkg-e
+  const nmPkgC = path.join(root, "node_modules", "pkg-c");
+  mkdir(nmPkgC);
+  write(
+    path.join(nmPkgC, "package.json"),
+    JSON.stringify(
+      {
+        name: "pkg-c",
+        version: "1.0.0",
+        main: "./index.js",
+        dependencies: { "pkg-d": "^1.0.0", "pkg-e": "^3.0.0" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  write(path.join(nmPkgC, "index.js"), `module.exports = {};\n`);
+
+  // pkg-d: no deps (transitive via pkg-c, dev-only)
+  const nmPkgD = path.join(root, "node_modules", "pkg-d");
+  mkdir(nmPkgD);
+  write(
+    path.join(nmPkgD, "package.json"),
+    JSON.stringify({ name: "pkg-d", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmPkgD, "index.js"), `module.exports = {};\n`);
+
+  // pkg-e: direct runtime dep (also transitively reachable via pkg-c dev dep).
+  // Because it is in the runtime closure, it must NOT appear in dev-only.
+  const nmPkgE = path.join(root, "node_modules", "pkg-e");
+  mkdir(nmPkgE);
+  write(
+    path.join(nmPkgE, "package.json"),
+    JSON.stringify({ name: "pkg-e", version: "3.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmPkgE, "index.js"), `module.exports = {};\n`);
+}
+
+// ── missing-manifest-root ─────────────────────────────────────────────────────
+// Fixture for the C1 soundness regression: a direct runtime dep is resolved in
+// the lockfile but its on-disk package.json is deliberately absent.
+//
+// Layout:
+//   dependencies: vuln-pkg@2.0.0, dep-with-child@1.0.0
+//   node_modules/vuln-pkg/             ← directory exists
+//   node_modules/vuln-pkg/package.json ← ABSENT (deleted after creation)
+//   node_modules/dep-with-child/       ← directory exists, manifest readable
+//   node_modules/dep-with-child/package.json ← declares transitive-unreadable
+//   node_modules/transitive-unreadable/ ← directory exists
+//   node_modules/transitive-unreadable/package.json ← ABSENT (deleted)
+//
+// Expected:
+//   closure.runtime contains vuln-pkg (seeded from lockfile) and dep-with-child
+//   closure.incomplete contains vuln-pkg and transitive-unreadable entries
+//   list-deps emits vuln-pkg with version from lockfile
+//   analyze() emits finding for vuln-pkg (not dropped)
+
+function buildMissingManifestRoot() {
+  const root = path.join(projects, "missing-manifest-root");
+
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "missing-manifest-root",
+        version: "1.0.0",
+        private: true,
+        main: "./index.js",
+        dependencies: {
+          "vuln-pkg": "^2.0.0",
+          "dep-with-child": "^1.0.0",
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // Minimal source so analyze() can detect an entrypoint
+  write(
+    path.join(root, "index.js"),
+    `module.exports = {};\n`
+  );
+
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "missing-manifest-root",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "missing-manifest-root",
+            version: "1.0.0",
+            dependencies: {
+              "vuln-pkg": "^2.0.0",
+              "dep-with-child": "^1.0.0",
+            },
+          },
+          "node_modules/vuln-pkg": {
+            version: "2.0.0",
+            resolved: "https://registry.npmjs.org/vuln-pkg/-/vuln-pkg-2.0.0.tgz",
+            integrity: "sha512-missing-manifest-vuln",
+          },
+          "node_modules/dep-with-child": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-with-child/-/dep-with-child-1.0.0.tgz",
+            integrity: "sha512-missing-manifest-dep-with-child",
+          },
+          "node_modules/transitive-unreadable": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/transitive-unreadable/-/transitive-unreadable-1.0.0.tgz",
+            integrity: "sha512-missing-manifest-transitive",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  rmdir(path.join(root, "node_modules"));
+
+  // vuln-pkg: directory exists but package.json intentionally absent
+  const nmVulnPkg = path.join(root, "node_modules", "vuln-pkg");
+  mkdir(nmVulnPkg);
+  write(path.join(nmVulnPkg, "index.js"), `module.exports = {};\n`);
+  // DO NOT write package.json — simulates missing/corrupt manifest
+
+  // dep-with-child: readable manifest that declares transitive-unreadable
+  const nmDepWithChild = path.join(root, "node_modules", "dep-with-child");
+  mkdir(nmDepWithChild);
+  write(
+    path.join(nmDepWithChild, "package.json"),
+    JSON.stringify(
+      { name: "dep-with-child", version: "1.0.0", main: "./index.js", dependencies: { "transitive-unreadable": "^1.0.0" } },
+      null,
+      2
+    ) + "\n"
+  );
+  write(path.join(nmDepWithChild, "index.js"), `module.exports = {};\n`);
+
+  // transitive-unreadable: directory exists but package.json absent
+  const nmTransitive = path.join(root, "node_modules", "transitive-unreadable");
+  mkdir(nmTransitive);
+  write(path.join(nmTransitive, "index.js"), `module.exports = {};\n`);
+  // DO NOT write package.json
+}
+
+// ── monorepo-dev-override ─────────────────────────────────────────────────────
+// Fixture for H2: a 2-workspace monorepo where pkg-x is dev-only in ws0 but
+// a RUNTIME dep in ws1. On the explicit-entrypoints path, devOnly must be
+// computed against the UNION of all workspace closures so pkg-x is NOT tagged
+// dev_only (runtime in ws1 wins).
+//
+// Layout:
+//   root (npm workspace)
+//   packages/ws0: devDependencies: { "pkg-x": "^1.0.0" }
+//   packages/ws1: dependencies:    { "pkg-x": "^1.0.0" }
+//   node_modules/pkg-x: installed at root level (hoisted)
+//   Entrypoint: packages/ws1/index.js (imports pkg-x)
+
+function buildMonorepoDevOverride() {
+  const root = path.join(projects, "monorepo-dev-override");
+
+  // Root package.json (workspace declaration, already static)
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "monorepo-dev-override-root",
+        version: "1.0.0",
+        private: true,
+        workspaces: ["packages/*"],
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ws0: only devDependencies contains pkg-x
+  write(
+    path.join(root, "packages", "ws0", "package.json"),
+    JSON.stringify(
+      {
+        name: "@mdo/ws0",
+        version: "1.0.0",
+        devDependencies: { "pkg-x": "^1.0.0" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ws1: runtime dependencies contains pkg-x
+  write(
+    path.join(root, "packages", "ws1", "package.json"),
+    JSON.stringify(
+      {
+        name: "@mdo/ws1",
+        version: "1.0.0",
+        main: "./index.js",
+        dependencies: { "pkg-x": "^1.0.0" },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ws1 entry that imports pkg-x
+  write(
+    path.join(root, "packages", "ws1", "index.js"),
+    [
+      `const pkgX = require("pkg-x");`,
+      `module.exports = { pkgX };`,
+      ``,
+    ].join("\n")
+  );
+
+  // Lockfile (gitignored)
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "monorepo-dev-override-root",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "monorepo-dev-override-root",
+            version: "1.0.0",
+            workspaces: ["packages/*"],
+          },
+          "packages/ws0": {
+            name: "@mdo/ws0",
+            version: "1.0.0",
+            devDependencies: { "pkg-x": "^1.0.0" },
+          },
+          "packages/ws1": {
+            name: "@mdo/ws1",
+            version: "1.0.0",
+            dependencies: { "pkg-x": "^1.0.0" },
+          },
+          "node_modules/pkg-x": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/pkg-x/-/pkg-x-1.0.0.tgz",
+            integrity: "sha512-mdo-pkg-x",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // node_modules (gitignored)
+  rmdir(path.join(root, "node_modules"));
+  const nmPkgX = path.join(root, "node_modules", "pkg-x");
+  mkdir(nmPkgX);
+  write(
+    path.join(nmPkgX, "package.json"),
+    JSON.stringify({ name: "pkg-x", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmPkgX, "index.js"), `module.exports = { x: true };\n`);
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -2807,4 +3185,7 @@ export default function setup() {
   buildDepSourceFixtures();
   buildTransitiveCrossPkg();
   buildHoistedDynamicPkg();
+  buildDepClosureFixture();
+  buildMissingManifestRoot();
+  buildMonorepoDevOverride();
 }

@@ -34,6 +34,7 @@ import { resolveAdvisoryConfidence } from "../reach/resolve-advisory.js";
 import { buildFinding, sortFindings } from "../finding.js";
 import { detectEntrypoints } from "../entry/detect-entrypoints.js";
 import { buildProjectModel } from "../project/build-project-model.js";
+import { computeWorkspaceClosure } from "../project/dep-closure.js";
 import { Confidence } from "../gen/anst/v1/plugin.js";
 import type { Finding } from "../gen/anst/v1/plugin.js";
 
@@ -88,6 +89,16 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
     const workspaceName = model.workspaces[0]?.name ?? "default";
     const findings: Finding[] = [];
 
+    // Compute devOnly against the UNION of all workspace closures so a package
+    // that is runtime in ANY workspace is not mistagged dev_only (H2 fix).
+    const allRuntimeNames = new Set<string>();
+    const allDevNames = new Set<string>();
+    for (const ws of model.workspaces) {
+      const c = computeWorkspaceClosure(ws);
+      for (const name of c.runtime.keys()) allRuntimeNames.add(name);
+      for (const name of c.dev.keys()) allDevNames.add(name);
+    }
+
     for (const advisory of uniqueAdvisories) {
       const sites = cgResult.importSites.get(advisory.module) ?? [];
       const igReachable = sites.some((s) => cgResult.reachableFiles.has(s.fromFile));
@@ -99,7 +110,9 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
       const phantom = cgResult.unknownFrontiers.some(
         (u) => u.reason === "phantom-dep" && sites.some((s) => s.fromFile === u.fromFile)
       );
-      findings.push(buildFinding({ advisory, confidence, workspace: workspaceName, importingFile, path, phantom, importGraphVerdict: igVerdict }));
+      // dev_only: in dev in at least one workspace, AND runtime in NO workspace.
+      const devOnly = allDevNames.has(advisory.module) && !allRuntimeNames.has(advisory.module);
+      findings.push(buildFinding({ advisory, confidence, workspace: workspaceName, importingFile, path, phantom, importGraphVerdict: igVerdict, devOnly }));
     }
 
     return sortFindings(findings);
@@ -140,14 +153,27 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
       entrypoints: wsEps,
     });
 
-    // Emit a finding for each advisory whose package is declared in this workspace.
-    // Packages NOT declared in this workspace's deps are skipped for this workspace
-    // (they may appear in another workspace's findings).
+    // Compute the full transitive dep closure for this workspace once.
+    // runtime = full closure reachable from runtime direct deps (transitive).
+    // dev     = closure from dev direct deps MINUS runtime (dev-only packages).
+    const closure = computeWorkspaceClosure(ws);
+
+    // Emit a finding for each advisory whose package appears anywhere in this
+    // workspace's dep closure (runtime or dev-only). Packages absent from the
+    // closure are not installed in this workspace — skip them here; another
+    // workspace may own the finding.
     for (const advisory of uniqueAdvisories) {
-      if (!ws.deps.has(advisory.module)) {
-        // Not declared in this workspace — skip; another workspace owns the finding.
+      const inRuntime = closure.runtime.has(advisory.module);
+      const inDev = closure.dev.has(advisory.module);
+
+      if (!inRuntime && !inDev) {
+        // Not in this workspace's installed dep tree at all.
         continue;
       }
+
+      // True when the package is reachable only via devDependencies. The Go gate
+      // uses this property to mark the finding as non-gating.
+      const devOnly = inDev && !inRuntime;
 
       const sites = cgResult.importSites.get(advisory.module) ?? [];
       const igReachable = sites.some((s) => cgResult.reachableFiles.has(s.fromFile));
@@ -177,6 +203,7 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
           path,
           phantom,
           importGraphVerdict: igVerdict,
+          devOnly,
         })
       );
     }

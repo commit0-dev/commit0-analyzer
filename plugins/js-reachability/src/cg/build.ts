@@ -31,6 +31,10 @@ import type { ResolveContext } from "../resolve/index.js";
 import type { UnknownMarker } from "../engine/graph.js";
 import { makeUnknownMarker } from "./unknown-frontier.js";
 import type { ResolvedPackage } from "../project/model.js";
+import {
+  findInstalledPackageDir,
+  readDepDeclaredPackages,
+} from "../project/dep-closure.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -413,58 +417,6 @@ function computeTransitiveDepClosure(pkgDir: string): string[] {
 
   expand(pkgDir);
   return [...closure].sort();
-}
-
-/**
- * Find the installed directory for a package name by walking up the
- * node_modules lookup chain from a starting directory.
- *
- * Mirrors Node.js module resolution: check <startDir>/node_modules/<name>,
- * then <parent>/node_modules/<name>, until the filesystem root.
- *
- * Returns the absolute path to the package directory or null if not found.
- */
-function findInstalledPackageDir(name: string, startDir: string): string | null {
-  let current = startDir;
-  while (true) {
-    const candidate = path.join(current, "node_modules", name);
-    try {
-      if (fs.statSync(candidate).isDirectory()) return candidate;
-    } catch {
-      // not found at this level
-    }
-    const parent = path.dirname(current);
-    if (parent === current) break; // filesystem root
-    current = parent;
-  }
-  return null;
-}
-
-/**
- * Read the declared dependency names from a package's package.json.
- *
- * Returns the union of dependencies, peerDependencies, and optionalDependencies
- * (all fields that could be loaded at runtime via require/import).
- * Returns an empty array if the package.json cannot be read or parsed.
- */
-function readDepDeclaredPackages(pkgDir: string): string[] {
-  try {
-    const manifestPath = path.join(pkgDir, "package.json");
-    const raw = fs.readFileSync(manifestPath, "utf8");
-    const manifest = JSON.parse(raw) as Record<string, unknown>;
-    const names = new Set<string>();
-    for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
-      const deps = manifest[field];
-      if (deps && typeof deps === "object" && !Array.isArray(deps)) {
-        for (const name of Object.keys(deps as Record<string, unknown>)) {
-          names.add(name);
-        }
-      }
-    }
-    return [...names].sort();
-  } catch {
-    return [];
-  }
 }
 
 /**

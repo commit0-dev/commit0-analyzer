@@ -40,6 +40,7 @@
 import path from "node:path";
 import { buildProjectModel } from "./project/build-project-model.js";
 import type { IncompleteKind } from "./project/model.js";
+import { computeWorkspaceClosure } from "./project/dep-closure.js";
 
 /** A single resolved npm dependency entry as emitted to stdout. */
 export interface DepEntry {
@@ -98,19 +99,36 @@ export async function listDeps(root: string): Promise<ListDepsOutput> {
 
   const seen = new Set<string>();
   const deps: DepEntry[] = [];
+  const incomplete: ListDepsOutput["incomplete"] = model.incomplete.map((e) => ({
+    scope: e.scope,
+    reason: e.reason,
+    kind: e.kind,
+  }));
 
   // Workspaces are already sorted by discoverWorkspaces; iterate in order.
   for (const ws of model.workspaces) {
-    // Build the set of direct runtime dep names for this workspace.
+    // Build the direct-name sets for tagging purposes.
     const directRuntimeNames = new Set([
       ...Object.keys(ws.manifest.dependencies ?? {}),
       ...Object.keys(ws.manifest.optionalDependencies ?? {}),
     ]);
+    const directDevNames = new Set(Object.keys(ws.manifest.devDependencies ?? {}));
 
-    // Emit runtime deps (direct:true, dev:false)
-    const sortedDepNames = [...ws.deps.keys()].sort();
-    for (const name of sortedDepNames) {
-      const pkg = ws.deps.get(name)!;
+    // Compute the full installed closure (direct + transitive).
+    // runtime: all packages reachable from runtime deps.
+    // dev: packages reachable only from dev deps (not in runtime closure).
+    // incomplete: packages whose on-disk manifest could not be read.
+    const closure = computeWorkspaceClosure(ws);
+
+    // Merge closure-level incompleteness (unreadable on-disk manifests).
+    for (const entry of closure.incomplete) {
+      incomplete.push({ scope: entry.scope, reason: entry.reason, kind: "dep-unresolved" });
+    }
+
+    // Emit runtime closure (dev:false). direct:true iff declared in manifest.
+    const sortedRuntimeNames = [...closure.runtime.keys()].sort();
+    for (const name of sortedRuntimeNames) {
+      const pkg = closure.runtime.get(name)!;
       const key = `${ws.name}\0${name}\0${pkg.version}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -124,11 +142,10 @@ export async function listDeps(root: string): Promise<ListDepsOutput> {
       });
     }
 
-    // Emit devDeps that are NOT already in runtime deps (dev:true, direct:false)
-    const sortedDevDepNames = [...ws.devDeps.keys()].sort();
-    for (const name of sortedDevDepNames) {
-      if (ws.deps.has(name)) continue; // already emitted as runtime dep above
-      const pkg = ws.devDeps.get(name)!;
+    // Emit dev-only closure (dev:true). direct:true iff declared in devDependencies.
+    const sortedDevNames = [...closure.dev.keys()].sort();
+    for (const name of sortedDevNames) {
+      const pkg = closure.dev.get(name)!;
       const key = `${ws.name}\0${name}\0${pkg.version}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -137,7 +154,7 @@ export async function listDeps(root: string): Promise<ListDepsOutput> {
         name,
         version: pkg.version,
         workspace: ws.name,
-        direct: false,
+        direct: directDevNames.has(name),
         dev: true,
       });
     }
@@ -151,12 +168,6 @@ export async function listDeps(root: string): Promise<ListDepsOutput> {
     if (nm !== 0) return nm;
     return a.version.localeCompare(b.version);
   });
-
-  const incomplete = model.incomplete.map((e) => ({
-    scope: e.scope,
-    reason: e.reason,
-    kind: e.kind,
-  }));
 
   return { deps, incomplete, declaredDepCount };
 }

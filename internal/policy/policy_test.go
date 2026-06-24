@@ -308,6 +308,51 @@ func TestPolicy_ElevatedIgnore_CriticalSymbolReachable_Suppresses(t *testing.T) 
 		"elevated ignore of SYMBOL_REACHABLE CRITICAL must suppress the finding (Red Team #15d)")
 }
 
+// TestPolicy_DevOnly_NeverGates verifies the runtime-vs-dev gate split: a finding
+// tagged properties["dev_only"]="true" is reported but never triggers a gate failure,
+// regardless of confidence or severity. Dev-only dependencies are not in the runtime
+// execution path; they are surfaced for audit, not for CI failure.
+func TestPolicy_DevOnly_NeverGates(t *testing.T) {
+	makeCriticalDevOnly := func() *anstv1.Finding {
+		return &anstv1.Finding{
+			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-DEV"},
+			Module:     "example.com/devtool",
+			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+			Properties: map[string]string{"dev_only": "true"},
+		}
+	}
+
+	t.Run("dev_only_passes_reachable_only_false", func(t *testing.T) {
+		p := &policy.Policy{FailOn: "critical", ReachableOnly: false}
+		code := p.EvaluateWithFlags([]*anstv1.Finding{makeCriticalDevOnly()}, policy.EvalFlags{})
+		assert.Equal(t, policy.ExitPass, code,
+			"dev_only CRITICAL SYMBOL_REACHABLE must not gate (ReachableOnly=false)")
+	})
+
+	t.Run("dev_only_passes_reachable_only_true", func(t *testing.T) {
+		p := &policy.Policy{FailOn: "critical", ReachableOnly: true}
+		code := p.EvaluateWithFlags([]*anstv1.Finding{makeCriticalDevOnly()}, policy.EvalFlags{})
+		assert.Equal(t, policy.ExitPass, code,
+			"dev_only CRITICAL SYMBOL_REACHABLE must not gate (ReachableOnly=true)")
+	})
+
+	t.Run("non_dev_only_still_gates", func(t *testing.T) {
+		// Prove the only difference is the dev_only property: without it, same finding gates.
+		f := &anstv1.Finding{
+			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-DEV"},
+			Module:     "example.com/devtool",
+			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+			// No Properties / dev_only not set.
+		}
+		p := &policy.Policy{FailOn: "critical", ReachableOnly: false}
+		code := p.EvaluateWithFlags([]*anstv1.Finding{f}, policy.EvalFlags{})
+		assert.Equal(t, policy.ExitGateFailure, code,
+			"identical finding WITHOUT dev_only must still gate (proves tag is the only differentiator)")
+	})
+}
+
 // TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses is a regression test
 // verifying that the elevated-ignore guard only applies to SYMBOL_REACHABLE CRITICAL
 // findings. Non-critical or non-SYMBOL_REACHABLE findings must still be suppressible

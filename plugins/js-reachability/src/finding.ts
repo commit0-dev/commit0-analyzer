@@ -37,6 +37,11 @@ export interface BuildFindingOptions {
    * Exposed as a property for P6 Metric V1-JS comparison.
    */
   importGraphVerdict?: Confidence;
+  /**
+   * True when the package is reachable only from devDependencies, not from
+   * any runtime dep. The Go gate uses this to mark the finding non-gating.
+   */
+  devOnly?: boolean;
 }
 
 /**
@@ -51,6 +56,7 @@ export function buildFinding(opts: BuildFindingOptions): Finding {
     importingFile,
     phantom,
     importGraphVerdict,
+    devOnly,
   } = opts;
 
   // Path only for SYMBOL_REACHABLE
@@ -69,6 +75,10 @@ export function buildFinding(opts: BuildFindingOptions): Finding {
 
   if (phantom) {
     properties["phantom"] = "true";
+  }
+
+  if (devOnly) {
+    properties["dev_only"] = "true";
   }
 
   // Metric V1-JS: expose import-graph-only verdict for P6 comparison
