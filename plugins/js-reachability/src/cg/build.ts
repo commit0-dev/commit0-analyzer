@@ -173,10 +173,17 @@ export async function buildCallGraph(
     }
   }
 
-  while (queue.length > 0) {
-    // Sort the queue for deterministic BFS order
-    queue.sort();
-    const file = queue.shift()!;
+  // FIFO BFS via a head index. We deliberately do NOT re-sort the queue each
+  // iteration: that was O(N² log N) and, once traversal descends into the full
+  // dependency source closure (thousands of files on a large project), it
+  // dominated runtime entirely. Determinism does not require a globally sorted
+  // visitation order — it requires deterministic OUTPUT, which we get by seeding
+  // entrypoints in sorted order, enqueuing each file's imports in sorted order,
+  // and sorting every order-sensitive output (importSites, unknownFrontiers)
+  // before returning.
+  let head = 0;
+  while (head < queue.length) {
+    const file = queue[head++];
 
     if (reachableFiles.has(file)) continue;
     reachableFiles.add(file);
@@ -373,6 +380,17 @@ export async function buildCallGraph(
         a.column - b.column
     );
   }
+
+  // Sort frontiers so the output order is independent of BFS visitation order
+  // (which is no longer globally sorted — see the head-index loop above).
+  unknownFrontiers.sort(
+    (a, b) =>
+      a.fromFile.localeCompare(b.fromFile) ||
+      a.line - b.line ||
+      a.column - b.column ||
+      a.reason.localeCompare(b.reason) ||
+      a.detail.localeCompare(b.detail)
+  );
 
   return { reachableFiles, importSites, unknownFrontiers };
 }
