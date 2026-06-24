@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ducthinh993/anst-analyzer/internal/advisory"
+	"github.com/ducthinh993/anst-analyzer/internal/advisory/ghfetch"
+	"github.com/ducthinh993/anst-analyzer/internal/advisory/symbolindex"
 	"github.com/ducthinh993/anst-analyzer/internal/host"
 	"github.com/ducthinh993/anst-analyzer/internal/policy"
 	"github.com/ducthinh993/anst-analyzer/internal/render"
@@ -36,6 +38,7 @@ type scanFlags struct {
 	source         string // comma-separated source names; default "go-vuln-db,osv"
 	sourceExplicit bool   // true when --source was explicitly set by the user
 	language       string // "auto"|"go"|"js"; default "auto"
+	symbols        bool   // resolve vulnerable-symbol data from advisory fix patches
 }
 
 // ecosystems records which ecosystem marker files were detected in a module root.
@@ -143,6 +146,8 @@ Exit codes:
 		"comma-separated advisory sources to query: go-vuln-db, osv (default: both)")
 	fs.StringVar(&flags.language, "language", "auto",
 		"ecosystem to scan: go|js|auto (default: auto — detected from go.mod / package.json)")
+	fs.BoolVar(&flags.symbols, "symbols", false,
+		"resolve vulnerable-symbol data from advisory fix patches (network, cached) to enable symbol-level reachability; degrades to package-level when unavailable")
 
 	return cmd
 }
@@ -457,6 +462,20 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				// npm automatically, but we avoid the lookup overhead for clarity.
 				npmMultiSrc := advisory.NewMultiSource(npmNamedSources...)
 
+				// Build the symbol resolver once for the entire npm dep loop when
+				// --symbols is set and the JS plugin binary is known. A missing plugin
+				// binary is handled below (resolver stays nil → symbols skipped silently).
+				var symResolver *symbolindex.Resolver
+				if flags.symbols && jsPluginBin != "" {
+					ghCacheDir := filepath.Join(osvCacheDir, "gh-fix-cache")
+					ghClient := ghfetch.NewClient(ghCacheDir)
+					if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+						ghClient.Token = tok
+					}
+					symIndexDir := filepath.Join(osvCacheDir, "symbol-index")
+					symResolver = symbolindex.NewResolver(symIndexDir, ghClient, jsPluginBin, flags.offline)
+				}
+
 				for _, dep := range npmDeps {
 					// Normalize the npm package name to lowercase to match OSV records.
 					// OSV stores npm package names lowercase; lockfile names may differ.
@@ -481,6 +500,24 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 								dep.Name, dep.Version, queryErr)
 							incomplete = true
 							continue
+						}
+					}
+
+					// Resolve symbols before converting to proto (only when --symbols
+					// is set and the resolver was successfully constructed). Any failure
+					// inside Resolve degrades quietly: the advisory stays at
+					// SymbolLevel=false and the finding remains PACKAGE_REACHABLE.
+					// Never set incomplete=true here — symbol data is precision-only.
+					if symResolver != nil {
+						for i := range advs {
+							if len(advs[i].FixRefs) == 0 {
+								continue
+							}
+							syms := symResolver.Resolve(ctx, &advs[i])
+							if len(syms) > 0 {
+								advs[i].Symbols = syms
+								advs[i].SymbolLevel = true
+							}
 						}
 					}
 
