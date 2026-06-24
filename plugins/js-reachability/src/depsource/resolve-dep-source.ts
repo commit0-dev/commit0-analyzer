@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveExportsMap, type ExportsMapValue } from "../resolve/exports-map.js";
 import type { DepSource, Fidelity } from "./types.js";
+import type { FetchOptions } from "./fetch-tarball.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -193,4 +194,59 @@ export function resolveDepSource(pkg: {
       : undefined;
 
   return { ...base, entryFile, fidelity, reason };
+}
+
+// ── Optional fetch-based upgrade ──────────────────────────────────────────────
+
+/**
+ * Async variant of resolveDepSource that optionally upgrades reduced/none
+ * fidelity packages by fetching their source tarball from the registry.
+ *
+ * Behavior:
+ *   1. Runs the existing synchronous on-disk classification first.
+ *   2. Only when fidelity is "reduced" or "none" AND fetchOpts are provided,
+ *      attempts fetchAndExtractSource against the verified tarball.
+ *   3. On a successful verified fetch, returns the result from the extracted
+ *      source tree (may be "source", "reduced", or "none" depending on content).
+ *   4. On any failure (integrity mismatch, network error, extraction error),
+ *      returns the original on-disk result unchanged.
+ *
+ * The synchronous resolveDepSource is untouched in behavior and signature.
+ */
+export async function resolveDepSourceWithFetch(
+  pkg: { name: string; version: string; dir: string },
+  fetchOpts?: Omit<FetchOptions, "name" | "version">
+): Promise<DepSource> {
+  const onDisk = resolveDepSource(pkg);
+
+  // No upgrade path: either already source-quality, or no fetch options given.
+  if (onDisk.fidelity === "source" || fetchOpts === undefined) {
+    return onDisk;
+  }
+
+  // Lazy import to avoid pulling fetch-tarball into the synchronous call path.
+  const { fetchAndExtractSource } = await import("./fetch-tarball.js");
+
+  const fetched = await fetchAndExtractSource({
+    name: pkg.name,
+    version: pkg.version,
+    ...fetchOpts,
+  });
+
+  if (fetched === null) {
+    // Fetch failed, integrity mismatch, or extraction error — keep on-disk result.
+    return onDisk;
+  }
+
+  return {
+    package: pkg.name,
+    version: pkg.version,
+    dir: fetched.dir,
+    entryFile: fetched.entryFile,
+    fidelity: fetched.fidelity,
+    reason:
+      fetched.fidelity === "reduced"
+        ? "entry file appears minified or bundled (high avg line length)"
+        : undefined,
+  };
 }

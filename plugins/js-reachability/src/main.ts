@@ -22,6 +22,8 @@ if (arg === "--list-deps") {
   await import("./analyze.js").then((m) => m.run());
 } else if (arg === "--project-model") {
   await import("./project-model-cmd.js").then((m) => m.run());
+} else if (arg === "--extract-symbols") {
+  await import("./symbols-cmd.js").then((m) => m.run());
 } else {
   // Default mode: serve as a go-plugin gRPC subprocess.
   await import("./server.js").then((m) => m.run());

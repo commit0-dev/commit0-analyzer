@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -16,14 +17,22 @@ import (
 // is Advisory and Symbol in model.go.
 
 type osvRecord struct {
-	ID       string      `json:"id"`
-	Aliases  []string    `json:"aliases"`
-	Affected []osvAffect `json:"affected"`
+	ID       string         `json:"id"`
+	Aliases  []string       `json:"aliases"`
+	Affected []osvAffect    `json:"affected"`
 	// Withdrawn is an RFC3339 timestamp present when the advisory has been
 	// retracted by the Go vuln DB maintainers. A non-empty value means the
 	// record is no longer considered a real vulnerability and must be excluded
 	// from query results to avoid false-positive findings (mirrors govulncheck).
-	Withdrawn string `json:"withdrawn"`
+	Withdrawn  string         `json:"withdrawn"`
+	References []osvReference `json:"references"`
+}
+
+// osvReference is one entry in the OSV top-level references array.
+// Type is one of: WEB, ADVISORY, REPORT, FIX, PACKAGE, ARTICLE, EVIDENCE.
+type osvReference struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
 }
 
 type osvAffect struct {
@@ -127,7 +136,30 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 		adv.VersionRanges = append(adv.VersionRanges, VersionRange{})
 	}
 
+	// Collect URLs from references entries whose type is "FIX". These point at
+	// the commits or patches that resolved the vulnerability. Deduplicate and
+	// sort for determinism; produce an empty (non-nil) slice when none exist.
+	adv.FixRefs = extractFixRefs(rec.References)
+
 	return adv, nil
+}
+
+// extractFixRefs returns the deduplicated, sorted set of URLs from the OSV
+// references slice whose Type field equals "FIX" (case-insensitive).
+// Always returns a non-nil slice (empty when no FIX references are present).
+func extractFixRefs(refs []osvReference) []string {
+	seen := make(map[string]struct{}, len(refs))
+	for _, r := range refs {
+		if strings.EqualFold(r.Type, "FIX") && r.URL != "" {
+			seen[r.URL] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for url := range seen {
+		out = append(out, url)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // extractVersionRanges converts a flat OSV events list into a slice of VersionRanges,

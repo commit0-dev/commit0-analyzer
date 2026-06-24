@@ -58,6 +58,13 @@ type Advisory struct {
 	// reason an advisory was excluded when needed (e.g. in debug logging).
 	Withdrawn string
 
+	// FixRefs holds the URLs from the OSV references[] array whose type is "FIX".
+	// These point at the commits or patches that resolved the vulnerability and
+	// are used by later pipeline phases to fetch and extract vulnerable symbols.
+	// Sorted and deduplicated; empty slice when the record has no FIX references.
+	// Not included in ToProto — consumed Go-side before the proto is built.
+	FixRefs []string
+
 	// Provenance — not part of the wire proto; stamped into finding properties.
 	SnapshotDigest  string // content digest of the snapshot this advisory came from
 	SnapshotAge     string // human-readable age string (e.g. "72h")
