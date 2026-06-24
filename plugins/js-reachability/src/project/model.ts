@@ -28,8 +28,15 @@ export interface Workspace {
   /** Absolute path to the workspace root (where package.json lives). */
   dir: string;
   manifest: PackageJson;
-  /** Declared dependency name → resolved installed package. */
+  /** Declared runtime dependency name → resolved installed package. */
   deps: Map<string, ResolvedPackage>;
+  /**
+   * Declared devDependency name → resolved installed package.
+   * Populated only when the lockfile resolves the package; packages absent
+   * from the lockfile are omitted (not an error for devDeps).
+   * Used by list-deps to emit the full installed package set with dev:true tags.
+   */
+  devDeps: Map<string, ResolvedPackage>;
   /** Names of sibling workspaces this workspace depends on. */
   localDeps: string[];
 }

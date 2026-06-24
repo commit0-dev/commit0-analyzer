@@ -4,7 +4,14 @@
  * Emits a deterministic JSON object to stdout:
  *   {
  *     "deps": [
- *       { "ecosystem": "npm", "name": "<pkg>", "version": "<resolved>", "workspace": "<ws-name>" },
+ *       {
+ *         "ecosystem": "npm",
+ *         "name": "<pkg>",
+ *         "version": "<resolved>",
+ *         "workspace": "<ws-name>",
+ *         "direct": true|false,
+ *         "dev": true|false
+ *       },
  *       ...
  *     ],
  *     "incomplete": [
@@ -12,6 +19,13 @@
  *       ...
  *     ]
  *   }
+ *
+ * Fields:
+ *   direct  — true when the package is declared in the workspace's
+ *             dependencies or optionalDependencies (not just transitive).
+ *   dev     — true when the package appears only in devDependencies and NOT
+ *             in runtime dependencies or optionalDependencies. Runtime deps
+ *             that also appear in devDependencies are NOT marked dev.
  *
  * Determinism guarantees:
  *   - Entries are sorted by workspace name, then package name, then version.
@@ -33,6 +47,17 @@ export interface DepEntry {
   name: string;
   version: string;
   workspace: string;
+  /**
+   * true when the package is directly declared in the workspace's
+   * dependencies or optionalDependencies (not transitive-only).
+   */
+  direct: boolean;
+  /**
+   * true when the package appears in devDependencies but NOT in
+   * dependencies or optionalDependencies of this workspace.
+   * Best-effort: if the lockfile doesn't resolve the devDep it is omitted.
+   */
+  dev: boolean;
 }
 
 /** The shape of the JSON object written to stdout by --list-deps. */
@@ -54,6 +79,9 @@ export interface ListDepsOutput {
 /**
  * Collect all resolved deps across all workspaces of the project at root.
  * Returns a deterministic ListDepsOutput (sorted, deduplicated).
+ *
+ * Emits both runtime deps (ws.deps) and devDependencies (ws.devDeps).
+ * Runtime deps are tagged direct:true; devDeps-only packages are tagged dev:true.
  */
 export async function listDeps(root: string): Promise<ListDepsOutput> {
   const model = await buildProjectModel(root);
@@ -73,7 +101,13 @@ export async function listDeps(root: string): Promise<ListDepsOutput> {
 
   // Workspaces are already sorted by discoverWorkspaces; iterate in order.
   for (const ws of model.workspaces) {
-    // Sort dep names within each workspace for determinism.
+    // Build the set of direct runtime dep names for this workspace.
+    const directRuntimeNames = new Set([
+      ...Object.keys(ws.manifest.dependencies ?? {}),
+      ...Object.keys(ws.manifest.optionalDependencies ?? {}),
+    ]);
+
+    // Emit runtime deps (direct:true, dev:false)
     const sortedDepNames = [...ws.deps.keys()].sort();
     for (const name of sortedDepNames) {
       const pkg = ws.deps.get(name)!;
@@ -85,6 +119,26 @@ export async function listDeps(root: string): Promise<ListDepsOutput> {
         name,
         version: pkg.version,
         workspace: ws.name,
+        direct: directRuntimeNames.has(name),
+        dev: false,
+      });
+    }
+
+    // Emit devDeps that are NOT already in runtime deps (dev:true, direct:false)
+    const sortedDevDepNames = [...ws.devDeps.keys()].sort();
+    for (const name of sortedDevDepNames) {
+      if (ws.deps.has(name)) continue; // already emitted as runtime dep above
+      const pkg = ws.devDeps.get(name)!;
+      const key = `${ws.name}\0${name}\0${pkg.version}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deps.push({
+        ecosystem: "npm",
+        name,
+        version: pkg.version,
+        workspace: ws.name,
+        direct: false,
+        dev: true,
       });
     }
   }

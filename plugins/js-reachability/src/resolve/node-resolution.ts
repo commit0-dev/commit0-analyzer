@@ -80,6 +80,12 @@ export interface ResolveResultThirdParty {
   /** Resolved entry path (package.json main / exports map target). */
   resolvedPath: string;
   /**
+   * Absolute path to the installed package directory (where package.json lives).
+   * Populated by the resolver so callers can invoke resolveDepSource without
+   * having to re-derive the package root from the entry path.
+   */
+  packageDir: string;
+  /**
    * true when the dep was found via flat node_modules walk but was NOT
    * declared in the workspace's manifest (hoisted/phantom dep).
    */
@@ -306,6 +312,7 @@ export function resolveSpecifier(
       packageName: pkgName,
       version: pinnedPkg.version,
       resolvedPath: entryPath ?? pinnedPkg.dir,
+      packageDir: pinnedPkg.dir,
       phantom: false,
     };
   }
@@ -326,6 +333,7 @@ export function resolveSpecifier(
       packageName: pkgName,
       version: phantomPkg?.version ?? "unknown",
       resolvedPath: entryPath ?? phantomDir,
+      packageDir: phantomDir,
       phantom: !isDeclared,
     };
   }

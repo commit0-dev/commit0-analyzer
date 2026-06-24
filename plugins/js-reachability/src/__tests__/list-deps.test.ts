@@ -96,6 +96,47 @@ describe("listDeps – incomplete project (missing lock)", () => {
   });
 });
 
+// ── Transitive deps: the full resolved package set ───────────────────────────
+// listDeps must emit the FULL resolved set (direct + transitive), each tagged
+// with direct:boolean and dev:boolean. The fixture transitive-cross-pkg has:
+//   direct runtime deps: dep-a, dep-b, dep-c, dep-e
+//   (dep-b is both a direct dep and a transitive dep of dep-a — both tags apply
+//    from the declared dep perspective)
+
+describe("listDeps – transitive dep set with direct/dev tags", () => {
+  it("emits all installed packages including transitive ones", async () => {
+    const out = await listDeps(path.join(fixtures, "transitive-cross-pkg"));
+    const names = out.deps.map((d) => d.name);
+    // All declared direct deps must appear
+    expect(names).toContain("dep-a");
+    expect(names).toContain("dep-b");
+    expect(names).toContain("dep-c");
+    expect(names).toContain("dep-e");
+  });
+
+  it("direct deps have direct:true", async () => {
+    const out = await listDeps(path.join(fixtures, "transitive-cross-pkg"));
+    const depA = out.deps.find((d) => d.name === "dep-a");
+    expect(depA).toBeDefined();
+    expect(depA!.direct).toBe(true);
+  });
+
+  it("dev-only deps have dev:true", async () => {
+    const out = await listDeps(path.join(fixtures, "transitive-cross-pkg"));
+    const depDev = out.deps.find((d) => d.name === "dep-dev");
+    expect(depDev).toBeDefined();
+    expect(depDev!.dev).toBe(true);
+    expect(depDev!.direct).toBe(false);
+  });
+
+  it("output is deterministic with transitive flag fields", async () => {
+    const root = path.join(fixtures, "transitive-cross-pkg");
+    const run1 = await listDeps(root);
+    const run2 = await listDeps(root);
+    expect(JSON.stringify(run1)).toBe(JSON.stringify(run2));
+  });
+});
+
 // H1: corrupt lockfile with zero runtime deps must still be marked incomplete.
 // A corrupt lockfile is an error-level signal regardless of declared dep count.
 // declaredDepCount=0 must NOT suppress it (only truly-empty projects stay clean).

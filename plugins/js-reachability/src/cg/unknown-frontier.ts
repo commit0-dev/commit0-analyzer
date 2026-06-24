@@ -21,7 +21,12 @@ export function makeUnknownMarker(
   detail: string,
   fromFile: string,
   line: number,
-  column: number
+  column: number,
+  couldReach?: string[]
 ): UnknownMarker {
-  return { reason, detail, fromFile, line, column };
+  const marker: UnknownMarker = { reason, detail, fromFile, line, column };
+  if (couldReach && couldReach.length > 0) {
+    marker.couldReach = couldReach;
+  }
+  return marker;
 }

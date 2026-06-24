@@ -695,6 +695,14 @@ type npmDep struct {
 	Name      string `json:"name"`
 	Version   string `json:"version"`
 	Workspace string `json:"workspace"`
+	// Direct is true when the package is declared directly in the workspace's
+	// dependencies or optionalDependencies (not only transitively reachable).
+	// Omitted (false) when the field is absent in older plugin versions.
+	Direct bool `json:"direct,omitempty"`
+	// Dev is true when the package appears only in devDependencies for this
+	// workspace (not in dependencies or optionalDependencies).
+	// Omitted (false) when the field is absent in older plugin versions.
+	Dev bool `json:"dev,omitempty"`
 }
 
 // listDepsOutput is the JSON shape emitted by the JS plugin's --list-deps mode.

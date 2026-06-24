@@ -166,6 +166,7 @@ export async function discoverWorkspaces(
       dir: root,
       manifest: rootManifest,
       deps: new Map(),
+      devDeps: new Map(),
       localDeps: [],
     };
     return { workspaces: [ws], incomplete };
@@ -194,6 +195,7 @@ export async function discoverWorkspaces(
       dir,
       manifest,
       deps: new Map(),
+      devDeps: new Map(),
       localDeps: [],
     });
   }

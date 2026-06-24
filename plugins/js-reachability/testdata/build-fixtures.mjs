@@ -2356,6 +2356,411 @@ function buildDepSourceFixtures() {
   );
 }
 
+// ── transitive-cross-pkg ──────────────────────────────────────────────────────
+// Fixture for Phase 4 cross-package traversal tests.
+//
+// Layout:
+//   index.js → require("dep-a")        (direct, source fidelity)
+//   index.js → require("dep-e")        (direct, reduced fidelity / minified)
+//   dep-a/index.js → require("dep-b")  (transitive, source fidelity, "vulnerable")
+//   dep-a: STATIC IMPORTS ONLY — no dynamic require, so dep-c stays NOT_REACHABLE
+//   dep-e/bundle.js (minified) → dep-f is UNKNOWN (reduced-fidelity boundary)
+//   dep-f declares deep-vuln → deep-vuln is UNKNOWN (transitive closure, C3)
+//   dep-c: installed but NEVER imported from any reachable file → NOT_REACHABLE
+//   dep-d: installed (dep-a declares it) but not imported → NOT_REACHABLE
+//   dep-dev: only in devDependencies (tests dev-flag tagging in listDeps)
+//
+// The lockfile declares all packages so the project model resolves them.
+
+function buildTransitiveCrossPkg() {
+  const root = path.join(projects, "transitive-cross-pkg");
+
+  // ── package.json ──────────────────────────────────────────────────────────
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "transitive-cross-pkg",
+        version: "1.0.0",
+        private: true,
+        main: "./index.js",
+        dependencies: {
+          "dep-a": "^1.0.0",
+          "dep-b": "^1.0.0",
+          "dep-c": "^1.0.0",
+          "dep-e": "^1.0.0",
+        },
+        devDependencies: {
+          "dep-dev": "^1.0.0",
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ── First-party source: index.js ──────────────────────────────────────────
+  write(
+    path.join(root, "index.js"),
+    [
+      `const depA = require("dep-a");`,
+      `const depE = require("dep-e");`,
+      `module.exports = { depA, depE };`,
+      ``,
+    ].join("\n")
+  );
+
+  // ── node_modules layout ───────────────────────────────────────────────────
+  rmdir(path.join(root, "node_modules"));
+
+  // dep-a: source fidelity, STATIC imports only (no dynamic require).
+  // dep-a declares dep-d as a dependency but does NOT dynamically require it.
+  // Since no dynamic frontier exists for dep-a, dep-c stays NOT_REACHABLE
+  // (it is not in dep-a's declared set, and dep-a has no dynamic dispatch).
+  // dep-d is NOT_REACHABLE (no import path, no frontier covering it).
+  const nmDepA = path.join(root, "node_modules", "dep-a");
+  mkdir(nmDepA);
+  write(
+    path.join(nmDepA, "package.json"),
+    JSON.stringify({ name: "dep-a", version: "1.0.0", main: "./index.js", dependencies: { "dep-b": "^1.0.0", "dep-d": "^1.0.0" } }, null, 2) + "\n"
+  );
+  write(
+    path.join(nmDepA, "index.js"),
+    [
+      `const depB = require("dep-b");`,
+      `module.exports = { depB };`,
+      ``,
+    ].join("\n")
+  );
+
+  // dep-b: source fidelity, the "vulnerable" transitive dep
+  const nmDepB = path.join(root, "node_modules", "dep-b");
+  mkdir(nmDepB);
+  write(
+    path.join(nmDepB, "package.json"),
+    JSON.stringify({ name: "dep-b", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(
+    path.join(nmDepB, "index.js"),
+    [
+      `function doSomething(x) { return x; }`,
+      `module.exports = { doSomething };`,
+      ``,
+    ].join("\n")
+  );
+
+  // dep-c: source fidelity but NEVER imported from any reachable file → NOT_REACHABLE
+  // dep-a has no dynamic dispatch, so dep-c cannot be reached dynamically.
+  const nmDepC = path.join(root, "node_modules", "dep-c");
+  mkdir(nmDepC);
+  write(
+    path.join(nmDepC, "package.json"),
+    JSON.stringify({ name: "dep-c", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(
+    path.join(nmDepC, "index.js"),
+    `module.exports = { unused: true };\n`
+  );
+
+  // dep-d: installed (dep-a declares it) but never imported from reachable code.
+  // dep-a has no dynamic require, so dep-d is genuinely NOT_REACHABLE.
+  const nmDepD = path.join(root, "node_modules", "dep-d");
+  mkdir(nmDepD);
+  write(
+    path.join(nmDepD, "package.json"),
+    JSON.stringify({ name: "dep-d", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmDepD, "index.js"), `module.exports = { dynamic: true };\n`);
+
+  // dep-e: MINIFIED entry (reduced fidelity) — must NOT be traversed into.
+  // dep-e declares dep-f as a dependency; since dep-e is unanalyzable, dep-f
+  // must be UNKNOWN (not NOT_REACHABLE). unknown ≠ safe.
+  const nmDepE = path.join(root, "node_modules", "dep-e");
+  mkdir(nmDepE);
+  write(
+    path.join(nmDepE, "package.json"),
+    JSON.stringify({ name: "dep-e", version: "1.0.0", main: "./bundle.js", dependencies: { "dep-f": "^1.0.0" } }, null, 2) + "\n"
+  );
+  // Single very long line (>500 chars average) → reduced fidelity
+  const minifiedLine =
+    `!function(e,t){"object"==typeof exports&&"object"==typeof module?module.exports=t():` +
+    `e.dep_e=t()}(this,(function(){"use strict";` +
+    `var d=require("dep-f");` +
+    `function n(e){return e}function r(e){return e+1}function o(e){return e-1}` +
+    `function i(e){return e*2}function a(e){return e/2}function s(e){return e%2}` +
+    `function u(e){return e**2}function c(e){return Math.sqrt(e)}function l(e){return Math.abs(e)}` +
+    `function f(e,t){return e+t}function p(e,t){return e-t}function g(e,t){return e*t}` +
+    `function h(e,t){return e/t}function m(e,t){return e%t}function v(e,t){return e**t}` +
+    `function y(e){return String(e)}function b(e){return Number(e)}function w(e){return Boolean(e)}` +
+    `function x(e){return Array.isArray(e)}function k(e){return typeof e}` +
+    `return{id:n,inc:r,dec:o,dbl:i,hlv:a,mod:s,sq:u,sqrt:c,abs:l,add:f,sub:p,mul:g,div:h,` +
+    `rem:m,pow:v,str:y,num:b,bool:w,isArr:x,type:k,dep:d}}));`;
+  write(path.join(nmDepE, "bundle.js"), minifiedLine + "\n");
+
+  // dep-f: installed (dep of dep-e). dep-e is reduced fidelity so dep-f is
+  // UNKNOWN (cannot prove dep-e does not use dep-f).
+  // C3: dep-f declares deep-vuln. The transitive closure of dep-e includes
+  // dep-f AND deep-vuln. Both must be UNKNOWN, not just dep-f (C3 fix).
+  const nmDepF = path.join(root, "node_modules", "dep-f");
+  mkdir(nmDepF);
+  write(
+    path.join(nmDepF, "package.json"),
+    JSON.stringify({ name: "dep-f", version: "1.0.0", main: "./index.js", dependencies: { "deep-vuln": "^1.0.0" } }, null, 2) + "\n"
+  );
+  write(path.join(nmDepF, "index.js"), `module.exports = { secret: true };\n`);
+
+  // deep-vuln: two levels behind the reduced dep-e boundary (dep-e → dep-f → deep-vuln).
+  // Must be UNKNOWN via the transitive closure of dep-e's declared deps (C3).
+  const nmDeepVuln = path.join(root, "node_modules", "deep-vuln");
+  mkdir(nmDeepVuln);
+  write(
+    path.join(nmDeepVuln, "package.json"),
+    JSON.stringify({ name: "deep-vuln", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmDeepVuln, "index.js"), `module.exports = { deepVuln: true };\n`);
+
+  // dep-dev: only in devDependencies — tests that listDeps tags it dev:true
+  const nmDepDev = path.join(root, "node_modules", "dep-dev");
+  mkdir(nmDepDev);
+  write(
+    path.join(nmDepDev, "package.json"),
+    JSON.stringify({ name: "dep-dev", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmDepDev, "index.js"), `module.exports = {};\n`);
+
+  // ── package-lock.json ─────────────────────────────────────────────────────
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "transitive-cross-pkg",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "transitive-cross-pkg",
+            version: "1.0.0",
+            dependencies: {
+              "dep-a": "^1.0.0",
+              "dep-b": "^1.0.0",
+              "dep-c": "^1.0.0",
+              "dep-e": "^1.0.0",
+            },
+            devDependencies: {
+              "dep-dev": "^1.0.0",
+            },
+          },
+          "node_modules/dep-a": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-a/-/dep-a-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-a",
+          },
+          "node_modules/dep-b": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-b/-/dep-b-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-b",
+          },
+          "node_modules/dep-c": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-c/-/dep-c-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-c",
+          },
+          "node_modules/dep-d": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-d/-/dep-d-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-d",
+          },
+          "node_modules/dep-e": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-e/-/dep-e-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-e",
+          },
+          "node_modules/dep-f": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-f/-/dep-f-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-f",
+          },
+          "node_modules/deep-vuln": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/deep-vuln/-/deep-vuln-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-deep-vuln",
+          },
+          "node_modules/dep-dev": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-dev/-/dep-dev-1.0.0.tgz",
+            integrity: "sha512-cross-pkg-dep-dev",
+            dev: true,
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+}
+
+// ── hoisted-dynamic-pkg ───────────────────────────────────────────────────────
+// Fixture for C1/C2: dynamic dispatch in deps with zero or limited declared deps.
+//
+// Layout:
+//   index.js → dep-zero  (source fidelity, ZERO declared deps, require(var))
+//   index.js → dep-withdep (source fidelity, declares dep-b only, require(var))
+//   hoisted-vuln: installed at root node_modules, NOT declared by either dep
+//
+// C1: dep-zero has require(var) and declares nothing.
+//     OLD engine: couldReach=[] → frontier dropped → hoisted-vuln = NOT_REACHABLE (WRONG)
+//     NEW engine: dep dynamic dispatch = global frontier → hoisted-vuln = UNKNOWN
+//
+// C2: dep-withdep has require(var) and declares dep-b only.
+//     OLD engine: couldReach=["dep-b"] → hoisted-vuln NOT in list → NOT_REACHABLE (WRONG)
+//     NEW engine: dep dynamic dispatch = global frontier → hoisted-vuln = UNKNOWN
+
+function buildHoistedDynamicPkg() {
+  const root = path.join(projects, "hoisted-dynamic-pkg");
+
+  // ── package.json ──────────────────────────────────────────────────────────
+  write(
+    path.join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "hoisted-dynamic-pkg",
+        version: "1.0.0",
+        private: true,
+        main: "./index.js",
+        dependencies: {
+          "dep-zero": "^1.0.0",
+          "dep-withdep": "^1.0.0",
+          "hoisted-vuln": "^1.0.0",
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+
+  // ── First-party source: index.js ──────────────────────────────────────────
+  write(
+    path.join(root, "index.js"),
+    [
+      `const depZero = require("dep-zero");`,
+      `const depWithDep = require("dep-withdep");`,
+      `module.exports = { depZero, depWithDep };`,
+      ``,
+    ].join("\n")
+  );
+
+  // ── node_modules layout ───────────────────────────────────────────────────
+  rmdir(path.join(root, "node_modules"));
+
+  // dep-zero: source fidelity, declares NOTHING, uses dynamic require(var).
+  // With the global dynamic frontier model: require(var) in a reachable dep
+  // is a GLOBAL frontier → hoisted-vuln must be UNKNOWN (C1).
+  const nmDepZero = path.join(root, "node_modules", "dep-zero");
+  mkdir(nmDepZero);
+  write(
+    path.join(nmDepZero, "package.json"),
+    JSON.stringify({ name: "dep-zero", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(
+    path.join(nmDepZero, "index.js"),
+    [
+      `// C1: dynamic require with zero declared deps`,
+      `function load(name) { return require(name); }`,
+      `module.exports = { load };`,
+      ``,
+    ].join("\n")
+  );
+
+  // dep-withdep: source fidelity, declares dep-b only, uses dynamic require(var).
+  // hoisted-vuln is NOT in dep-withdep's declared set.
+  // With the global dynamic frontier model: require(var) → GLOBAL frontier →
+  // hoisted-vuln must be UNKNOWN even though it's not declared (C2).
+  const nmDepWithDep = path.join(root, "node_modules", "dep-withdep");
+  mkdir(nmDepWithDep);
+  write(
+    path.join(nmDepWithDep, "package.json"),
+    JSON.stringify({ name: "dep-withdep", version: "1.0.0", main: "./index.js", dependencies: { "dep-b": "^1.0.0" } }, null, 2) + "\n"
+  );
+  write(
+    path.join(nmDepWithDep, "index.js"),
+    [
+      `// C2: dynamic require, declares dep-b only`,
+      `const depB = require("dep-b");`,
+      `function load(name) { return require(name); }`,
+      `module.exports = { depB, load };`,
+      ``,
+    ].join("\n")
+  );
+
+  // dep-b: simple package declared by dep-withdep
+  const nmDepB = path.join(root, "node_modules", "dep-b");
+  mkdir(nmDepB);
+  write(
+    path.join(nmDepB, "package.json"),
+    JSON.stringify({ name: "dep-b", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmDepB, "index.js"), `module.exports = { ok: true };\n`);
+
+  // hoisted-vuln: installed at the root node_modules. NOT declared by dep-zero
+  // or dep-withdep. With the global dynamic frontier model, any reachable dep
+  // with dynamic dispatch means hoisted-vuln CANNOT be proven unreachable.
+  const nmHoistedVuln = path.join(root, "node_modules", "hoisted-vuln");
+  mkdir(nmHoistedVuln);
+  write(
+    path.join(nmHoistedVuln, "package.json"),
+    JSON.stringify({ name: "hoisted-vuln", version: "1.0.0", main: "./index.js" }, null, 2) + "\n"
+  );
+  write(path.join(nmHoistedVuln, "index.js"), `module.exports = { vuln: true };\n`);
+
+  // ── package-lock.json ─────────────────────────────────────────────────────
+  write(
+    path.join(root, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "hoisted-dynamic-pkg",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": {
+            name: "hoisted-dynamic-pkg",
+            version: "1.0.0",
+            dependencies: {
+              "dep-zero": "^1.0.0",
+              "dep-withdep": "^1.0.0",
+              "hoisted-vuln": "^1.0.0",
+            },
+          },
+          "node_modules/dep-zero": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-zero/-/dep-zero-1.0.0.tgz",
+            integrity: "sha512-hoisted-dep-zero",
+          },
+          "node_modules/dep-withdep": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-withdep/-/dep-withdep-1.0.0.tgz",
+            integrity: "sha512-hoisted-dep-withdep",
+            dependencies: { "dep-b": "^1.0.0" },
+          },
+          "node_modules/dep-b": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/dep-b/-/dep-b-1.0.0.tgz",
+            integrity: "sha512-hoisted-dep-b",
+          },
+          "node_modules/hoisted-vuln": {
+            version: "1.0.0",
+            resolved: "https://registry.npmjs.org/hoisted-vuln/-/hoisted-vuln-1.0.0.tgz",
+            integrity: "sha512-hoisted-vuln",
+          },
+        },
+      },
+      null,
+      2
+    ) + "\n"
+  );
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 export default function setup() {
@@ -2400,4 +2805,6 @@ export default function setup() {
   buildPnpmOptionalPlatform();
   buildNpmOptionalPlatform();
   buildDepSourceFixtures();
+  buildTransitiveCrossPkg();
+  buildHoistedDynamicPkg();
 }

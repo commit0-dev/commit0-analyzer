@@ -283,6 +283,18 @@ export async function buildProjectModel(
       }
     }
 
+    // Populate devDeps: resolve devDependencies packages for list-deps tagging.
+    // Resolution failures are silently skipped (devDeps are best-effort).
+    for (const [depName, specifier] of Object.entries(ws.manifest.devDependencies ?? {})) {
+      // Skip workspace references and packages already in runtime deps
+      if (ws.deps.has(depName)) continue;
+      if (wsNames.has(depName) || isWorkspaceRef(specifier, depName, wsNames)) continue;
+      const resolved = resolveByManager(manager, depName, specifier, wsRelDir, graph, importers);
+      if (resolved) {
+        ws.devDeps.set(depName, resolved);
+      }
+    }
+
     // Sort localDeps deterministically
     ws.localDeps.sort();
   }

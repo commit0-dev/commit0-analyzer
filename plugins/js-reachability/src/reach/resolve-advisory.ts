@@ -67,11 +67,14 @@ export function resolveAdvisoryConfidence(
   // still consults reachable UNKNOWN frontiers so the caller receives a
   // correct unknownFrontierBlocks signal (a package reached only via a dynamic
   // require must surface as UNKNOWN, never a false not-reachable).
+  // Pass advisory.module as targetPackage so dep-scoped frontiers (couldReach)
+  // can be correctly evaluated for this specific package.
   const bfs = bfsReachable(
     [...entrypoints].sort(),
     cgResult.reachableFiles,
     sites,
-    cgResult.unknownFrontiers
+    cgResult.unknownFrontiers,
+    advisory.module
   );
 
   // Symbol resolution for symbol-level advisories (H1 fix: verify the named

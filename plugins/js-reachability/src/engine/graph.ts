@@ -34,6 +34,19 @@ export interface UnknownMarker {
   line: number;
   /** 1-based column number (character offset within the line). */
   column: number;
+  /**
+   * Package names that this frontier could lead to at runtime.
+   * When set, the frontier makes those specific packages UNKNOWN-eligible
+   * even when they have no static import site and the frontier is not
+   * from a first-party file.
+   *
+   * Used for:
+   *   - dynamic specifiers in reachable dep source files: the dep's declared
+   *     dependencies that could be loaded by the dynamic require/import.
+   *   - reduced/none fidelity deps: the dep's declared dependencies that we
+   *     cannot prove are unreachable because we cannot analyze the dep's code.
+   */
+  couldReach?: string[];
 }
 
 // ── First-party module node ───────────────────────────────────────────────────
