@@ -482,17 +482,25 @@ function extractExports(
  * Parse a single source file using oxc-parser and return a normalized
  * ParsedModule. Never throws — errors become ParsedModuleUnknown.
  */
-export async function parseModuleWithOxc(file: string): Promise<ParsedModule> {
-  // Read the source file
+export async function parseModuleWithOxc(
+  file: string,
+  preReadSource?: string
+): Promise<ParsedModule> {
+  // Read the source file (or use content the caller already read, to avoid a
+  // second filesystem round-trip when the caller has size-guarded the file).
   let source: string;
-  try {
-    source = fs.readFileSync(file, "utf8");
-  } catch (err) {
-    return {
-      kind: "unknown",
-      file,
-      reason: `Could not read file: ${String(err)}`,
-    };
+  if (preReadSource !== undefined) {
+    source = preReadSource;
+  } else {
+    try {
+      source = fs.readFileSync(file, "utf8");
+    } catch (err) {
+      return {
+        kind: "unknown",
+        file,
+        reason: `Could not read file: ${String(err)}`,
+      };
+    }
   }
 
   // Determine source type for oxc

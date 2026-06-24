@@ -189,6 +189,28 @@ function walkDepTree(
   }
 }
 
+// ── Memoization caches ────────────────────────────────────────────────────────
+//
+// The installed node_modules layout is read repeatedly during a scan: the
+// per-workspace closure walk and the call graph's per-dependency transitive
+// closure both resolve the same package directories and re-read the same
+// package.json files thousands of times. Without caching this is the dominant
+// cost on a large repo (a 1000+ dependency project triggers millions of
+// statSync/readFileSync calls). The layout is immutable for the duration of a
+// scan, so cache by absolute path. clearDepClosureCaches() resets them.
+//
+// Keys are absolute paths, so distinct projects never collide; the only
+// staleness risk is re-installing node_modules in the same long-lived process,
+// which a scan does not do.
+const installedDirCache = new Map<string, string | null>();
+const pkgInfoCache = new Map<string, PkgInfo | null>();
+
+/** Clear the path-keyed filesystem caches (for tests / between unrelated scans). */
+export function clearDepClosureCaches(): void {
+  installedDirCache.clear();
+  pkgInfoCache.clear();
+}
+
 // ── Exported resolution helpers (also used by cg/build.ts) ───────────────────
 
 /**
@@ -199,13 +221,22 @@ function walkDepTree(
  * then <parent>/node_modules/<name>, until the filesystem root.
  *
  * Returns the absolute path to the package directory or null if not found.
+ * Memoized by (startDir, name) — the result is invariant for a scan.
  */
 export function findInstalledPackageDir(name: string, startDir: string): string | null {
+  const key = `${startDir}\0${name}`;
+  const cached = installedDirCache.get(key);
+  if (cached !== undefined) return cached;
+
   let current = startDir;
+  let result: string | null = null;
   while (true) {
     const candidate = path.join(current, "node_modules", name);
     try {
-      if (fs.statSync(candidate).isDirectory()) return candidate;
+      if (fs.statSync(candidate).isDirectory()) {
+        result = candidate;
+        break;
+      }
     } catch {
       // not found at this level
     }
@@ -213,7 +244,8 @@ export function findInstalledPackageDir(name: string, startDir: string): string 
     if (parent === current) break; // filesystem root
     current = parent;
   }
-  return null;
+  installedDirCache.set(key, result);
+  return result;
 }
 
 /**
@@ -223,23 +255,7 @@ export function findInstalledPackageDir(name: string, startDir: string): string 
  * Returns an empty array if the package.json cannot be read or parsed.
  */
 export function readDepDeclaredPackages(pkgDir: string): string[] {
-  try {
-    const manifestPath = path.join(pkgDir, "package.json");
-    const raw = fs.readFileSync(manifestPath, "utf8");
-    const manifest = JSON.parse(raw) as Record<string, unknown>;
-    const names = new Set<string>();
-    for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
-      const deps = manifest[field];
-      if (deps && typeof deps === "object" && !Array.isArray(deps)) {
-        for (const name of Object.keys(deps as Record<string, unknown>)) {
-          names.add(name);
-        }
-      }
-    }
-    return [...names].sort();
-  } catch {
-    return [];
-  }
+  return readPackageInfo(pkgDir)?.depNames ?? [];
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -251,7 +267,12 @@ interface PkgInfo {
   depNames: string[];
 }
 
+/** Read + parse a package.json once, memoized by directory. */
 function readPackageInfo(pkgDir: string): PkgInfo | null {
+  const cached = pkgInfoCache.get(pkgDir);
+  if (cached !== undefined) return cached;
+
+  let info: PkgInfo | null = null;
   try {
     const manifestPath = path.join(pkgDir, "package.json");
     const raw = fs.readFileSync(manifestPath, "utf8");
@@ -267,8 +288,10 @@ function readPackageInfo(pkgDir: string): PkgInfo | null {
         }
       }
     }
-    return { name, version, depNames: [...depNames].sort() };
+    info = { name, version, depNames: [...depNames].sort() };
   } catch {
-    return null;
+    info = null;
   }
+  pkgInfoCache.set(pkgDir, info);
+  return info;
 }

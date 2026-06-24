@@ -19,6 +19,7 @@ import (
 	"github.com/ducthinh993/anst-analyzer/internal/host"
 	"github.com/ducthinh993/anst-analyzer/internal/policy"
 	"github.com/ducthinh993/anst-analyzer/internal/render"
+	"github.com/ducthinh993/anst-analyzer/internal/telemetry"
 	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
 )
 
@@ -155,6 +156,8 @@ Exit codes:
 // runScan executes the full scan pipeline and returns the exit code.
 // It never panics; panics are caught by policy.RunWithRecovery in main.
 func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
+	defer telemetry.Span("scan.total")()
+
 	// ── 1. Detect ecosystems and validate module root ────────────────────────
 	eco := detectEcosystems(moduleRoot)
 	scanGo, scanJS, langErr := resolveLanguage(flags.language, eco)
@@ -595,7 +598,9 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 	}
 
+	stopPluginRun := telemetry.Span("scan.plugin.run")
 	results, runErr := host.Run(ctx, reg, req, host.RunOptions{})
+	stopPluginRun()
 	if runErr != nil {
 		fmt.Fprintf(os.Stderr, "anst-analyzer scan: host.Run: %v\n", runErr)
 		return policy.ExitOperationalError

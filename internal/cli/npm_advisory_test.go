@@ -134,6 +134,19 @@ func buildNPMFixtureProject(t *testing.T, pkgName, resolvedVersion string) strin
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "package-lock.json"), lockBytes, 0o644))
 
+	// Install the dependency on disk. The project model walks the installed
+	// tree to compute the dependency closure; a declared-but-uninstalled dep is
+	// correctly reported as incomplete, so a realistic fixture must materialise
+	// node_modules/<pkg>/package.json (as a real npm install would).
+	depDir := filepath.Join(dir, "node_modules", filepath.FromSlash(pkgName))
+	require.NoError(t, os.MkdirAll(depDir, 0o755))
+	depPkgBytes, err := json.Marshal(map[string]interface{}{
+		"name":    pkgName,
+		"version": resolvedVersion,
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(depDir, "package.json"), depPkgBytes, 0o644))
+
 	return dir
 }
 

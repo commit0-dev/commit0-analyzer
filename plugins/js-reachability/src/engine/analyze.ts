@@ -37,6 +37,7 @@ import { buildProjectModel } from "../project/build-project-model.js";
 import { computeWorkspaceClosure } from "../project/dep-closure.js";
 import { Confidence } from "../gen/anst/v1/plugin.js";
 import type { Finding } from "../gen/anst/v1/plugin.js";
+import * as telemetry from "../telemetry.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -62,6 +63,11 @@ export interface EngineRequest {
  */
 export async function analyze(req: EngineRequest): Promise<Finding[]> {
   const { moduleRoot, advisories } = req;
+
+  // Per-scan telemetry: reset accumulators so a debug summary reflects this
+  // scan only (no-op unless ANST_DEBUG/ANST_TELEMETRY is set). Flushed to
+  // stderr before each return below.
+  telemetry.reset();
 
   // Resolve project model to discover workspaces and their declared deps.
   const model = await buildProjectModel(moduleRoot);
@@ -115,6 +121,7 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
       findings.push(buildFinding({ advisory, confidence, workspace: workspaceName, importingFile, path, phantom, importGraphVerdict: igVerdict, devOnly }));
     }
 
+    telemetry.flush("plugin");
     return sortFindings(findings);
   }
 
@@ -209,5 +216,6 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
     }
   }
 
+  telemetry.flush("plugin");
   return sortFindings(findings);
 }
