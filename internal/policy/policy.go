@@ -14,6 +14,15 @@
 //     + UNKNOWN (any finding that could be reachable); NOT_REACHABLE excluded.
 //   - Custom severity thresholds: exit non-zero when HIGH+ count exceeds limit.
 //
+// Dep-type gating:
+//   - Non-runtime dependencies (dev, test, docs, optional-extra) do NOT fail the
+//     gate by default: they are not in the production execution path.
+//   - The gate-on field controls the confidence floor for gating:
+//       "reachable"         → gate only SYMBOL_REACHABLE + PACKAGE_REACHABLE
+//       "reachable+unknown" → gate SYMBOL_REACHABLE + PACKAGE_REACHABLE + UNKNOWN (default)
+//       "all"               → gate all findings regardless of confidence
+//   - NOT_REACHABLE is never gate-eligible regardless of gate-on.
+//
 // A crashed or incomplete scan MUST exit 3, never 0.
 package policy
 
@@ -65,10 +74,37 @@ type EvalFlags struct {
 	Incomplete bool
 }
 
+// GateOn constants control which confidence tiers are eligible to trigger a gate
+// failure. The value is case-insensitive.
+//
+//   - GateOnReachable          → gate SYMBOL_REACHABLE + PACKAGE_REACHABLE only.
+//     UNKNOWN is treated as warn-only. Useful for hyper-dynamic apps where static
+//     analysis cannot resolve all call paths, making UNKNOWN extremely common.
+//   - GateOnReachableAndUnknown → gate SYMBOL_REACHABLE + PACKAGE_REACHABLE +
+//     UNKNOWN (default). "unknown ≠ safe": a runtime dep with UNKNOWN confidence
+//     still gates because we cannot prove it's unreachable.
+//   - GateOnAll                → gate all non-NOT_REACHABLE findings regardless of
+//     confidence tier. Equivalent to the pre-dep-type behaviour.
+const (
+	GateOnReachable          = "reachable"
+	GateOnReachableAndUnknown = "reachable+unknown"
+	GateOnAll                = "all"
+)
+
+// nonRuntimeDepTypes is the set of dep_type values that do NOT fail the gate by
+// default (they are not in the production execution path).
+var nonRuntimeDepTypes = map[string]bool{
+	"dev":            true,
+	"test":           true,
+	"docs":           true,
+	"optional-extra": true,
+}
+
 // policyYAML is the raw YAML structure for unmarshalling.
 type policyYAML struct {
 	FailOn        string          `yaml:"fail-on"`
 	ReachableOnly bool            `yaml:"reachable-only"`
+	GateOn        string          `yaml:"gate-on"`
 	Ignores       []ignoreYAML    `yaml:"ignores"`
 }
 
@@ -90,6 +126,13 @@ type Policy struct {
 	// SYMBOL_REACHABLE, PACKAGE_REACHABLE, and UNKNOWN. Only NOT_REACHABLE
 	// is excluded. See Red Team #15c.
 	ReachableOnly bool
+	// GateOn sets the confidence floor for gating:
+	//   "reachable"          → gate SYMBOL_REACHABLE + PACKAGE_REACHABLE only
+	//   "reachable+unknown"  → gate SYMBOL_REACHABLE + PACKAGE_REACHABLE + UNKNOWN (default)
+	//   "all"                → gate all non-NOT_REACHABLE findings
+	// Empty string defaults to GateOnReachableAndUnknown (sound default).
+	// NOT_REACHABLE is never gate-eligible regardless of this setting.
+	GateOn string
 	// Ignores is the list of active ignore entries.
 	Ignores []IgnoreEntry
 }
@@ -103,9 +146,16 @@ func LoadPolicy(data []byte) (*Policy, error) {
 		return nil, fmt.Errorf("policy: YAML parse error: %w", err)
 	}
 
+	// Validate gate-on value if present.
+	gateOn := strings.ToLower(strings.TrimSpace(raw.GateOn))
+	if gateOn != "" && gateOn != GateOnReachable && gateOn != GateOnReachableAndUnknown && gateOn != GateOnAll {
+		return nil, fmt.Errorf("policy: unknown gate-on value %q: must be reachable|reachable+unknown|all", raw.GateOn)
+	}
+
 	p := &Policy{
 		FailOn:        raw.FailOn,
 		ReachableOnly: raw.ReachableOnly,
+		GateOn:        gateOn,
 	}
 
 	for i, ig := range raw.Ignores {
@@ -132,31 +182,75 @@ func LoadPolicy(data []byte) (*Policy, error) {
 	return p, nil
 }
 
+// effectiveGateOn returns the gate-on tier in effect, defaulting to
+// GateOnReachableAndUnknown when GateOn is unset.
+func (p *Policy) effectiveGateOn() string {
+	if p.GateOn == "" {
+		return GateOnReachableAndUnknown
+	}
+	return p.GateOn
+}
+
 // isGateEligible reports whether a finding is eligible to trigger a gate failure
 // under the current policy settings.
 //
-// Under reachable-only mode (Red Team #15c):
-//   - SYMBOL_REACHABLE → eligible (definitely reachable)
-//   - PACKAGE_REACHABLE → eligible (not proven safe)
-//   - UNKNOWN → eligible (unknown ≠ safe)
-//   - NOT_REACHABLE → NOT eligible (only excludable tier)
+// Confidence tier eligibility (applied to all ecosystems):
+//   - NOT_REACHABLE → NEVER eligible (only suppressible tier).
+//   - SYMBOL_REACHABLE → always eligible.
+//   - PACKAGE_REACHABLE → always eligible.
+//   - UNKNOWN → eligible when gate-on is "reachable+unknown" (default) or "all";
+//     treated as warn-only under "reachable".
 //
-// Without reachable-only: all findings are eligible regardless of confidence.
+// Under ReachableOnly mode the gate-on logic is also applied (they compose).
+// ReachableOnly without a gate-on is equivalent to gate-on=reachable+unknown.
 //
-// Dev-only exclusion: a finding tagged properties["dev_only"]="true" is never
-// gate-eligible, regardless of confidence or severity. Dev-only dependencies exist
-// only in the development toolchain and are not present in the runtime execution
-// path; they are surfaced for audit purposes but must not cause CI gate failures.
+// Dep-type eligibility (Python; signalled via properties["dep_type"]):
+//   - runtime → eligible (in production execution path).
+//   - optional-extra, dev, test, docs → NOT eligible by default (not in production).
+//   - Missing dep_type is treated as runtime (conservative default).
+//
+// Legacy exclusion: properties["dev_only"]="true" → never eligible.
+// This covers the older JS/Go wire that doesn't use dep_type.
 func (p *Policy) isGateEligible(f *anstv1.Finding) bool {
-	if f.GetProperties()["dev_only"] == "true" {
+	props := f.GetProperties()
+
+	// Legacy dev-only tag (JS/Go) — always overrides.
+	if props["dev_only"] == "true" {
 		return false
 	}
-	if p.ReachableOnly {
-		// Use the contract wrapper to enforce the suppression invariant.
-		// IsSuppressible() is true ONLY for NOT_REACHABLE.
-		return !contract.WrapFinding(f).IsSuppressible()
+
+	// Dep-type exclusion: non-runtime Python deps do not gate by default.
+	// properties["dep_type"] is set by the host's stampDepType pass.
+	// When absent, we assume runtime (conservative: never hide a real runtime vuln).
+	if dt := props["dep_type"]; dt != "" && nonRuntimeDepTypes[dt] {
+		return false
 	}
-	return true
+
+	// NOT_REACHABLE is the only confidence tier that may be suppressed.
+	if contract.WrapFinding(f).IsSuppressible() {
+		return false
+	}
+
+	// Without reachable-only and gate-on=all, all remaining findings gate.
+	gateOn := p.effectiveGateOn()
+	if !p.ReachableOnly && gateOn == GateOnAll {
+		return true
+	}
+
+	// Apply the confidence floor.
+	switch f.GetConfidence() {
+	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+		// Always gate-eligible (provably reachable or not proven safe).
+		return true
+	case anstv1.Confidence_CONFIDENCE_UNKNOWN:
+		// UNKNOWN gates unless gate-on="reachable" (hyper-dynamic opt-out).
+		return gateOn != GateOnReachable
+	default:
+		// Any other confidence value: gate only when not in reachable-only /
+		// reachable+unknown mode (i.e., gate-on=all or no mode restriction).
+		return !p.ReachableOnly && gateOn == GateOnAll
+	}
 }
 
 // isIgnored reports whether f is suppressed by an active (non-expired, matching)
