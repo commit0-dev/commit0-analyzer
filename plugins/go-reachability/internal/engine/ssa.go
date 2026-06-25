@@ -15,12 +15,18 @@ func BuildSSA(pkgs []*packages.Package) (*ssa.Program, []*ssa.Package) {
 	// ssautil.AllPackages creates the SSA program from the type-checked package
 	// graph produced by go/packages. The mode flags control how bodies are built:
 	//
-	//   ssa.SanityCheckFunctions  — extra correctness assertions (useful in tests)
 	//   ssa.InstantiateGenerics   — materialise generic instantiations as SSA funcs
+	//
+	// We do NOT enable ssa.SanityCheckFunctions: it is a debug verification mode
+	// whose assertions PANIC on valid real-world SSA — notably the synthetic
+	// closures x/tools emits inside instantiated generics carry a nil Pkg, which
+	// the sanity check rejects (observed on istio's generic krt package). The SSA
+	// is correct for call-graph construction regardless; govulncheck likewise
+	// runs without sanity checks in production.
 	//
 	// We do NOT use ssa.GlobalDebug here because it bloats memory for large repos;
 	// position information is still available via fn.Pos() from the token.FileSet.
-	mode := ssa.SanityCheckFunctions | ssa.InstantiateGenerics
+	mode := ssa.InstantiateGenerics
 	prog, ssaPkgs := ssautil.AllPackages(pkgs, mode)
 
 	// prog.Build() builds function bodies for every reachable package.

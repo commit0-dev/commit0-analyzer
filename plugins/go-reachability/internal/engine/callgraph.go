@@ -60,6 +60,14 @@ func buildVTA(prog *ssa.Program, _ []*ssa.Function) (*callgraph.Graph, string, e
 	// Step 2: refine with VTA. allFunctions is the universe VTA propagates over.
 	// vta.CallGraph returns a new graph with edges only reachable from the
 	// type-propagation fixed point seeded by the CHA edges.
+	//
+	// NOTE: both cha.CallGraph above and vta.CallGraph below route through
+	// x/tools ssautil method-set enumeration, which PANICS on programs that use
+	// generics (ForEachElement on a type still containing a *types.TypeParam —
+	// observed on istio's generic krt package; it is an intentional assertion in
+	// x/tools v0.46.0, the latest release, so it cannot be fixed by upgrading).
+	// The panic is recovered at the Analyze level, which then degrades to a
+	// sound import-level analysis rather than crashing the process.
 	allFuncs := ssautil.AllFunctions(prog)
 	vtaGraph := vta.CallGraph(allFuncs, chaGraph)
 
