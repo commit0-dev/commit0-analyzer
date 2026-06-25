@@ -676,7 +676,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	if rustManifest != nil && selectedSources[advisory.SourceOSV] {
 		// List the resolved crate deps via cargo metadata (lockfile-static, no
 		// build-script execution — safe on untrusted repos).
-		cargoDeps, cargoIncomplete, cargoListErr := listCargoDeps(ctx, moduleRoot)
+		cargoDeps, cargoIncomplete, cargoListErr := listCargoDeps(ctx, moduleRoot, flags.offline)
 		if cargoListErr != nil {
 			// cargo not on PATH or Cargo.lock missing: degrade to incomplete
 			// (unknown ≠ safe). The plugin will emit UNKNOWN+Incomplete=true for
@@ -1038,6 +1038,19 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register python plugin: %v\n", addErr)
 			return policy.ExitOperationalError
 		}
+	}
+
+	// Signal offline mode to child plugins via environment. The Rust plugin reads
+	// ANST_CARGO_OFFLINE to decide whether to pass --offline to cargo metadata.
+	// Plugin subprocesses inherit the host process environment (go-plugin uses
+	// exec.CommandContext with no explicit cmd.Env override), and the plugin's
+	// sanitized cargo env allowlists ANST_CARGO_OFFLINE so it flows through to
+	// the cargo subprocess. We unset it when not in offline mode so a stale env
+	// var from a parent process cannot accidentally trigger offline mode.
+	if flags.offline {
+		_ = os.Setenv("ANST_CARGO_OFFLINE", "1")
+	} else {
+		_ = os.Unsetenv("ANST_CARGO_OFFLINE")
 	}
 
 	stopPluginRun := telemetry.Span("scan.plugin.run")
@@ -1442,6 +1455,19 @@ func sanitizedCargoEnv() []string {
 		// Preserve existing CARGO_HOME and RUSTUP_HOME so they stay consistent
 		// with the user's toolchain setup. We strip override attempts but keep
 		// the inherited values (handled below via the strip map + re-add).
+		// Proxy vars: required for online cargo metadata resolution behind a
+		// corporate or CI proxy. Cargo respects these standard env vars for
+		// HTTPS connections to the crates.io registry index.
+		"HTTP_PROXY",
+		"HTTPS_PROXY",
+		"NO_PROXY",
+		"http_proxy",
+		"https_proxy",
+		"no_proxy",
+		"CARGO_HTTP_",
+		// Offline mode signal forwarded from the host to the Rust plugin so
+		// the plugin's own cargo metadata invocation can also honour offline mode.
+		"ANST_CARGO_OFFLINE",
 	}
 
 	var env []string
@@ -1489,16 +1515,23 @@ func sanitizedCargoEnv() []string {
 	return env
 }
 
-// listCargoDeps runs `cargo metadata --format-version 1 --offline` in moduleRoot,
+// listCargoDeps runs `cargo metadata --format-version 1` in moduleRoot,
 // parses the resulting JSON, and returns a flat list of (name, version) pairs for
 // every crate in the resolved closure.
 //
-// Security: `cargo metadata --offline` reads only the already-fetched registry
-// cache. It does NOT execute build scripts (build.rs) or proc-macros, making it
-// safe on untrusted repos (the same guarantee held by the Rust plugin's own
-// cargo.LoadManifest call). The subprocess is run with a sanitized environment
-// (see sanitizedCargoEnv) so a repo-local rust-toolchain.toml cannot hijack the
-// toolchain and arbitrary env vars cannot influence the cargo invocation.
+// Security: cargo metadata does NOT execute build scripts (build.rs) or
+// proc-macros, making it safe on untrusted repos (the same guarantee held by the
+// Rust plugin's own cargo.LoadManifest call). The subprocess is run with a
+// sanitized environment (see sanitizedCargoEnv) so a repo-local rust-toolchain.toml
+// cannot hijack the toolchain and arbitrary env vars cannot influence the cargo
+// invocation. RUSTUP_TOOLCHAIN=stable is always pinned.
+//
+// When offline is true (the user passed --offline), --offline is added to the
+// cargo invocation so it reads only the already-fetched registry cache without
+// hitting the network. When offline is false (the default), cargo fetches registry
+// metadata as needed — this is required for fresh clones whose deps are not yet
+// in the local cache. Cargo metadata only downloads index + crate metadata
+// (not source tarballs and not build scripts), so online resolution is safe.
 //
 // Returns (deps, incomplete, err):
 //   - deps: every crate present in the resolved packages[]; may be empty on
@@ -1510,13 +1543,12 @@ func sanitizedCargoEnv() []string {
 //     (callers print a warning and propagate incomplete=true; they do NOT abort).
 //
 // Invariant: on any failure, incomplete is always true (unknown ≠ safe).
-func listCargoDeps(ctx context.Context, moduleRoot string) ([]cargoDep, bool, error) {
-	cmd := exec.CommandContext(ctx,
-		"cargo", "metadata",
-		"--format-version", "1",
-		"--all-features",
-		"--offline",
-	)
+func listCargoDeps(ctx context.Context, moduleRoot string, offline bool) ([]cargoDep, bool, error) {
+	args := []string{"metadata", "--format-version", "1", "--all-features"}
+	if offline {
+		args = append(args, "--offline")
+	}
+	cmd := exec.CommandContext(ctx, "cargo", args...)
 	cmd.Dir = moduleRoot
 	// Use a sanitized environment: pin RUSTUP_TOOLCHAIN=stable, strip
 	// CARGO_HOME/RUSTUP_HOME override vectors, pass only an allowlisted set.

@@ -5,9 +5,13 @@
 //
 // cargo metadata is the only build-tool invocation used; it does NOT execute
 // build scripts (build.rs) or proc-macros, making it safe on untrusted repos.
-// The plugin prefers Cargo.lock-static parsing when possible: the
-// --offline flag ensures cargo reads only the already-fetched registry cache
-// without hitting the network, which also prevents supply-chain confusion.
+// By default cargo metadata runs in online mode so it can resolve dependencies
+// on fresh clones where crate metadata is not yet in the local registry cache.
+// When ANST_CARGO_OFFLINE is set to a truthy value (e.g. "1"), --offline is
+// passed to cargo so the scan runs from the already-fetched cache only — this
+// matches the behaviour requested by the user's --offline scan flag.
+// RUSTUP_TOOLCHAIN=stable is always pinned to prevent a repo-supplied
+// rust-toolchain.toml from hijacking the toolchain.
 //
 // # Partiality invariant
 //
@@ -37,7 +41,7 @@ const cargoTimeout = 5 * time.Second
 // ─── Public types ────────────────────────────────────────────────────────────
 
 // Manifest is the resolved dependency closure produced by parsing the output
-// of `cargo metadata --format-version 1 --all-features --offline`.
+// of `cargo metadata --format-version 1 --all-features`.
 //
 // Packages is keyed by crate name (the "name" field in Cargo.toml), not by
 // the full package ID. When two workspace members have the same name (rare but
@@ -125,12 +129,18 @@ type cargoResolve struct {
 }
 
 type cargoNode struct {
-	ID   string      `json:"id"`
-	Deps []cargoDep  `json:"dependencies"`
+	ID string `json:"id"`
+	// Deps maps to the "deps" field (not "dependencies") in cargo metadata
+	// --format-version 1 output. The "dependencies" field is a flat []string of
+	// package IDs present in all cargo versions; "deps" is the structured form
+	// (with dep_kinds) introduced alongside the space-free ID format in cargo
+	// 1.77 and present in all cargo versions that support --format-version 1.
+	// Unmarshaling "dependencies" fails because it is []string, not []cargoDep.
+	Deps []cargoDep `json:"deps"`
 }
 
 type cargoDep struct {
-	Pkg      string        `json:"pkg"`
+	Pkg      string         `json:"pkg"`
 	DepKinds []cargoDepKind `json:"dep_kinds"`
 }
 
@@ -144,9 +154,26 @@ type cargoDepKind struct {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-// LoadManifest invokes `cargo metadata --format-version 1 --all-features
-// --offline` in moduleRoot, parses the output, and returns a fully-populated
-// Manifest.
+// cargoOfflineRequested returns true when the ANST_CARGO_OFFLINE environment
+// variable is set to a truthy value ("1", "true", "yes", case-insensitive).
+//
+// The host scan process sets this variable before launching the plugin when
+// the user passed --offline, allowing the plugin to honour the same flag
+// without requiring a separate CLI argument or gRPC field.
+func cargoOfflineRequested() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("ANST_CARGO_OFFLINE")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+// LoadManifest invokes `cargo metadata --format-version 1 --all-features`
+// in moduleRoot, parses the output, and returns a fully-populated Manifest.
+//
+// Online vs offline mode: by default cargo metadata runs online so it can
+// fetch registry index and crate metadata on fresh clones. When the env var
+// ANST_CARGO_OFFLINE is set to a truthy value ("1", "true", "yes"), --offline
+// is added and cargo reads only the already-fetched local cache. This mirrors
+// the host scan's --offline flag, which the host signals by setting
+// ANST_CARGO_OFFLINE before launching the plugin subprocess.
 //
 // On any failure (cargo not on PATH, non-zero exit, timeout, JSON parse
 // error, empty resolve), LoadManifest returns a non-nil Manifest with
@@ -175,12 +202,11 @@ func LoadManifest(ctx context.Context, moduleRoot string) (*Manifest, error) {
 	// (CARGO_HOME, RUSTUP_HOME) to attacker-controlled paths. The child inherits
 	// only a minimal allowlist sufficient for cargo to locate binaries, config,
 	// and the registry cache.
-	cmd := exec.CommandContext(ctx,
-		"cargo", "metadata",
-		"--format-version", "1",
-		"--all-features",
-		"--offline",
-	)
+	args := []string{"metadata", "--format-version", "1", "--all-features"}
+	if cargoOfflineRequested() {
+		args = append(args, "--offline")
+	}
+	cmd := exec.CommandContext(ctx, "cargo", args...)
 	cmd.Dir = moduleRoot
 	cmd.Env = SanitizedCargoEnv()
 
@@ -396,16 +422,18 @@ func CrateNameFromID(id string) string {
 //
 // # Allowlist
 //
-// The child inherits only env vars cargo requires for normal offline operation:
-//   - PATH            — locates the cargo/rustup binaries
-//   - HOME            — fallback for default CARGO_HOME / RUSTUP_HOME resolution
-//   - USERPROFILE     — Windows equivalent of HOME
-//   - LOCALAPPDATA    — Windows: default CARGO_HOME fallback
-//   - SystemRoot      — Windows: required by many C runtime calls
-//   - TMPDIR/TEMP/TMP — cargo writes temporary files
-//   - SSL_CERT_*      — TLS roots (even with --offline, cargo may validate certs
-//                       for already-fetched registry index entries on some platforms)
-//   - XDG_*           — honoured by some cargo/rustup paths on Linux
+// The child inherits only env vars cargo requires for normal operation:
+//   - PATH                  — locates the cargo/rustup binaries
+//   - HOME                  — fallback for default CARGO_HOME / RUSTUP_HOME resolution
+//   - USERPROFILE           — Windows equivalent of HOME
+//   - LOCALAPPDATA          — Windows: default CARGO_HOME fallback
+//   - SystemRoot            — Windows: required by many C runtime calls
+//   - TMPDIR/TEMP/TMP       — cargo writes temporary files
+//   - SSL_CERT_*            — TLS roots for HTTPS connections to the registry
+//   - XDG_*                 — honoured by some cargo/rustup paths on Linux
+//   - HTTP_PROXY/HTTPS_PROXY/NO_PROXY (and lowercase) — proxy for online resolution
+//   - CARGO_HTTP_*          — cargo-specific HTTP config (proxy, timeout, etc.)
+//   - ANST_CARGO_OFFLINE    — internal signal: host sets this to propagate --offline
 //
 // Anything not on this list is dropped; RUSTUP_TOOLCHAIN is explicitly pinned
 // rather than inherited so it cannot be overridden by the calling environment.
@@ -430,6 +458,21 @@ func SanitizedCargoEnv() []string {
 		// neutralizes the only repo-controlled vector (a rust-toolchain.toml file).
 		"CARGO_HOME=",
 		"RUSTUP_HOME=",
+		// Proxy vars: required for online cargo metadata resolution behind a
+		// corporate or CI proxy. Cargo honours these for HTTPS connections to
+		// the crates.io registry index. Both upper and lower case forms are used
+		// by different tools and systems.
+		"HTTP_PROXY=",
+		"HTTPS_PROXY=",
+		"NO_PROXY=",
+		"http_proxy=",
+		"https_proxy=",
+		"no_proxy=",
+		// cargo-specific HTTP configuration (proxy override, timeout, TLS, etc.).
+		"CARGO_HTTP_",
+		// Internal signal from the host scan: set to "1" when the user passed
+		// --offline so the plugin's LoadManifest call can honour offline mode.
+		"ANST_CARGO_OFFLINE=",
 	}
 
 	// RUSTUP_TOOLCHAIN is pinned below, never inherited, so a rust-toolchain.toml

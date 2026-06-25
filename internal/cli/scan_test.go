@@ -1183,13 +1183,13 @@ func newCratesIOOSVMockServer(t *testing.T, advID, pkgName, fixedVersion string,
 
 // buildRustFixtureProject creates a minimal Rust project with no external deps
 // in a temp directory and returns the directory path. The project has a lib
-// target so `cargo metadata --offline` succeeds without a prior registry fetch.
+// target so `cargo metadata` succeeds without a prior registry fetch.
 // The crate is named pkgName at version pkgVersion.
 //
 // A minimal Cargo.lock is written alongside Cargo.toml so that both the host's
-// listCargoDeps (--offline) and the Rust plugin's internal cargo call can run
-// without network access. Without Cargo.lock, cargo metadata --offline fails even
-// for a no-dependency project on some Cargo versions.
+// listCargoDeps and the Rust plugin's internal cargo call can run without network
+// access. Without Cargo.lock, cargo metadata --offline fails even for a
+// no-dependency project on some Cargo versions.
 func buildRustFixtureProject(t *testing.T, pkgName, pkgVersion string) string {
 	t.Helper()
 	dir := t.TempDir()

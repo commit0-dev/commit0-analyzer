@@ -56,8 +56,10 @@ func TestParseMetadataJSON_SimpleCrate(t *testing.T) {
 			"nodes": [
 				{
 					"id": "my-app 0.1.0 (path+file:///tmp/my-app)",
-					"dependencies": [
+					"dependencies": ["serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "serde",
 							"pkg": "serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -65,7 +67,8 @@ func TestParseMetadataJSON_SimpleCrate(t *testing.T) {
 				},
 				{
 					"id": "serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "my-app 0.1.0 (path+file:///tmp/my-app)"
@@ -131,8 +134,10 @@ func TestParseMetadataJSON_DevOnlyDep(t *testing.T) {
 			"nodes": [
 				{
 					"id": "my-lib 0.1.0 (path+file:///tmp/my-lib)",
-					"dependencies": [
+					"dependencies": ["dev-tools 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "dev-tools",
 							"pkg": "dev-tools 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": "dev", "target": null}]
 						}
@@ -140,7 +145,8 @@ func TestParseMetadataJSON_DevOnlyDep(t *testing.T) {
 				},
 				{
 					"id": "dev-tools 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "my-lib 0.1.0 (path+file:///tmp/my-lib)"
@@ -192,8 +198,10 @@ func TestParseMetadataJSON_BuildDep(t *testing.T) {
 			"nodes": [
 				{
 					"id": "my-app 0.1.0 (path+file:///tmp/my-app)",
-					"dependencies": [
+					"dependencies": ["cc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "cc",
 							"pkg": "cc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": "build", "target": null}]
 						}
@@ -201,7 +209,8 @@ func TestParseMetadataJSON_BuildDep(t *testing.T) {
 				},
 				{
 					"id": "cc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "my-app 0.1.0 (path+file:///tmp/my-app)"
@@ -253,8 +262,10 @@ func TestParseMetadataJSON_BothNormalAndDev(t *testing.T) {
 			"nodes": [
 				{
 					"id": "my-app 0.1.0 (path+file:///tmp/my-app)",
-					"dependencies": [
+					"dependencies": ["serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "serde",
 							"pkg": "serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [
 								{"kind": null, "target": null},
@@ -265,7 +276,8 @@ func TestParseMetadataJSON_BothNormalAndDev(t *testing.T) {
 				},
 				{
 					"id": "serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "my-app 0.1.0 (path+file:///tmp/my-app)"
@@ -334,8 +346,10 @@ func TestParseMetadataJSON_Workspace(t *testing.T) {
 			"nodes": [
 				{
 					"id": "member-a 0.1.0 (path+file:///tmp/ws/a)",
-					"dependencies": [
+					"dependencies": ["transitive-c 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "transitive-c",
 							"pkg": "transitive-c 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -343,8 +357,10 @@ func TestParseMetadataJSON_Workspace(t *testing.T) {
 				},
 				{
 					"id": "member-b 0.2.0 (path+file:///tmp/ws/b)",
-					"dependencies": [
+					"dependencies": ["member-a 0.1.0 (path+file:///tmp/ws/a)"],
+					"deps": [
 						{
+							"name": "member-a",
 							"pkg": "member-a 0.1.0 (path+file:///tmp/ws/a)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -352,11 +368,13 @@ func TestParseMetadataJSON_Workspace(t *testing.T) {
 				},
 				{
 					"id": "transitive-c 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				},
 				{
 					"id": "workspace-root 0.1.0 (path+file:///tmp/ws)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": null
@@ -446,8 +464,10 @@ func TestParseMetadataJSON_TransitiveClosure(t *testing.T) {
 			"nodes": [
 				{
 					"id": "app 0.1.0 (path+file:///tmp/app)",
-					"dependencies": [
+					"dependencies": ["middle 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "middle",
 							"pkg": "middle 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -455,8 +475,10 @@ func TestParseMetadataJSON_TransitiveClosure(t *testing.T) {
 				},
 				{
 					"id": "middle 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": [
+					"dependencies": ["leaf 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "leaf",
 							"pkg": "leaf 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -464,7 +486,8 @@ func TestParseMetadataJSON_TransitiveClosure(t *testing.T) {
 				},
 				{
 					"id": "leaf 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "app 0.1.0 (path+file:///tmp/app)"
@@ -648,8 +671,10 @@ func TestCrateNameFromID_NewFormatWorkspaceParsing(t *testing.T) {
 			"nodes": [
 				{
 					"id": "path+file:///workspace/demo#demo@0.1.0",
-					"dependencies": [
+					"dependencies": ["registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.18"],
+					"deps": [
 						{
+							"name": "itoa",
 							"pkg": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.18",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -657,7 +682,8 @@ func TestCrateNameFromID_NewFormatWorkspaceParsing(t *testing.T) {
 				},
 				{
 					"id": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.18",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "path+file:///workspace/demo#demo@0.1.0"
@@ -762,8 +788,10 @@ func TestParseMetadataJSON_WorkspaceMemberReachable(t *testing.T) {
 			"nodes": [
 				{
 					"id": "member-a 0.1.0 (path+file:///tmp/ws/a)",
-					"dependencies": [
+					"dependencies": ["transitive-c 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "transitive-c",
 							"pkg": "transitive-c 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -771,15 +799,18 @@ func TestParseMetadataJSON_WorkspaceMemberReachable(t *testing.T) {
 				},
 				{
 					"id": "member-b 0.2.0 (path+file:///tmp/ws/b)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				},
 				{
 					"id": "transitive-c 3.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				},
 				{
 					"id": "workspace-root 0.1.0 (path+file:///tmp/ws)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": null
@@ -868,8 +899,10 @@ func TestParseMetadataJSON_RootCrateReachable(t *testing.T) {
 			"nodes": [
 				{
 					"id": "my-app 0.1.0 (path+file:///tmp/my-app)",
-					"dependencies": [
+					"dependencies": ["serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "serde",
 							"pkg": "serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -877,7 +910,8 @@ func TestParseMetadataJSON_RootCrateReachable(t *testing.T) {
 				},
 				{
 					"id": "serde 1.0.197 (registry+https://github.com/rust-lang/crates.io-index)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": "my-app 0.1.0 (path+file:///tmp/my-app)"
@@ -934,8 +968,10 @@ func TestParseMetadataJSON_UnknownDepPkgSetsClosureUnknown(t *testing.T) {
 			"nodes": [
 				{
 					"id": "my-app 0.1.0 (path+file:///tmp/my-app)",
-					"dependencies": [
+					"dependencies": ["phantom-crate 9.9.9 (registry+https://github.com/rust-lang/crates.io-index)"],
+					"deps": [
 						{
+							"name": "phantom-crate",
 							"pkg": "phantom-crate 9.9.9 (registry+https://github.com/rust-lang/crates.io-index)",
 							"dep_kinds": [{"kind": null, "target": null}]
 						}
@@ -993,11 +1029,13 @@ func TestParseMetadataJSON_WorkspaceMembersField(t *testing.T) {
 			"nodes": [
 				{
 					"id": "alpha 0.1.0 (path+file:///tmp/ws/alpha)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				},
 				{
 					"id": "beta 0.1.0 (path+file:///tmp/ws/beta)",
-					"dependencies": []
+					"dependencies": [],
+					"deps": []
 				}
 			],
 			"root": null
