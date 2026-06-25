@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,55 +26,127 @@ import (
 
 // scanFlags holds all flag values for the scan sub-command.
 type scanFlags struct {
-	format         string
-	policyFile     string
-	dbSnapshot     string
-	offline        bool
-	update         bool
-	failOn         string
-	goos           string
-	goarch         string
-	tags           string
-	pluginBin      string
-	jsPluginBin    string // path to pre-built js-reachability plugin binary (skip build)
-	source         string // comma-separated source names; default "go-vuln-db,osv"
-	sourceExplicit bool   // true when --source was explicitly set by the user
-	language       string // "auto"|"go"|"js"; default "auto"
-	symbols        bool   // resolve vulnerable-symbol data from advisory fix patches
+	format           string
+	policyFile       string
+	dbSnapshot       string
+	offline          bool
+	update           bool
+	failOn           string
+	gateOn           string // confidence floor for gating: reachable|reachable+unknown|all
+	goos             string
+	goarch           string
+	tags             string
+	pluginBin        string
+	jsPluginBin      string // path to pre-built js-reachability plugin binary (skip build)
+	rustPluginBin    string // path to pre-built rust-reachability plugin binary (skip build)
+	pythonPluginBin  string // path to pre-built python-reachability plugin binary (skip build)
+	source           string // comma-separated source names; default "go-vuln-db,osv"
+	sourceExplicit   bool   // true when --source was explicitly set by the user
+	language         string // "auto"|"go"|"js"|"rust"|"python"; default "auto"
+	symbols          bool   // resolve vulnerable-symbol data from advisory fix patches
 }
 
 // ecosystems records which ecosystem marker files were detected in a module root.
+// Each field corresponds to one language ecosystem; true means the detection
+// manifest for that ecosystem was found.
+//
+// Detection manifests:
+//   - Go:     go.mod
+//   - JS/TS:  package.json
+//   - Rust:   Cargo.toml
+//   - Python: pyproject.toml OR requirements.txt
+//   - Java:   pom.xml OR build.gradle OR build.gradle.kts
 type ecosystems struct {
-	hasGo bool // go.mod present
-	hasJS bool // package.json present
+	hasGo     bool // go.mod present
+	hasJS     bool // package.json present
+	hasRust   bool // Cargo.toml present
+	hasPython bool // pyproject.toml or requirements.txt present
+	hasJava   bool // pom.xml, build.gradle, or build.gradle.kts present
 }
 
-// detectEcosystems checks the module root for go.mod and package.json.
+// detectEcosystems checks moduleRoot for the well-known manifest files of each
+// supported ecosystem. It never errors; an absent file simply leaves the field
+// false (unknown ≠ safe: the caller decides what to do with an empty set).
 func detectEcosystems(moduleRoot string) ecosystems {
 	var e ecosystems
-	if _, err := os.Stat(filepath.Join(moduleRoot, "go.mod")); err == nil {
-		e.hasGo = true
+	stat := func(name string) bool {
+		_, err := os.Stat(filepath.Join(moduleRoot, name))
+		return err == nil
 	}
-	if _, err := os.Stat(filepath.Join(moduleRoot, "package.json")); err == nil {
-		e.hasJS = true
-	}
+	e.hasGo = stat("go.mod")
+	e.hasJS = stat("package.json")
+	e.hasRust = stat("Cargo.toml")
+	e.hasPython = stat("pyproject.toml") || stat("requirements.txt")
+	e.hasJava = stat("pom.xml") || stat("build.gradle") || stat("build.gradle.kts")
 	return e
 }
 
-// resolveLanguage applies the --language override to the detected ecosystems and
-// returns (hasGo, hasJS, error). "auto" defers to detection; "go" forces Go only;
-// "js" forces JS only. Any other value is an operational error.
-func resolveLanguage(lang string, e ecosystems) (hasGo, hasJS bool, err error) {
+// resolveLanguage applies the --language override to the detected ecosystems
+// and returns the resulting ecosystem set. "auto" defers to detection and
+// passes all detected ecosystems through (zero-config: a polyglot repo runs
+// every detected plugin). The explicit values "go", "js", "rust", "python",
+// "java" are optional narrowing filters — they never activate an ecosystem
+// that has no manifest file, but they do restrict scanning to that ecosystem
+// only. Any unrecognised value is an operational error.
+func resolveLanguage(lang string, e ecosystems) (ecosystems, error) {
 	switch lang {
-	case "go":
-		return true, false, nil
-	case "js":
-		return false, true, nil
 	case "auto":
-		return e.hasGo, e.hasJS, nil
+		return e, nil
+	case "go":
+		return ecosystems{hasGo: true}, nil
+	case "js":
+		return ecosystems{hasJS: true}, nil
+	case "rust":
+		return ecosystems{hasRust: true}, nil
+	case "python":
+		return ecosystems{hasPython: true}, nil
+	case "java":
+		return ecosystems{hasJava: true}, nil
 	default:
-		return false, false, fmt.Errorf("unknown --language value %q: must be one of auto|go|js", lang)
+		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java", lang)
 	}
+}
+
+// ecosystemManifestBuilder is the seam each language plugin registers to build
+// its host.Manifest. It returns (manifest, true) when the plugin binary is
+// available, or (nil, false) when the binary has not been built yet — in which
+// case the ecosystem is silently skipped rather than aborting the scan.
+type ecosystemManifestBuilder func(overrideBin string) (*host.Manifest, bool)
+
+// warnUnsupportedEcosystems writes a warning to w for every ecosystem in eco
+// that is detected (or explicitly selected via --language) but has no scan
+// path yet (rust, python, java). It returns true when any such ecosystem is
+// present, signalling that the caller must set incomplete=true.
+//
+// "unknown ≠ safe": a detected ecosystem with no scan path MUST surface as an
+// incomplete scan (exit 3) rather than a false-clean pass (exit 0). This
+// mirrors the npm-no-capable-source guard at the JS advisory block.
+//
+// Go and JS always have full scan paths and are never warned about.
+// Rust and Python are warned about only when their plugin binaries are absent
+// (callers reduce the eco flags before calling this when a plugin is available).
+func warnUnsupportedEcosystems(eco ecosystems, w io.Writer) bool {
+	type unsupported struct {
+		flag bool
+		name string
+	}
+	pending := []unsupported{
+		{eco.hasRust, "rust"},
+		{eco.hasPython, "python"},
+		{eco.hasJava, "java"},
+	}
+	incomplete := false
+	for _, u := range pending {
+		if !u.flag {
+			continue
+		}
+		fmt.Fprintf(w,
+			"warning: %s ecosystem detected but no %s scan path is available yet; "+
+				"%s deps were not checked for vulnerabilities; scan marked incomplete\n",
+			u.name, u.name, u.name)
+		incomplete = true
+	}
+	return incomplete
 }
 
 // sourceAliases maps user-facing --source flag tokens to canonical advisory
@@ -93,7 +166,7 @@ func newScanCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "scan [path]",
-		Short: "Scan a Go module or JS/TS package for reachable dependency vulnerabilities",
+		Short: "Scan a Go module, JS/TS package, Rust crate, Python project, or Java project for reachable dependency vulnerabilities",
 		Long: `Run the full reachability SCA pipeline against a Go module:
 
   1. Resolve module dependencies from go.mod/go.sum.
@@ -143,12 +216,16 @@ Exit codes:
 	fs.StringVar(&flags.tags, "tags", "", "comma-separated build tags")
 	fs.StringVar(&flags.pluginBin, "plugin-binary", "", "path to pre-built go-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.jsPluginBin, "js-plugin-binary", "", "path to pre-built js-reachability plugin binary (skip build)")
+	fs.StringVar(&flags.rustPluginBin, "rust-plugin-binary", "", "path to pre-built rust-reachability plugin binary (skip build)")
+	fs.StringVar(&flags.pythonPluginBin, "python-plugin-binary", "", "path to pre-built python-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.source, "source", "go-vuln-db,osv",
 		"comma-separated advisory sources to query: go-vuln-db, osv (default: both)")
 	fs.StringVar(&flags.language, "language", "auto",
-		"ecosystem to scan: go|js|auto (default: auto — detected from go.mod / package.json)")
+		"ecosystem to scan: auto|go|js|rust|python|java (default: auto — detected from manifest files; auto runs ALL detected ecosystems)")
 	fs.BoolVar(&flags.symbols, "symbols", false,
 		"resolve vulnerable-symbol data from advisory fix patches (network, cached) to enable symbol-level reachability; degrades to package-level when unavailable")
+	fs.StringVar(&flags.gateOn, "gate-on", "",
+		"confidence floor for gate failures: reachable (SYMBOL+PACKAGE only), reachable+unknown (default, gates UNKNOWN on runtime deps too), all (gate all non-NOT_REACHABLE findings)")
 
 	return cmd
 }
@@ -159,23 +236,25 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	defer telemetry.Span("scan.total")()
 
 	// ── 1. Detect ecosystems and validate module root ────────────────────────
-	eco := detectEcosystems(moduleRoot)
-	scanGo, scanJS, langErr := resolveLanguage(flags.language, eco)
+	detected := detectEcosystems(moduleRoot)
+	eco, langErr := resolveLanguage(flags.language, detected)
 	if langErr != nil {
 		fmt.Fprintf(os.Stderr, "anst-analyzer scan: %v\n", langErr)
 		return policy.ExitOperationalError
 	}
 
-	if !scanGo && !scanJS {
+	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava {
 		fmt.Fprintf(os.Stderr,
-			"anst-analyzer scan: %s contains neither go.mod nor package.json; nothing to scan\n",
+			"anst-analyzer scan: %s contains no recognised ecosystem manifest "+
+				"(go.mod, package.json, Cargo.toml, pyproject.toml, requirements.txt, "+
+				"pom.xml, build.gradle, build.gradle.kts); nothing to scan\n",
 			moduleRoot)
 		return policy.ExitOperationalError
 	}
 
 	// The Go advisory pipeline (steps 3–5) requires go.mod to resolve deps.
-	// Skip it when only the JS ecosystem was selected.
-	if scanGo {
+	// Skip it when only non-Go ecosystems were selected.
+	if eco.hasGo {
 		goModPath := filepath.Join(moduleRoot, "go.mod")
 		if _, err := os.Stat(goModPath); err != nil {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: --language go selected but %s does not contain a go.mod file: %v\n",
@@ -193,7 +272,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 	// ── 3. Resolve module dependencies (Go only) ─────────────────────────────
 	var deps []modDep
-	if scanGo {
+	if eco.hasGo {
 		var depsErr error
 		deps, depsErr = listModDeps(ctx, moduleRoot)
 		if depsErr != nil {
@@ -220,8 +299,20 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	var namedSources []advisory.NamedSource
 	var protoAdvs []*anstv1.Advisory
 	sourcesByID := map[string][]string{}
+	// severityByID maps advisory ID → advisory.Severity (CVSS-derived).
+	// Populated alongside sourcesByID; used in stampAdvisorySeverity after
+	// findings are collected so that Finding.Severity is filled from the
+	// advisory when the plugin left it UNSPECIFIED.
+	severityByID := map[string]advisory.Severity{}
+	// depTypeByAdvID maps advisory ID → dep_type (runtime | optional-extra | dev |
+	// test | docs) for Python packages. Populated during the PyPI advisory loop;
+	// used by stampDepType after findings are collected to tag each finding with
+	// properties["dep_type"] so the policy gate can apply dep-type aware gating.
+	// Non-Python ecosystems do not populate this map; their findings get no
+	// dep_type property (treated as runtime by the gate — conservative default).
+	depTypeByAdvID := map[string]string{}
 
-	if scanGo {
+	if eco.hasGo {
 		cacheDir, cacheErr := os.UserCacheDir()
 		if cacheErr != nil {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
@@ -359,9 +450,18 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			}
 
 			for i := range advs {
+				// Propagate advisory-level Incomplete signal: an undecidable version
+				// comparison (e.g. unparseable version string) must surface as
+				// incomplete=true so the scan exits 3, not 0 (unknown ≠ safe).
+				if advs[i].Incomplete {
+					incomplete = true
+				}
 				protoAdvs = append(protoAdvs, advs[i].ToProto())
 				if advs[i].ID != "" {
 					sourcesByID[advs[i].ID] = advs[i].Sources
+					if advs[i].Severity != advisory.SeverityUnspecified {
+						severityByID[advs[i].ID] = advs[i].Severity
+					}
 				}
 			}
 		}
@@ -378,7 +478,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// go-vuln-db source returns (nil,nil) for npm (it covers only "Go") —
 	// confirmed by goVulnDBClient.Query checking pkg.Ecosystem != EcosystemGo.
 	// OSV source uses the "npm" bundle (npm/all.zip from the OSV GCS bucket).
-	if scanJS {
+	if eco.hasJS {
 		// Resolve the JS plugin binary path (same as the manifest lookup used later
 		// for registering the gRPC plugin, but needed now for --list-deps).
 		jsPluginBin := flags.jsPluginBin
@@ -525,14 +625,338 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 					}
 
 					for i := range advs {
+						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
+						if advs[i].Incomplete {
+							incomplete = true
+						}
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
+							if advs[i].Severity != advisory.SeverityUnspecified {
+								severityByID[advs[i].ID] = advs[i].Severity
+							}
 						}
 					}
 				}
 			}
 		}
+	}
+
+	// ── 5c. Rust ecosystem — pre-build manifest check and advisory query ────
+	//
+	// When Cargo.toml is detected (eco.hasRust), attempt to build the Rust
+	// plugin manifest now so we know whether the binary is available. The
+	// manifest is registered in step 7 (after reg is initialized). If the
+	// binary is absent, we fall through to warnUnsupportedEcosystems.
+	//
+	// When the plugin binary IS available, query the OSV crates.io bundle for
+	// advisories covering the project's resolved Cargo deps — mirroring the JS
+	// npm advisory resolution path (step 5b). Without this the plugin always
+	// receives an empty advisory list and can never emit findings.
+	//
+	// "unknown ≠ safe": a Cargo.toml without a registered plugin means the
+	// Rust deps were not checked; the scan MUST be marked incomplete.
+	var rustManifest *host.Manifest
+	if eco.hasRust {
+		rustManifest, _ = buildRustPluginManifest(ctx, flags.rustPluginBin)
+	}
+
+	// False-clean guard (Rust): OSV is the only advisory source with crates.io
+	// coverage. If Rust is in scope but no OSV-capable source is selected, the
+	// plugin would run against an empty advisory list and silently exit 0.
+	// "unknown ≠ safe": warn and mark incomplete so the gate cannot pass clean.
+	if eco.hasRust && rustManifest != nil && !selectedSources[advisory.SourceOSV] {
+		fmt.Fprintf(os.Stderr,
+			"warning: Rust crates.io deps found but no crates.io-capable advisory source is selected "+
+				"(osv.dev covers crates.io; go-vuln-db does not); "+
+				"Rust packages were not checked for vulnerabilities; scan marked incomplete\n")
+		incomplete = true
+	}
+
+	if rustManifest != nil && selectedSources[advisory.SourceOSV] {
+		// List the resolved crate deps via cargo metadata (lockfile-static, no
+		// build-script execution — safe on untrusted repos).
+		cargoDeps, cargoIncomplete, cargoListErr := listCargoDeps(ctx, moduleRoot)
+		if cargoListErr != nil {
+			// cargo not on PATH or Cargo.lock missing: degrade to incomplete
+			// (unknown ≠ safe). The plugin will emit UNKNOWN+Incomplete=true for
+			// every advisory when ClosureUnknown=true, but it needs advisories to
+			// iterate over. Mark incomplete here; the plugin's own degradation
+			// handles the finding tier.
+			fmt.Fprintf(os.Stderr,
+				"warning: cargo metadata failed for crates.io advisory query: %v; scan marked incomplete\n",
+				cargoListErr)
+			incomplete = true
+		}
+		if cargoIncomplete {
+			fmt.Fprintf(os.Stderr,
+				"warning: cargo dep list is incomplete; scan marked incomplete\n")
+			incomplete = true
+		}
+
+		if len(cargoDeps) > 0 {
+			// Build a crates.io OSV source; reuse the same cache root as the Go/npm paths.
+			cacheDir, cacheErr := os.UserCacheDir()
+			if cacheErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				return policy.ExitOperationalError
+			}
+			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+
+			cratesOSV := advisory.NewOSVBundleSource(osvCacheDir)
+			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+				cratesOSV.BaseURL = override
+			}
+			cratesOSV.ForceUpdate = flags.update
+
+			// Refresh the crates.io OSV bundle (secondary source → failure warns + marks incomplete).
+			addCratesOSV := true
+			if !flags.offline && flags.dbSnapshot == "" {
+				if refreshErr := cratesOSV.Refresh(ctx, advisory.EcosystemCratesIO); refreshErr != nil {
+					fmt.Fprintf(os.Stderr,
+						"warning: OSV crates.io source refresh failed (%s): %v; scan marked incomplete\n",
+						advisory.SourceOSV, refreshErr)
+					incomplete = true
+					addCratesOSV = false
+				}
+			} else {
+				// Offline/snapshot mode: check whether the crates.io OSV cache exists.
+				if !osvCacheDirExists(osvCacheDir, advisory.EcosystemCratesIO) {
+					if flags.sourceExplicit {
+						fmt.Fprintf(os.Stderr,
+							"warning: OSV crates.io cache not populated at %s (run without --offline to fetch); OSV crates.io source skipped, scan marked incomplete\n",
+							filepath.Join(osvCacheDir, advisory.EcosystemCratesIO))
+						incomplete = true
+					}
+					addCratesOSV = false
+				}
+			}
+
+			if addCratesOSV {
+				cratesMultiSrc := advisory.NewMultiSource(advisory.NamedSource{
+					Name: advisory.SourceOSV,
+					S:    cratesOSV,
+				})
+
+				for _, dep := range cargoDeps {
+					pkg := advisory.Package{Ecosystem: advisory.EcosystemCratesIO, Name: dep.Name}
+					advs, queryErr := cratesMultiSrc.Query(ctx, pkg, dep.Version)
+
+					var srcIncomplete *advisory.SourcesIncompleteError
+					if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
+						for i, name := range srcIncomplete.FailedSources {
+							fmt.Fprintf(os.Stderr,
+								"warning: advisory source %q failed for crate %s@%s: %v\n",
+								name, dep.Name, dep.Version, srcIncomplete.Errors[i])
+						}
+						incomplete = true
+					} else if queryErr != nil {
+						var staleWarn *advisory.StalenessWarningError
+						if errors.As(queryErr, &staleWarn) {
+							fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
+							advs = staleWarn.Advisories
+						} else {
+							fmt.Fprintf(os.Stderr,
+								"anst-analyzer scan: advisory query crate %s@%s: %v\n",
+								dep.Name, dep.Version, queryErr)
+							incomplete = true
+							continue
+						}
+					}
+
+					for i := range advs {
+						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
+						if advs[i].Incomplete {
+							incomplete = true
+						}
+						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						if advs[i].ID != "" {
+							sourcesByID[advs[i].ID] = advs[i].Sources
+							if advs[i].Severity != advisory.SeverityUnspecified {
+								severityByID[advs[i].ID] = advs[i].Severity
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ── 5d. Python ecosystem — pre-build manifest check and advisory query ──
+	//
+	// When pyproject.toml or requirements.txt is detected (eco.hasPython), attempt
+	// to build the Python plugin manifest now so we know whether the binary is
+	// available. The manifest is registered in step 7 (after reg is initialized).
+	// If the binary is absent, we fall through to warnUnsupportedEcosystems.
+	//
+	// When the plugin binary IS available, query the PyPI OSV bundle for
+	// advisories covering the project's resolved Python deps. Without this the
+	// plugin always receives an empty advisory list and can never emit findings.
+	//
+	// "unknown ≠ safe": a pyproject.toml/requirements.txt without a registered
+	// plugin means the Python deps were not checked; the scan MUST be marked
+	// incomplete. Additionally, manifest-only / no-venv / offline+unpinned
+	// scenarios where the plugin cannot perform reachability analysis are surfaced
+	// as incomplete=true so the scan exits 3, never 0 (false-clean).
+	var pythonManifest *host.Manifest
+	if eco.hasPython {
+		pythonManifest, _ = buildPythonPluginManifest(ctx, flags.pythonPluginBin)
+	}
+
+	// False-clean guard (Python): OSV is the only advisory source with PyPI
+	// coverage. If Python is in scope but no OSV-capable source is selected,
+	// the plugin would run against an empty advisory list and silently exit 0.
+	// "unknown ≠ safe": warn and mark incomplete so the gate cannot pass clean.
+	if eco.hasPython && pythonManifest != nil && !selectedSources[advisory.SourceOSV] {
+		fmt.Fprintf(os.Stderr,
+			"warning: Python PyPI deps found but no PyPI-capable advisory source is selected "+
+				"(osv.dev covers PyPI; go-vuln-db does not); "+
+				"Python packages were not checked for vulnerabilities; scan marked incomplete\n")
+		incomplete = true
+	}
+
+	if pythonManifest != nil && selectedSources[advisory.SourceOSV] {
+		// List the resolved Python package deps via the plugin's --list-deps
+		// subcommand (lockfile-static, no pip/uv execution — safe on untrusted repos
+		// when a lockfile is present; degrades to incomplete when no lockfile/venv).
+		pythonDeps, pyIncomplete, pyListErr := listPythonDeps(ctx, pythonManifest.ExecPath, moduleRoot)
+		if pyListErr != nil {
+			// Plugin --list-deps failed: degrade to incomplete.
+			// The plugin will emit UNKNOWN+Incomplete=true for every advisory.
+			fmt.Fprintf(os.Stderr,
+				"warning: python-reachability --list-deps failed: %v; scan marked incomplete\n",
+				pyListErr)
+			incomplete = true
+		}
+		if pyIncomplete {
+			// Manifest-only / no-venv / offline+unpinned: the plugin signalled
+			// that its dep resolution is partial. Force incomplete=true so the
+			// scan exits 3 (not 0) and the user sees the degraded-mode message.
+			fmt.Fprintf(os.Stderr,
+				"warning: python project model is incomplete (manifest-only or no resolved venv); "+
+					"reachability analysis will be degraded; scan marked incomplete\n")
+			incomplete = true
+		}
+
+		if len(pythonDeps) > 0 {
+			// Build a PyPI OSV source; reuse the same cache root as the Go/npm/Rust paths.
+			cacheDir, cacheErr := os.UserCacheDir()
+			if cacheErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				return policy.ExitOperationalError
+			}
+			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+
+			pypiOSV := advisory.NewOSVBundleSource(osvCacheDir)
+			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+				pypiOSV.BaseURL = override
+			}
+			pypiOSV.ForceUpdate = flags.update
+
+			// Refresh the PyPI OSV bundle (secondary source → failure warns + marks incomplete).
+			addPyPIOSV := true
+			if !flags.offline && flags.dbSnapshot == "" {
+				if refreshErr := pypiOSV.Refresh(ctx, advisory.EcosystemPyPI); refreshErr != nil {
+					fmt.Fprintf(os.Stderr,
+						"warning: OSV PyPI source refresh failed (%s): %v; scan marked incomplete\n",
+						advisory.SourceOSV, refreshErr)
+					incomplete = true
+					addPyPIOSV = false
+				}
+			} else {
+				// Offline/snapshot mode: check whether the PyPI OSV cache exists.
+				if !osvCacheDirExists(osvCacheDir, advisory.EcosystemPyPI) {
+					if flags.sourceExplicit {
+						fmt.Fprintf(os.Stderr,
+							"warning: OSV PyPI cache not populated at %s (run without --offline to fetch); OSV PyPI source skipped, scan marked incomplete\n",
+							filepath.Join(osvCacheDir, advisory.EcosystemPyPI))
+						incomplete = true
+					}
+					addPyPIOSV = false
+				}
+			}
+
+			if addPyPIOSV {
+				pypiMultiSrc := advisory.NewMultiSource(advisory.NamedSource{
+					Name: advisory.SourceOSV,
+					S:    pypiOSV,
+				})
+
+				for _, dep := range pythonDeps {
+					// Normalize the PyPI package name to lowercase to match OSV records.
+					normalizedName := strings.ToLower(dep.Name)
+					pkg := advisory.Package{Ecosystem: advisory.EcosystemPyPI, Name: normalizedName}
+					advs, queryErr := pypiMultiSrc.Query(ctx, pkg, dep.Version)
+
+					var srcIncomplete *advisory.SourcesIncompleteError
+					if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
+						for i, name := range srcIncomplete.FailedSources {
+							fmt.Fprintf(os.Stderr,
+								"warning: advisory source %q failed for python pkg %s@%s: %v\n",
+								name, dep.Name, dep.Version, srcIncomplete.Errors[i])
+						}
+						incomplete = true
+					} else if queryErr != nil {
+						var staleWarn *advisory.StalenessWarningError
+						if errors.As(queryErr, &staleWarn) {
+							fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
+							advs = staleWarn.Advisories
+						} else {
+							fmt.Fprintf(os.Stderr,
+								"anst-analyzer scan: advisory query python pkg %s@%s: %v\n",
+								dep.Name, dep.Version, queryErr)
+							incomplete = true
+							continue
+						}
+					}
+
+					for i := range advs {
+						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
+						if advs[i].Incomplete {
+							incomplete = true
+						}
+						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						if advs[i].ID != "" {
+							sourcesByID[advs[i].ID] = advs[i].Sources
+							if advs[i].Severity != advisory.SeverityUnspecified {
+								severityByID[advs[i].ID] = advs[i].Severity
+							}
+							// Tag advisory with dep's classification for the gate.
+							// Conservative: if the same advisory is reported for multiple deps
+							// with different types, "runtime" wins (most restrictive).
+							if existing, ok := depTypeByAdvID[advs[i].ID]; !ok || existing != "runtime" {
+								dt := dep.DepType
+								if dt == "" {
+									dt = "runtime" // conservative default
+								}
+								if dt == "runtime" {
+									depTypeByAdvID[advs[i].ID] = "runtime"
+								} else if !ok {
+									depTypeByAdvID[advs[i].ID] = dt
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ── 5e. Unsupported ecosystems (python when plugin absent, java, and rust
+	// when the rust plugin binary is absent) ──────────────────────────────────
+	//
+	// Warn and mark incomplete (→ exit 3) for every detected ecosystem that
+	// has no scan path (no advisory query, no plugin), mirroring the
+	// npm-no-capable-source guard above.
+	unsupportedEco := eco // copy; reduce below as plugins are confirmed
+	if rustManifest != nil {
+		unsupportedEco.hasRust = false // Rust plugin binary is available
+	}
+	if pythonManifest != nil {
+		unsupportedEco.hasPython = false // Python plugin binary is available
+	}
+	if warnUnsupportedEcosystems(unsupportedEco, os.Stderr) {
+		incomplete = true
 	}
 
 	// ── 6. Build AnalyzeRequest ───────────────────────────────────────────────
@@ -551,7 +975,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// ── 7. Locate / build plugins and register ────────────────────────────────
 	reg := host.NewRegistry()
 
-	if scanGo {
+	if eco.hasGo {
 		pluginBin := flags.pluginBin
 		if pluginBin == "" {
 			var buildErr error
@@ -586,7 +1010,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 	}
 
-	if scanJS {
+	if eco.hasJS {
 		m, buildErr := buildJSPluginManifest(flags.jsPluginBin)
 		if buildErr != nil {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available: %v\n", buildErr)
@@ -594,6 +1018,24 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 		if addErr := reg.Add(m); addErr != nil {
 			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register js plugin: %v\n", addErr)
+			return policy.ExitOperationalError
+		}
+	}
+
+	// Register the Rust plugin when its manifest was successfully built in step 5c.
+	// rustManifest is non-nil only when eco.hasRust && the binary is present.
+	if rustManifest != nil {
+		if addErr := reg.Add(rustManifest); addErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register rust plugin: %v\n", addErr)
+			return policy.ExitOperationalError
+		}
+	}
+
+	// Register the Python plugin when its manifest was successfully built in step 5d.
+	// pythonManifest is non-nil only when eco.hasPython && the binary is present.
+	if pythonManifest != nil {
+		if addErr := reg.Add(pythonManifest); addErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register python plugin: %v\n", addErr)
 			return policy.ExitOperationalError
 		}
 	}
@@ -607,6 +1049,24 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	}
 
 	// Collect all findings and detect plugin errors.
+	//
+	// Lane-agnostic incomplete signal: a plugin may signal partial analysis by
+	// emitting a synthetic UNKNOWN finding with Properties["synthetic"]="true".
+	// This is the same marker that host.Run appends on crash (see run.go:syntheticUnknown);
+	// a clean plugin that detects its own partiality (e.g. partial resolve, no-venv,
+	// missing environment) MUST emit the same shape to propagate incomplete=true here.
+	//
+	// Wire contract (plugin author-facing):
+	//   1. For each advisory the plugin cannot decide (partial resolve, killed analysis,
+	//      dynamic dispatch, missing environment, unparseable version), emit:
+	//        Finding{Confidence: CONFIDENCE_UNKNOWN, Properties: {"synthetic": "true"}}
+	//   2. Return from the Analyze stream without error (normal EOF).
+	//   The host reads Properties["synthetic"]=="true" on CONFIDENCE_UNKNOWN findings
+	//   and sets incomplete=true at the policy gate, ensuring the scan exits 3 (not 0).
+	//
+	// This generalises the JS modelIncomplete→incomplete path (listNPMDeps returns a
+	// bool that callers must forward) into a single, language-agnostic detection pass
+	// that every ecosystem plugin can use without any per-language host-side wiring.
 	var findings []*anstv1.Finding
 	for _, pr := range results {
 		if pr.Err != nil {
@@ -616,20 +1076,36 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 		findings = append(findings, pr.Findings...)
 	}
+	// Check whether any finding carries the synthetic partiality marker.
+	// This covers plugins that ran to completion but detected their own analysis gap.
+	if hasPartialityMarker(findings) {
+		incomplete = true
+	}
 
-	// ── 7b. Stamp default severity ────────────────────────────────────────────
-	// The engine does not know vulnerability severity (it only knows call-graph
-	// reachability). When a finding has SEVERITY_UNSPECIFIED and the confidence
-	// is SYMBOL_REACHABLE or PACKAGE_REACHABLE, stamp HIGH as a conservative
-	// default so the policy gate can function even when the advisory source does
-	// not carry a severity field. UNKNOWN findings keep UNSPECIFIED — their
-	// risk is surfaced by the reachable-only gate, not the severity threshold.
+	// ── 7b. Stamp advisory severity ───────────────────────────────────────────
+	// Join findings with the advisory's CVSS-derived severity (populated from
+	// the OSV severity[] array during the advisory query loop above). Only fills
+	// SEVERITY_UNSPECIFIED slots — never downgrades a severity a plugin already
+	// set as more specific (e.g. a plugin may have a narrower CVSS override).
+	stampAdvisorySeverity(findings, severityByID)
+
+	// ── 7b2. Stamp default severity ───────────────────────────────────────────
+	// After the advisory join, any finding still UNSPECIFIED and reachable gets
+	// a conservative HIGH default so the policy gate can function without CVSS data.
+	// This is the fallback; the advisory join above is the preferred source.
 	stampDefaultSeverity(findings)
 
 	// ── 7c. Stamp source attribution ──────────────────────────────────────────
 	// Make the multi-source merge visible: record which source(s) reported each
 	// finding's advisory into properties["sources"] (e.g. "go-vuln-db,osv.dev").
 	stampSources(findings, sourcesByID)
+
+	// ── 7d. Stamp dep_type ────────────────────────────────────────────────────
+	// For Python findings, record the dependency classification (runtime |
+	// optional-extra | dev | test | docs) into properties["dep_type"].
+	// This makes the dep_type visible in all output formats and lets the policy
+	// gate apply dep-type aware confidence-tiered gating.
+	stampDepType(findings, depTypeByAdvID)
 
 	// ── 8. Render output ──────────────────────────────────────────────────────
 	if renderErr := renderFindings(flags.format, findings); renderErr != nil {
@@ -645,6 +1121,79 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	}
 
 	return pol.EvaluateWithFlags(findings, policy.EvalFlags{Incomplete: incomplete})
+}
+
+// hasPartialityMarker reports whether any finding in the slice signals
+// incomplete analysis. Two wire contracts are honored:
+//
+//  1. The lane-agnostic synthetic-partiality marker: a CONFIDENCE_UNKNOWN
+//     finding whose Properties map contains the key "synthetic" set to "true".
+//     This is emitted by the host's syntheticUnknown (run.go) on plugin crash
+//     and SHOULD be emitted by any plugin that detects its own partiality.
+//
+//  2. The Finding.Incomplete proto field (plugin.proto:10): any finding with
+//     Incomplete=true signals that the analysis producing it was partial. The
+//     Rust plugin sets this field (not Properties["synthetic"]) when cargo
+//     metadata fails or returns a partial closure. Both signals are equivalent
+//     — either one sets incomplete=true at the policy gate.
+//
+// Both are honored to support:
+//   - Plugins (e.g. go-reachability, js-reachability) that use the Properties
+//     path (legacy wire contract), and
+//   - Plugins (e.g. rust-reachability) that use Finding.Incomplete (proto field).
+func hasPartialityMarker(findings []*anstv1.Finding) bool {
+	for _, f := range findings {
+		// Proto field: Incomplete=true (Rust plugin partiality signal).
+		if f.GetIncomplete() {
+			return true
+		}
+		// Properties marker: synthetic=true on CONFIDENCE_UNKNOWN (crash/host signal).
+		if f.GetConfidence() == anstv1.Confidence_CONFIDENCE_UNKNOWN &&
+			f.GetProperties()["synthetic"] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+// advisorySeverityToProto maps the internal advisory.Severity to the wire
+// anstv1.Severity enum. The values are intentionally parallel (both ordered
+// Unspecified < Low < Medium < High < Critical), so a direct cast works, but
+// we keep an explicit mapping to make the coupling visible and catch drift.
+func advisorySeverityToProto(s advisory.Severity) anstv1.Severity {
+	switch s {
+	case advisory.SeverityLow:
+		return anstv1.Severity_SEVERITY_LOW
+	case advisory.SeverityMedium:
+		return anstv1.Severity_SEVERITY_MEDIUM
+	case advisory.SeverityHigh:
+		return anstv1.Severity_SEVERITY_HIGH
+	case advisory.SeverityCritical:
+		return anstv1.Severity_SEVERITY_CRITICAL
+	default:
+		return anstv1.Severity_SEVERITY_UNSPECIFIED
+	}
+}
+
+// stampAdvisorySeverity joins each finding with the CVSS-derived severity from
+// the matched advisory (keyed by advisory ID). It only fills SEVERITY_UNSPECIFIED
+// slots — if a plugin already set a more specific severity it is preserved.
+// Findings with no advisory (synthetic/crash markers) are skipped.
+func stampAdvisorySeverity(findings []*anstv1.Finding, severityByID map[string]advisory.Severity) {
+	for _, f := range findings {
+		// Only fill slots the plugin left as UNSPECIFIED.
+		if f.GetSeverity() != anstv1.Severity_SEVERITY_UNSPECIFIED {
+			continue
+		}
+		if f.GetAdvisory() == nil {
+			continue
+		}
+		advSev, ok := severityByID[f.GetAdvisory().GetId()]
+		if !ok || advSev == advisory.SeverityUnspecified {
+			continue
+		}
+		f.Severity = advisorySeverityToProto(advSev)
+	}
 }
 
 // stampDefaultSeverity conservatively stamps SEVERITY_HIGH onto findings that
@@ -691,6 +1240,31 @@ func stampSources(findings []*anstv1.Finding, sourcesByID map[string][]string) {
 	}
 }
 
+// stampDepType records the dependency classification (dep_type) for Python
+// findings into properties["dep_type"]. The depTypeByAdvID map is populated
+// during the PyPI OSV advisory query loop. Only findings whose advisory ID is
+// present in the map are tagged; other ecosystem findings are left untagged
+// (the policy gate treats missing dep_type as runtime — conservative default).
+//
+// This makes the dep_type visible in all output formats (SARIF properties,
+// JSON, table) and is the data that lets the policy gate apply dep-type aware
+// confidence-tiered gating without any per-language wiring in the gate itself.
+func stampDepType(findings []*anstv1.Finding, depTypeByAdvID map[string]string) {
+	for _, f := range findings {
+		if f.GetAdvisory() == nil {
+			continue
+		}
+		dt, ok := depTypeByAdvID[f.GetAdvisory().GetId()]
+		if !ok || dt == "" {
+			continue
+		}
+		if f.Properties == nil {
+			f.Properties = map[string]string{}
+		}
+		f.Properties["dep_type"] = dt
+	}
+}
+
 // renderFindings writes findings to stdout in the requested format.
 func renderFindings(format string, findings []*anstv1.Finding) error {
 	switch strings.ToLower(format) {
@@ -726,8 +1300,11 @@ func loadPolicyFromFlags(flags scanFlags) (*policy.Policy, error) {
 		return policy.LoadPolicy(data)
 	}
 
-	// Synthesise a minimal policy from --fail-on flag.
+	// Synthesise a minimal policy from --fail-on and --gate-on flags.
 	yamlSrc := fmt.Sprintf("fail-on: %s\n", flags.failOn)
+	if flags.gateOn != "" {
+		yamlSrc += fmt.Sprintf("gate-on: %s\n", flags.gateOn)
+	}
 	return policy.LoadPolicy([]byte(yamlSrc))
 }
 
@@ -812,6 +1389,191 @@ func listNPMDeps(ctx context.Context, pluginBin, moduleRoot string) ([]npmDep, b
 	}
 
 	return result.Deps, modelIncomplete, nil
+}
+
+// cargoDep is a resolved Rust crate dependency (name + version) extracted from
+// `cargo metadata --format-version 1`. Used to query crates.io OSV advisories
+// before the Rust reachability plugin runs. Only the fields needed for the
+// advisory query are kept; full dependency graph data lives in the plugin.
+type cargoDep struct {
+	Name    string
+	Version string
+}
+
+// sanitizedCargoEnv returns a filtered copy of the current process environment
+// suitable for running `cargo` on untrusted repo sources. It:
+//
+//  1. Pins RUSTUP_TOOLCHAIN=stable so a repo-local rust-toolchain.toml cannot
+//     hijack the toolchain (defense against supply-chain attacks).
+//  2. Removes CARGO_HOME and RUSTUP_HOME overrides from the environment — only
+//     the existing values (inherited from the parent shell) are preserved; a
+//     repo cannot override them via the environment it injects.
+//  3. Passes through an allowlist of safe variables (PATH, HOME, TMPDIR,
+//     SSL_CERT_*, XDG_*, GITHUB_ACTIONS, CI, TERM) so the subprocess can find
+//     the cargo binary and write to temp dirs, but cannot be influenced by
+//     arbitrary env vars the parent process might have inherited.
+//
+// The result is intentionally conservative: unknown vars are excluded.
+func sanitizedCargoEnv() []string {
+	// Variables to always strip (override vectors for toolchain hijacking).
+	strip := map[string]bool{
+		"CARGO_HOME":   true,
+		"RUSTUP_HOME":  true,
+		"RUSTUP_TOOLCHAIN": true, // we pin it explicitly below
+	}
+
+	// Allowlist prefixes: variables whose names start with any of these are
+	// forwarded. Exact matches and prefix matches are both checked.
+	allowPrefixes := []string{
+		"PATH",
+		"HOME",
+		"TMPDIR",
+		"TEMP",
+		"TMP",
+		"SSL_CERT",
+		"XDG_",
+		"GITHUB_",
+		"CI",
+		"TERM",
+		"USER",
+		"LOGNAME",
+		"LANG",
+		"LC_",
+		// Preserve existing CARGO_HOME and RUSTUP_HOME so they stay consistent
+		// with the user's toolchain setup. We strip override attempts but keep
+		// the inherited values (handled below via the strip map + re-add).
+	}
+
+	var env []string
+	var cargoHome, rustupHome string
+	for _, kv := range os.Environ() {
+		eqIdx := strings.Index(kv, "=")
+		if eqIdx < 0 {
+			continue
+		}
+		k := kv[:eqIdx]
+
+		// Save the inherited CARGO_HOME / RUSTUP_HOME before stripping.
+		if k == "CARGO_HOME" {
+			cargoHome = kv[eqIdx+1:]
+		}
+		if k == "RUSTUP_HOME" {
+			rustupHome = kv[eqIdx+1:]
+		}
+
+		if strip[k] {
+			continue
+		}
+		allowed := false
+		for _, pfx := range allowPrefixes {
+			if k == pfx || strings.HasPrefix(k, pfx) {
+				allowed = true
+				break
+			}
+		}
+		if allowed {
+			env = append(env, kv)
+		}
+	}
+
+	// Re-add inherited CARGO_HOME / RUSTUP_HOME (trusted — came from the parent shell).
+	if cargoHome != "" {
+		env = append(env, "CARGO_HOME="+cargoHome)
+	}
+	if rustupHome != "" {
+		env = append(env, "RUSTUP_HOME="+rustupHome)
+	}
+	// Pin the toolchain to stable; overrides any rust-toolchain.toml in the repo.
+	env = append(env, "RUSTUP_TOOLCHAIN=stable")
+
+	return env
+}
+
+// listCargoDeps runs `cargo metadata --format-version 1 --offline` in moduleRoot,
+// parses the resulting JSON, and returns a flat list of (name, version) pairs for
+// every crate in the resolved closure.
+//
+// Security: `cargo metadata --offline` reads only the already-fetched registry
+// cache. It does NOT execute build scripts (build.rs) or proc-macros, making it
+// safe on untrusted repos (the same guarantee held by the Rust plugin's own
+// cargo.LoadManifest call). The subprocess is run with a sanitized environment
+// (see sanitizedCargoEnv) so a repo-local rust-toolchain.toml cannot hijack the
+// toolchain and arbitrary env vars cannot influence the cargo invocation.
+//
+// Returns (deps, incomplete, err):
+//   - deps: every crate present in the resolved packages[]; may be empty on
+//     parse success with a trivial project.
+//   - incomplete: true when cargo exited non-zero or the JSON was unparseable
+//     (ClosureUnknown — the plugin will degrade, but we still need to mark the
+//     host-side advisory query incomplete).
+//   - err: non-nil when cargo is not on PATH or the process could not be started
+//     (callers print a warning and propagate incomplete=true; they do NOT abort).
+//
+// Invariant: on any failure, incomplete is always true (unknown ≠ safe).
+func listCargoDeps(ctx context.Context, moduleRoot string) ([]cargoDep, bool, error) {
+	cmd := exec.CommandContext(ctx,
+		"cargo", "metadata",
+		"--format-version", "1",
+		"--all-features",
+		"--offline",
+	)
+	cmd.Dir = moduleRoot
+	// Use a sanitized environment: pin RUSTUP_TOOLCHAIN=stable, strip
+	// CARGO_HOME/RUSTUP_HOME override vectors, pass only an allowlisted set.
+	cmd.Env = sanitizedCargoEnv()
+
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, true, fmt.Errorf("cargo metadata: %w\n%s", err, exitErr.Stderr)
+		}
+		return nil, true, fmt.Errorf("cargo metadata: %w", err)
+	}
+
+	deps, incomplete, parseErr := parseCargoMetadataForDeps(out)
+	if parseErr != nil {
+		return nil, true, parseErr
+	}
+	return deps, incomplete, nil
+}
+
+// cargoMetadataMinimal is the minimal JSON shape of `cargo metadata --format-version 1`
+// that listCargoDeps needs: just the flat packages[] list.
+type cargoMetadataMinimal struct {
+	Packages []cargoPackageMinimal `json:"packages"`
+}
+
+// cargoPackageMinimal holds only the name and version fields needed for advisory queries.
+type cargoPackageMinimal struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// parseCargoMetadataForDeps parses the raw JSON output of `cargo metadata` and
+// returns a flat (name, version) list for every crate in packages[].
+//
+// An empty packages list is treated as ClosureUnknown (incomplete=true) because
+// a valid Cargo project always has at least one package. JSON parse errors also
+// set incomplete=true and return a non-nil error.
+func parseCargoMetadataForDeps(raw []byte) ([]cargoDep, bool, error) {
+	var meta cargoMetadataMinimal
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return nil, true, fmt.Errorf("parse cargo metadata JSON: %w", err)
+	}
+	if len(meta.Packages) == 0 {
+		// Cargo produced a valid JSON response but with no packages — treat as
+		// partial/unknown (partiality invariant).
+		return nil, true, nil
+	}
+	deps := make([]cargoDep, 0, len(meta.Packages))
+	for _, p := range meta.Packages {
+		if p.Name == "" || p.Version == "" {
+			continue
+		}
+		deps = append(deps, cargoDep{Name: p.Name, Version: p.Version})
+	}
+	return deps, false, nil
 }
 
 // modDep is a resolved module dependency (path + version).
@@ -1012,6 +1774,249 @@ func jsDistDir() string {
 // oxc-binding package.
 func jsSidecarName() string {
 	return fmt.Sprintf("parser.%s-%s.node", runtime.GOOS, runtime.GOARCH)
+}
+
+// rustDistDir returns the absolute path to the Rust plugin's dist directory,
+// resolved relative to this source file's location in the repository tree.
+// At runtime (installed build), it falls back to a path adjacent to the
+// running executable. Returns "" when neither location exists.
+func rustDistDir() string {
+	// Prefer the repo-relative path for development and test.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if ok {
+		// This file is at internal/cli/scan.go; repo root is two dirs up.
+		repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+		candidate := filepath.Join(repoRoot, "plugins", "rust-reachability", "dist")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	// Fall back to a path adjacent to the running executable (installed build).
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(exe), "plugins", "rust-reachability", "dist")
+}
+
+// buildRustPluginManifest constructs a Manifest for the rust-reachability plugin
+// by locating its single-binary distribution under plugins/rust-reachability/dist/
+// and computing a SHA-256 pin. The Rust plugin has no sidecar (unlike the JS plugin).
+//
+// When overrideBin is non-empty it is used as the plugin binary path directly
+// (the override disables on-demand build).
+// When overrideBin is empty and the dist binary is absent, the plugin is built
+// on demand via `go build` — mirroring the Go plugin's buildPlugin(ctx) path.
+// This enables zero-config: `anst scan <repo>` builds and runs all detected plugins.
+// Returns (manifest, true) on success, or (nil, false) when the build fails or
+// the binary cannot be located — callers treat this identically to the absent case.
+func buildRustPluginManifest(ctx context.Context, overrideBin string) (*host.Manifest, bool) {
+	var mainBin string
+
+	if overrideBin != "" {
+		mainBin = overrideBin
+	} else {
+		distDir := rustDistDir()
+		if distDir == "" {
+			return nil, false
+		}
+		mainBin = filepath.Join(distDir, "anst-rust-reachability")
+
+		// On-demand build: if the dist binary is absent, build it now.
+		if _, err := os.Stat(mainBin); err != nil {
+			const pluginPkg = "github.com/ducthinh993/anst-analyzer/plugins/rust-reachability"
+			if mkErr := os.MkdirAll(distDir, 0o755); mkErr != nil {
+				fmt.Fprintf(os.Stderr,
+					"warning: cannot create rust plugin dist dir %s: %v; rust plugin unavailable\n",
+					distDir, mkErr)
+				return nil, false
+			}
+			cmd := exec.CommandContext(ctx, "go", "build", "-o", mainBin, pluginPkg)
+			cmd.Env = os.Environ()
+			if out, buildErr := cmd.CombinedOutput(); buildErr != nil {
+				fmt.Fprintf(os.Stderr,
+					"warning: on-demand build of rust plugin failed: %v\n%s; rust plugin unavailable\n",
+					buildErr, out)
+				return nil, false
+			}
+		}
+	}
+
+	if _, err := os.Stat(mainBin); err != nil {
+		// Binary not present even after build attempt: graceful skip.
+		return nil, false
+	}
+
+	absMain, err := filepath.Abs(mainBin)
+	if err != nil {
+		// Should not happen for a file we just stat'd; treat as absent.
+		return nil, false
+	}
+
+	hash, err := host.SHA256OfFile(absMain)
+	if err != nil {
+		// Cannot hash a file we know exists; treat as absent rather than crashing.
+		return nil, false
+	}
+
+	return &host.Manifest{
+		Name:      "rust-reachability",
+		ExecPath:  absMain,
+		Pillar:    "sca",
+		Languages: []string{"rust"},
+		SHA256:    hash,
+	}, true
+}
+
+// pythonDistDir returns the absolute path to the Python plugin's dist directory,
+// resolved relative to this source file's location in the repository tree.
+// At runtime (installed build), it falls back to a path adjacent to the
+// running executable. Returns "" when neither location exists.
+func pythonDistDir() string {
+	// Prefer the repo-relative path for development and test.
+	_, thisFile, _, ok := runtime.Caller(0)
+	if ok {
+		// This file is at internal/cli/scan.go; repo root is two dirs up.
+		repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
+		candidate := filepath.Join(repoRoot, "plugins", "python-reachability", "dist")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	// Fall back to a path adjacent to the running executable (installed build).
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(exe), "plugins", "python-reachability", "dist")
+}
+
+// buildPythonPluginManifest constructs a Manifest for the python-reachability plugin
+// by locating its single-binary distribution under plugins/python-reachability/dist/
+// and computing a SHA-256 pin. The Python plugin embeds its Python sidecar inside
+// the Go binary (via embed.FS), so no separate sidecar file needs to be pinned.
+//
+// When overrideBin is non-empty it is used as the plugin binary path directly
+// (the override disables on-demand build).
+// When overrideBin is empty and the dist binary is absent, the plugin is built
+// on demand via `go build` — mirroring the Go plugin's buildPlugin(ctx) path.
+// Returns (manifest, true) on success, or (nil, false) when the build fails or
+// the binary cannot be located — callers treat this identically to the absent case.
+func buildPythonPluginManifest(ctx context.Context, overrideBin string) (*host.Manifest, bool) {
+	var mainBin string
+
+	if overrideBin != "" {
+		mainBin = overrideBin
+	} else {
+		distDir := pythonDistDir()
+		if distDir == "" {
+			return nil, false
+		}
+		mainBin = filepath.Join(distDir, "anst-python-reachability")
+
+		// On-demand build: if the dist binary is absent, build it now.
+		if _, err := os.Stat(mainBin); err != nil {
+			const pluginPkg = "github.com/ducthinh993/anst-analyzer/plugins/python-reachability"
+			if mkErr := os.MkdirAll(distDir, 0o755); mkErr != nil {
+				fmt.Fprintf(os.Stderr,
+					"warning: cannot create python plugin dist dir %s: %v; python plugin unavailable\n",
+					distDir, mkErr)
+				return nil, false
+			}
+			cmd := exec.CommandContext(ctx, "go", "build", "-o", mainBin, pluginPkg)
+			cmd.Env = os.Environ()
+			if out, buildErr := cmd.CombinedOutput(); buildErr != nil {
+				fmt.Fprintf(os.Stderr,
+					"warning: on-demand build of python plugin failed: %v\n%s; python plugin unavailable\n",
+					buildErr, out)
+				return nil, false
+			}
+		}
+	}
+
+	if _, err := os.Stat(mainBin); err != nil {
+		// Binary not present even after build attempt: graceful skip.
+		return nil, false
+	}
+
+	absMain, err := filepath.Abs(mainBin)
+	if err != nil {
+		// Should not happen for a file we just stat'd; treat as absent.
+		return nil, false
+	}
+
+	hash, err := host.SHA256OfFile(absMain)
+	if err != nil {
+		// Cannot hash a file we know exists; treat as absent rather than crashing.
+		return nil, false
+	}
+
+	return &host.Manifest{
+		Name:      "python-reachability",
+		ExecPath:  absMain,
+		Pillar:    "sca",
+		Languages: []string{"python"},
+		SHA256:    hash,
+	}, true
+}
+
+// pythonDep is a resolved Python package dependency (name + version) extracted
+// from the Python project's lockfile via the python-reachability plugin's
+// --list-deps subcommand. Used to query PyPI OSV advisories before the plugin runs.
+// DepType carries the dep classification from the Python plugin (runtime |
+// optional-extra | dev | test | docs). It is used by the host to tag findings
+// with properties["dep_type"] so the policy gate can apply dep-type aware gating.
+type pythonDep struct {
+	Ecosystem string `json:"ecosystem"` // always "PyPI"
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	// DepType is the dependency classification emitted by the Python plugin's
+	// --list-deps output: runtime | optional-extra | dev | test | docs.
+	// Missing (empty string) is treated as runtime by the host (conservative default).
+	DepType string `json:"dep_type,omitempty"`
+}
+
+// listPythonDepsOutput is the JSON shape emitted by the Python plugin's --list-deps mode.
+type listPythonDepsOutput struct {
+	Deps []pythonDep `json:"deps"`
+	// Incomplete is true when the dep list could not be fully resolved.
+	// This covers: no lockfile present, no venv present (manifest-only mode),
+	// offline+unpinned (cannot resolve without network), or any parse error.
+	// When true, the caller MUST set incomplete=true on the scan.
+	Incomplete bool   `json:"incomplete"`
+	// IncompleteReason provides a human-readable explanation for the incomplete signal.
+	IncompleteReason string `json:"incompleteReason,omitempty"`
+}
+
+// listPythonDeps execs the Python plugin binary in --list-deps mode and returns
+// the resolved Python dependency list for the project rooted at moduleRoot.
+// It also returns whether the project model is incomplete.
+//
+// The incomplete signal covers:
+//   - No lockfile present (only pyproject.toml/requirements.txt): manifest-only mode,
+//     no pinned versions available; dep resolution requires network or venv.
+//   - No venv present: dist→import mapping unavailable, reachability not computable.
+//   - offline+unpinned: cannot resolve without network access.
+//
+// Any of these forces incomplete=true so the scan exits 3, never 0 (false-clean).
+// On any subprocess or parse failure it returns an error (never silently empty).
+func listPythonDeps(ctx context.Context, pluginBin, moduleRoot string) ([]pythonDep, bool, error) {
+	cmd := exec.CommandContext(ctx, pluginBin, "--list-deps", moduleRoot)
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, false, fmt.Errorf("python plugin --list-deps: %w\n%s", err, exitErr.Stderr)
+		}
+		return nil, false, fmt.Errorf("python plugin --list-deps: %w", err)
+	}
+
+	var result listPythonDepsOutput
+	if err := json.Unmarshal(out, &result); err != nil {
+		return nil, false, fmt.Errorf("python plugin --list-deps: parse output: %w", err)
+	}
+
+	return result.Deps, result.Incomplete, nil
 }
 
 // buildJSPluginManifest constructs a Manifest for the js-reachability plugin
