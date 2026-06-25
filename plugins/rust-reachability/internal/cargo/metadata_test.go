@@ -4,26 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/cargo"
 )
-
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-// writeMetadataJSON writes a synthetic cargo-metadata JSON blob to a temp dir
-// so ParseMetadataJSON can be exercised without invoking cargo.
-func writeMetadataJSON(t *testing.T, dir string, blob []byte) string {
-	t.Helper()
-	p := filepath.Join(dir, "metadata.json")
-	if err := os.WriteFile(p, blob, 0o644); err != nil {
-		t.Fatalf("write metadata.json: %v", err)
-	}
-	return p
-}
 
 // ─── ParseMetadataJSON ───────────────────────────────────────────────────────
 

@@ -1138,7 +1138,7 @@ func runExtractSymbols() {
 
 	if err := cmd.Run(); err != nil {
 		// sidecar guarantees exit 0; if we get non-zero, emit []
-		fmt.Fprintln(os.Stdout, "[]")
+		_, _ = fmt.Fprintln(os.Stdout, "[]")
 		return
 	}
 
@@ -1146,7 +1146,7 @@ func runExtractSymbols() {
 	if out == "" {
 		out = "[]"
 	}
-	fmt.Fprintln(os.Stdout, out)
+	_, _ = fmt.Fprintln(os.Stdout, out)
 }
 
 // ---------------------------------------------------------------------------

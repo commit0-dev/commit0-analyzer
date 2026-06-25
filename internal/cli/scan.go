@@ -107,12 +107,6 @@ func resolveLanguage(lang string, e ecosystems) (ecosystems, error) {
 	}
 }
 
-// ecosystemManifestBuilder is the seam each language plugin registers to build
-// its host.Manifest. It returns (manifest, true) when the plugin binary is
-// available, or (nil, false) when the binary has not been built yet — in which
-// case the ecosystem is silently skipped rather than aborting the scan.
-type ecosystemManifestBuilder func(overrideBin string) (*host.Manifest, bool)
-
 // warnUnsupportedEcosystems writes a warning to w for every ecosystem in eco
 // that is detected (or explicitly selected via --language) but has no scan
 // path yet (rust, python, java). It returns true when any such ecosystem is
@@ -140,7 +134,7 @@ func warnUnsupportedEcosystems(eco ecosystems, w io.Writer) bool {
 		if !u.flag {
 			continue
 		}
-		fmt.Fprintf(w,
+		_, _ = fmt.Fprintf(w,
 			"warning: %s ecosystem detected but no %s scan path is available yet; "+
 				"%s deps were not checked for vulnerabilities; scan marked incomplete\n",
 			u.name, u.name, u.name)
@@ -1603,7 +1597,7 @@ func parseCargoMetadataForDeps(raw []byte) ([]cargoDep, bool, error) {
 		if p.Name == "" || p.Version == "" {
 			continue
 		}
-		deps = append(deps, cargoDep{Name: p.Name, Version: p.Version})
+		deps = append(deps, cargoDep(p))
 	}
 	return deps, false, nil
 }
