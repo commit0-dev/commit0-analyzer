@@ -1,10 +1,16 @@
 // Package ghfetch fetches the unified diff and changed-file contents for a
-// GitHub commit URL, producing the inputs that the symbol extractor consumes.
+// commit URL, producing the inputs that the symbol extractor consumes.
 //
-// Soundness contract: any fetch failure, unsupported URL, non-200 response, or
-// context cancellation returns (nil, nil) so callers can degrade to a
-// package-level verdict.  A non-nil error is reserved for genuinely unexpected
-// programming conditions.
+// Soundness contract: any fetch failure, non-200 response, or context
+// cancellation degrades gracefully.  FetchFix returns (nil, nil) for backward
+// compatibility.  FetchFixResult returns a FixResult whose UnsupportedForge
+// field is true when the URL is a non-GitHub forge — this is a defined,
+// surfaceable degrade, not a silent zero.  A non-nil error is reserved for
+// genuinely unexpected programming conditions.
+//
+// Currently only GitHub is supported as a fetch target.  Non-GitHub forge URLs
+// (GitLab, Gitea, Bitbucket, etc.) are detected and explicitly signalled via
+// UnsupportedForge=true; no HTTP request is made.
 package ghfetch
 
 import (
@@ -27,9 +33,24 @@ const (
 	defaultBaseRawURL = "https://raw.githubusercontent.com"
 )
 
-// sourceExtensions is the set of JS/TS file extensions whose content is fetched
-// and forwarded to the symbol extractor. Mirrors the extractor's filter.
-var sourceExtensions = map[string]bool{
+// ForgeKind identifies the version-control hosting provider in a fix URL.
+type ForgeKind int
+
+const (
+	// ForgeUnknown means the URL could not be parsed into a recognised forge shape.
+	ForgeUnknown ForgeKind = iota
+	// ForgeGitHub is a github.com commit URL.
+	ForgeGitHub
+	// ForgeUnsupported means the URL was parseable as a commit URL on a non-GitHub
+	// forge (e.g. gitlab.com, gitea, Bitbucket) but that forge is not yet
+	// supported.  Callers must surface this as a defined degrade (UNKNOWN +
+	// incomplete), not treat it as equivalent to a network error.
+	ForgeUnsupported
+)
+
+// JSExtensions is the extension set for JS/TS source files.
+// It is the default used by FetchFix for backward compatibility.
+var JSExtensions = map[string]bool{
 	".js":  true,
 	".cjs": true,
 	".mjs": true,
@@ -38,6 +59,24 @@ var sourceExtensions = map[string]bool{
 	".cts": true,
 	".mts": true,
 	".tsx": true,
+}
+
+// PythonExtensions is the extension set for Python source files.
+var PythonExtensions = map[string]bool{
+	".py": true,
+}
+
+// FixResult is the richer return type from FetchFixResult.
+// It separates the "unsupported forge" degrade from other failure modes so
+// callers can surface it explicitly (e.g. set incomplete=true) rather than
+// silently treating it as a cache miss or network error.
+type FixResult struct {
+	// Fix is non-nil on a successful fetch.  Nil when the fetch failed or the
+	// forge is unsupported.
+	Fix *Fix
+	// UnsupportedForge is true when the URL was identified as a non-GitHub forge
+	// commit URL.  Callers should surface this as UNKNOWN + incomplete.
+	UnsupportedForge bool
 }
 
 // Fix holds the unified diff of a security fix commit and the post-fix content
@@ -127,6 +166,49 @@ func ParseCommitURL(raw string) (owner, repo, sha string, ok bool) {
 	return parts[0], parts[1], rawSHA, true
 }
 
+// ParseFixURL is the ecosystem-aware successor to ParseCommitURL.  It returns:
+//   - (ForgeGitHub, owner, repo, sha, true) for a valid github.com commit URL.
+//   - (ForgeUnsupported, "", "", "", true) for a URL that looks like a commit
+//     on a known non-GitHub forge (gitlab.com, gitea, Bitbucket paths, etc.)
+//     so callers can surface an explicit "unsupported forge" degrade.
+//   - (ForgeUnknown, "", "", "", false) for anything else (unparseable, PR,
+//     non-HTTPS, non-hex SHA, etc.).
+//
+// The path-traversal and host guards from ParseCommitURL are preserved:
+// owner/repo segments must match the GitHub-legal charset and may not be "."
+// or "..".
+func ParseFixURL(raw string) (forge ForgeKind, owner, repo, sha string, ok bool) {
+	if raw == "" || !strings.HasPrefix(raw, "https://") {
+		return ForgeUnknown, "", "", "", false
+	}
+
+	// GitHub fast path.
+	if strings.HasPrefix(raw, "https://github.com/") {
+		o, r, s, parsed := ParseCommitURL(raw)
+		if !parsed {
+			return ForgeUnknown, "", "", "", false
+		}
+		return ForgeGitHub, o, r, s, true
+	}
+
+	// Detect known non-GitHub forges by host prefix.
+	knownForgeHosts := []string{
+		"https://gitlab.com/",
+		"https://bitbucket.org/",
+		"https://codeberg.org/",
+		"https://gitea.com/",
+	}
+	for _, prefix := range knownForgeHosts {
+		if strings.HasPrefix(raw, prefix) {
+			// It is a recognised non-GitHub forge — surfaceable degrade.
+			return ForgeUnsupported, "", "", "", true
+		}
+	}
+
+	// Unknown shape.
+	return ForgeUnknown, "", "", "", false
+}
+
 // isPathSegment returns true when s is a non-empty GitHub-legal owner/repo
 // segment ([A-Za-z0-9._-]) that is neither "." nor ".." — i.e. safe to use as
 // a single filesystem path component.
@@ -168,32 +250,75 @@ func isHexChar(c rune) bool {
 }
 
 // FetchFix fetches the unified diff and changed source-file contents for the
-// commit at commitURL.
+// commit at commitURL using the default JS/TS extension set.
 //
 // Degrade semantics:
 //   - Unsupported or unparseable URL → (nil, nil), no HTTP.
 //   - Any non-200 response, network error, or context cancellation → (nil, nil).
 //   - A commit whose changed files are all non-source → *Fix with empty Files.
 //   - Cache hit → returns from disk, no HTTP.
+//
+// For richer degrade information (e.g. distinguishing unsupported forges from
+// network errors), use FetchFixResult instead.
 func (c *Client) FetchFix(ctx context.Context, commitURL string) (*Fix, error) {
-	owner, repo, sha, ok := ParseCommitURL(commitURL)
+	result, err := c.FetchFixResult(ctx, commitURL, JSExtensions)
+	if err != nil {
+		return nil, err
+	}
+	return result.Fix, nil
+}
+
+// FetchFixWithExtensions is like FetchFix but uses the caller-supplied extension
+// set to filter which changed source files are fetched.  Use PythonExtensions for
+// Python fix commits, JSExtensions (or nil) for JS/TS.
+//
+// If extensions is nil or empty, JSExtensions is used (backward-compatible default).
+func (c *Client) FetchFixWithExtensions(ctx context.Context, commitURL string, extensions map[string]bool) (*Fix, error) {
+	result, err := c.FetchFixResult(ctx, commitURL, extensions)
+	if err != nil {
+		return nil, err
+	}
+	return result.Fix, nil
+}
+
+// FetchFixResult is the recommended entry point for new callers.  It returns a
+// FixResult that distinguishes:
+//   - Successful fetch: Fix != nil, UnsupportedForge == false.
+//   - Unsupported forge: Fix == nil, UnsupportedForge == true.  Callers should
+//     surface this as UNKNOWN + incomplete, not treat it as equivalent to a
+//     network error.
+//   - Other failure (non-200, network error, cancelled, unparseable URL):
+//     Fix == nil, UnsupportedForge == false.
+//
+// If extensions is nil or empty, JSExtensions is used.
+func (c *Client) FetchFixResult(ctx context.Context, commitURL string, extensions map[string]bool) (FixResult, error) {
+	if len(extensions) == 0 {
+		extensions = JSExtensions
+	}
+
+	forge, owner, repo, sha, ok := ParseFixURL(commitURL)
 	if !ok {
-		return nil, nil
+		// Unparseable URL (not even a known forge shape).
+		return FixResult{}, nil
+	}
+	if forge != ForgeGitHub {
+		// Recognised non-GitHub forge — explicit, surfaceable degrade.
+		return FixResult{UnsupportedForge: true}, nil
 	}
 
 	// Check disk cache first.
 	if cached := c.loadCache(owner, repo, sha); cached != nil {
-		return cached, nil
+		return FixResult{Fix: cached}, nil
 	}
 
 	// Fetch the unified diff from the GitHub API.
-	patch, ok := c.fetchDiff(ctx, owner, repo, sha)
-	if !ok {
-		return nil, nil
+	patch, fetched := c.fetchDiff(ctx, owner, repo, sha)
+	if !fetched {
+		return FixResult{}, nil
 	}
 
-	// Parse changed source-file paths from the diff.
-	paths := parseSourcePaths(patch)
+	// Parse changed source-file paths from the diff using the caller's extension set.
+	paths := parseSourcePaths(patch, extensions)
 
 	// Fetch each source file's content at the fixed SHA.
 	files := make([]symbolextract.FileContent, 0, len(paths))
@@ -201,14 +326,14 @@ func (c *Client) FetchFix(ctx context.Context, commitURL string) (*Fix, error) {
 		content, ok := c.fetchRaw(ctx, owner, repo, sha, p)
 		if !ok {
 			// Any single file fetch failure degrades the whole result.
-			return nil, nil
+			return FixResult{}, nil
 		}
 		files = append(files, symbolextract.FileContent{Path: p, Content: content})
 	}
 
 	fix := &Fix{Patch: patch, Files: files}
 	c.saveCache(owner, repo, sha, fix)
-	return fix, nil
+	return FixResult{Fix: fix}, nil
 }
 
 // fetchDiff performs GET {BaseAPIURL}/repos/{owner}/{repo}/commits/{sha} with
@@ -277,9 +402,14 @@ func (c *Client) applyAuth(req *http.Request) {
 }
 
 // parseSourcePaths scans a unified diff and returns the repo-relative paths of
-// changed files whose extension is in sourceExtensions.  The git "a/"/"b/"
-// prefixes are stripped so paths match the symbol extractor's contract.
-func parseSourcePaths(patch string) []string {
+// changed files whose extension is in the supplied extensions set.  The git
+// "a/"/"b/" prefixes are stripped so paths match the symbol extractor's
+// contract.  If extensions is nil or empty, the function falls back to
+// JSExtensions.
+func parseSourcePaths(patch string, extensions map[string]bool) []string {
+	if len(extensions) == 0 {
+		extensions = JSExtensions
+	}
 	seen := make(map[string]bool)
 	var paths []string
 	sc := bufio.NewScanner(strings.NewReader(patch))
@@ -302,7 +432,7 @@ func parseSourcePaths(patch string) []string {
 			continue
 		}
 		ext := filepath.Ext(candidate)
-		if !sourceExtensions[ext] {
+		if !extensions[ext] {
 			continue
 		}
 		seen[candidate] = true

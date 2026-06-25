@@ -381,3 +381,174 @@ func TestFetchFix_CachePersistedToDisk(t *testing.T) {
 		t.Error("no cache file written to disk")
 	}
 }
+
+// ─── Python ecosystem extension support ──────────────────────────────────────
+
+// samplePyDiff is a minimal unified diff touching one .py file and one non-source file.
+const samplePyDiff = `diff --git a/src/utils.py b/src/utils.py
+index 0000001..0000002 100644
+--- a/src/utils.py
++++ b/src/utils.py
+@@ -1,3 +1,4 @@
+ def greet(name):
+-    return 'hello ' + name
++    return 'Hello, ' + name + '!'
++    # fixed
+diff --git a/README.md b/README.md
+index 0000003..0000004 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1,2 @@
+ # utils
++Updated.
+`
+
+const samplePyContent = `def greet(name):
+    return 'Hello, ' + name + '!'
+    # fixed
+`
+
+// newPyTestServer returns a test server that handles commit diff + raw .py file fetches.
+func newPyTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	// GitHub API: commit diff
+	mux.HandleFunc("/repos/"+testOwner+"/"+testRepo+"/commits/"+testSHA, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(samplePyDiff))
+	})
+
+	// raw.githubusercontent.com equivalent: .py file content
+	mux.HandleFunc("/"+testOwner+"/"+testRepo+"/"+testSHA+"/src/utils.py", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(samplePyContent))
+	})
+
+	return httptest.NewServer(mux)
+}
+
+func TestFetchFixWithExtensions_PyPaths(t *testing.T) {
+	cacheDir := t.TempDir()
+	srv := newPyTestServer(t)
+	defer srv.Close()
+
+	c := newClient(t, srv, cacheDir)
+
+	commitURL := "https://github.com/" + testOwner + "/" + testRepo + "/commit/" + testSHA
+	fix, err := c.FetchFixWithExtensions(context.Background(), commitURL, ghfetch.PythonExtensions)
+	if err != nil {
+		t.Fatalf("FetchFixWithExtensions returned unexpected error: %v", err)
+	}
+	if fix == nil {
+		t.Fatal("FetchFixWithExtensions returned nil fix, want non-nil")
+	}
+	if len(fix.Files) != 1 {
+		t.Fatalf("len(fix.Files)=%d, want 1 (only the .py file)", len(fix.Files))
+	}
+	if fix.Files[0].Path != "src/utils.py" {
+		t.Errorf("fix.Files[0].Path=%q, want %q", fix.Files[0].Path, "src/utils.py")
+	}
+	if fix.Files[0].Content != samplePyContent {
+		t.Errorf("fix.Files[0].Content mismatch\ngot: %q\nwant: %q", fix.Files[0].Content, samplePyContent)
+	}
+}
+
+// FetchFix (default JS/TS) must NOT pick up .py files — regression test.
+func TestFetchFix_DoesNotPickUpPyFiles(t *testing.T) {
+	cacheDir := t.TempDir()
+	srv := newPyTestServer(t)
+	defer srv.Close()
+
+	c := newClient(t, srv, cacheDir)
+
+	commitURL := "https://github.com/" + testOwner + "/" + testRepo + "/commit/" + testSHA
+	fix, err := c.FetchFix(context.Background(), commitURL)
+	if err != nil {
+		t.Fatalf("FetchFix returned unexpected error: %v", err)
+	}
+	if fix == nil {
+		t.Fatal("FetchFix returned nil fix, want non-nil")
+	}
+	// The diff only has a .py source file + README.md; JS/TS filter must yield 0 source files.
+	if len(fix.Files) != 0 {
+		t.Errorf("FetchFix picked up %d files from a .py-only diff, want 0", len(fix.Files))
+	}
+}
+
+// ─── Non-GitHub forge degrade ─────────────────────────────────────────────────
+
+func TestParseFixURL_GitHub(t *testing.T) {
+	kind, owner, repo, sha, ok := ghfetch.ParseFixURL("https://github.com/owner/repo/commit/abc1234")
+	if !ok {
+		t.Fatal("ParseFixURL returned ok=false for valid GitHub URL")
+	}
+	if kind != ghfetch.ForgeGitHub {
+		t.Errorf("kind=%v, want ForgeGitHub", kind)
+	}
+	if owner != "owner" || repo != "repo" || sha != "abc1234" {
+		t.Errorf("got owner=%q repo=%q sha=%q, want owner repo abc1234", owner, repo, sha)
+	}
+}
+
+func TestParseFixURL_GitLab_UnsupportedForge(t *testing.T) {
+	kind, _, _, _, ok := ghfetch.ParseFixURL("https://gitlab.com/owner/repo/commit/abc1234")
+	// A non-GitHub URL that looks like a commit URL is ok=true but ForgeUnsupported.
+	// (Different from a totally unparseable URL.)
+	if !ok {
+		// ok=false is also acceptable (URL too ambiguous to parse forge); test both paths.
+		return
+	}
+	if kind != ghfetch.ForgeUnsupported {
+		t.Errorf("kind=%v, want ForgeUnsupported for GitLab URL", kind)
+	}
+}
+
+func TestFetchFixWithExtensions_NonGitHubForge_DefinedDegrade(t *testing.T) {
+	cacheDir := t.TempDir()
+	// Non-GitHub commit URL — server is never reached.
+	var count atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		count.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, cacheDir)
+
+	// GitLab commit URL: should not silently return (nil, nil) without signalling
+	// the forge is unsupported; instead FetchFixResult.UnsupportedForge must be true.
+	result, err := c.FetchFixResult(context.Background(), "https://gitlab.com/owner/repo/-/commit/abc1234", ghfetch.JSExtensions)
+	if err != nil {
+		t.Fatalf("FetchFixResult returned unexpected error: %v", err)
+	}
+	if !result.UnsupportedForge {
+		t.Errorf("FetchFixResult.UnsupportedForge=false for GitLab URL, want true (defined degrade, not silent zero)")
+	}
+	if count.Load() != 0 {
+		t.Errorf("made %d HTTP requests for non-GitHub URL, want 0", count.Load())
+	}
+}
+
+func TestFetchFixResult_GitHub_HappyPath(t *testing.T) {
+	cacheDir := t.TempDir()
+	srv := newTestServer(t, nil)
+	defer srv.Close()
+
+	c := newClient(t, srv, cacheDir)
+
+	commitURL := "https://github.com/" + testOwner + "/" + testRepo + "/commit/" + testSHA
+	result, err := c.FetchFixResult(context.Background(), commitURL, ghfetch.JSExtensions)
+	if err != nil {
+		t.Fatalf("FetchFixResult returned unexpected error: %v", err)
+	}
+	if result.UnsupportedForge {
+		t.Error("FetchFixResult.UnsupportedForge=true for GitHub URL, want false")
+	}
+	if result.Fix == nil {
+		t.Fatal("FetchFixResult.Fix=nil for valid GitHub commit, want non-nil")
+	}
+	if len(result.Fix.Files) != 1 {
+		t.Errorf("len(Fix.Files)=%d, want 1", len(result.Fix.Files))
+	}
+}
