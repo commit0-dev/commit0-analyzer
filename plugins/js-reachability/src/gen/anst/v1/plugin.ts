@@ -59,6 +59,76 @@ import {
  */
 
 /**
+ * Ecosystem identifies the package ecosystem / language a plugin operates on.
+ * This is an additive discriminator: Go/JS plugins that predate this field
+ * may omit it (zero value = ECOSYSTEM_UNKNOWN); the host infers the
+ * ecosystem from the plugin's MetadataResponse.supported_languages when the
+ * field is absent.
+ */
+export enum Ecosystem {
+  /** ECOSYSTEM_UNKNOWN - ECOSYSTEM_UNKNOWN is the zero/default. Treated as unknown ecosystem. */
+  ECOSYSTEM_UNKNOWN = 0,
+  /** ECOSYSTEM_GO - ECOSYSTEM_GO covers the Go module ecosystem (go.mod / go.sum). */
+  ECOSYSTEM_GO = 1,
+  /** ECOSYSTEM_NPM - ECOSYSTEM_NPM covers the npm / Node.js ecosystem (package.json / package-lock.json). */
+  ECOSYSTEM_NPM = 2,
+  /** ECOSYSTEM_CRATES_IO - ECOSYSTEM_CRATES_IO covers the Rust / Cargo ecosystem (Cargo.toml / Cargo.lock). */
+  ECOSYSTEM_CRATES_IO = 3,
+  /** ECOSYSTEM_PYPI - ECOSYSTEM_PYPI covers the Python / PyPI ecosystem (pyproject.toml / requirements.txt). */
+  ECOSYSTEM_PYPI = 4,
+  /** ECOSYSTEM_MAVEN - ECOSYSTEM_MAVEN covers the Java / Maven and Gradle ecosystems (pom.xml / build.gradle). */
+  ECOSYSTEM_MAVEN = 5,
+  UNRECOGNIZED = -1,
+}
+
+export function ecosystemFromJSON(object: any): Ecosystem {
+  switch (object) {
+    case 0:
+    case "ECOSYSTEM_UNKNOWN":
+      return Ecosystem.ECOSYSTEM_UNKNOWN;
+    case 1:
+    case "ECOSYSTEM_GO":
+      return Ecosystem.ECOSYSTEM_GO;
+    case 2:
+    case "ECOSYSTEM_NPM":
+      return Ecosystem.ECOSYSTEM_NPM;
+    case 3:
+    case "ECOSYSTEM_CRATES_IO":
+      return Ecosystem.ECOSYSTEM_CRATES_IO;
+    case 4:
+    case "ECOSYSTEM_PYPI":
+      return Ecosystem.ECOSYSTEM_PYPI;
+    case 5:
+    case "ECOSYSTEM_MAVEN":
+      return Ecosystem.ECOSYSTEM_MAVEN;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return Ecosystem.UNRECOGNIZED;
+  }
+}
+
+export function ecosystemToJSON(object: Ecosystem): string {
+  switch (object) {
+    case Ecosystem.ECOSYSTEM_UNKNOWN:
+      return "ECOSYSTEM_UNKNOWN";
+    case Ecosystem.ECOSYSTEM_GO:
+      return "ECOSYSTEM_GO";
+    case Ecosystem.ECOSYSTEM_NPM:
+      return "ECOSYSTEM_NPM";
+    case Ecosystem.ECOSYSTEM_CRATES_IO:
+      return "ECOSYSTEM_CRATES_IO";
+    case Ecosystem.ECOSYSTEM_PYPI:
+      return "ECOSYSTEM_PYPI";
+    case Ecosystem.ECOSYSTEM_MAVEN:
+      return "ECOSYSTEM_MAVEN";
+    case Ecosystem.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+/**
  * Confidence describes how certain the analyzer is that a vulnerable symbol or
  * package is actually reachable from an entry point.
  *
@@ -286,6 +356,21 @@ export interface Finding {
   pillar: string;
   /** language is a reserved tag for multi-language support (e.g. "go", "js", "python"). */
   language: string;
+  /**
+   * ecosystem identifies the package ecosystem this finding came from.
+   * Optional; Go/JS plugins that predate this field may leave it at the
+   * zero value (ECOSYSTEM_UNKNOWN). New plugins SHOULD set this so findings
+   * can be grouped and filtered per ecosystem without parsing the language string.
+   */
+  ecosystem: Ecosystem;
+  /**
+   * incomplete signals that the analysis producing this finding was partial:
+   * the plugin could not fully resolve the dependency graph or call graph, so
+   * additional vulnerable paths may exist that were not checked. When true,
+   * the host MUST set the scan-level incomplete flag. The zero value (false)
+   * means analysis was complete for this finding's dependency.
+   */
+  incomplete: boolean;
 }
 
 export interface Finding_PropertiesEntry {
@@ -323,6 +408,13 @@ export interface Advisory {
   symbolLevel: boolean;
   /** sources lists the advisory data sources (e.g. ["go-vuln-db"]). */
   sources: string[];
+  /**
+   * ecosystem identifies the package ecosystem this advisory applies to.
+   * Optional; Go/JS advisories may omit this field (pre-dates the multi-language
+   * extension). New plugins SHOULD set this so the host can route version
+   * comparison to the correct per-ecosystem comparator.
+   */
+  ecosystem: Ecosystem;
 }
 
 /**
@@ -337,6 +429,46 @@ export interface BuildConfig {
   goarch: string;
   /** tags are additional build tags to apply during analysis. */
   tags: string[];
+}
+
+/**
+ * EcosystemBuildConfig carries per-ecosystem build context for non-Go plugins.
+ * It gives Rust, Python, and future language plugins a dedicated place for their
+ * build environment rather than overloading the Go-specific goos/goarch fields.
+ * This message is optional and non-breaking: Go/JS plugins ignore it.
+ */
+export interface EcosystemBuildConfig {
+  /** ecosystem identifies which ecosystem this build config applies to. */
+  ecosystem: Ecosystem;
+  /**
+   * target_triple is the ecosystem-specific build target descriptor.
+   * Rust: Cargo target triple (e.g. "x86_64-unknown-linux-gnu").
+   * Python: platform tag (e.g. "linux_x86_64").
+   * Absent for Go (use BuildConfig.goos/goarch instead).
+   */
+  targetTriple: string;
+  /**
+   * features are ecosystem-specific feature flags to enable during analysis.
+   * Rust: Cargo feature names (e.g. ["serde", "tokio/full"]).
+   * Python: extras (e.g. ["dev", "test"]).
+   */
+  features: string[];
+  /**
+   * python_version is the Python interpreter version string (e.g. "3.11.4").
+   * Only meaningful for ECOSYSTEM_PYPI; ignored by other ecosystems.
+   */
+  pythonVersion: string;
+  /**
+   * extra_env carries additional key=value environment variables the plugin
+   * needs to replicate the project's build environment. Only values that are
+   * SAFE TO EXPOSE should be set here (no secrets, no credentials).
+   */
+  extraEnv: { [key: string]: string };
+}
+
+export interface EcosystemBuildConfig_ExtraEnvEntry {
+  key: string;
+  value: string;
 }
 
 /**
@@ -359,6 +491,12 @@ export interface AnalyzeRequest {
     | undefined;
   /** advisories are the resolved vulnerabilities to check reachability for. */
   advisories: Advisory[];
+  /**
+   * ecosystem_build_config carries per-ecosystem build context for non-Go plugins.
+   * Optional and additive: Go/JS plugins ignore this field. New language plugins
+   * (Rust, Python) use this instead of overloading the Go-specific build_config.
+   */
+  ecosystemBuildConfig?: EcosystemBuildConfig | undefined;
 }
 
 /** MetadataRequest is sent by the host to identify itself during the handshake. */
@@ -714,6 +852,8 @@ function createBaseFinding(): Finding {
     properties: {},
     pillar: "",
     language: "",
+    ecosystem: 0,
+    incomplete: false,
   };
 }
 
@@ -742,6 +882,12 @@ export const Finding: MessageFns<Finding> = {
     }
     if (message.language !== "") {
       writer.uint32(66).string(message.language);
+    }
+    if (message.ecosystem !== 0) {
+      writer.uint32(72).int32(message.ecosystem);
+    }
+    if (message.incomplete !== false) {
+      writer.uint32(80).bool(message.incomplete);
     }
     return writer;
   },
@@ -820,6 +966,22 @@ export const Finding: MessageFns<Finding> = {
           message.language = reader.string();
           continue;
         }
+        case 9: {
+          if (tag !== 72) {
+            break;
+          }
+
+          message.ecosystem = reader.int32() as any;
+          continue;
+        }
+        case 10: {
+          if (tag !== 80) {
+            break;
+          }
+
+          message.incomplete = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -847,6 +1009,8 @@ export const Finding: MessageFns<Finding> = {
         : {},
       pillar: isSet(object.pillar) ? globalThis.String(object.pillar) : "",
       language: isSet(object.language) ? globalThis.String(object.language) : "",
+      ecosystem: isSet(object.ecosystem) ? ecosystemFromJSON(object.ecosystem) : 0,
+      incomplete: isSet(object.incomplete) ? globalThis.Boolean(object.incomplete) : false,
     };
   },
 
@@ -882,6 +1046,12 @@ export const Finding: MessageFns<Finding> = {
     if (message.language !== "") {
       obj.language = message.language;
     }
+    if (message.ecosystem !== 0) {
+      obj.ecosystem = ecosystemToJSON(message.ecosystem);
+    }
+    if (message.incomplete !== false) {
+      obj.incomplete = message.incomplete;
+    }
     return obj;
   },
 
@@ -910,6 +1080,8 @@ export const Finding: MessageFns<Finding> = {
     );
     message.pillar = object.pillar ?? "";
     message.language = object.language ?? "";
+    message.ecosystem = object.ecosystem ?? 0;
+    message.incomplete = object.incomplete ?? false;
     return message;
   },
 };
@@ -1067,7 +1239,7 @@ export const Symbol: MessageFns<Symbol> = {
 };
 
 function createBaseAdvisory(): Advisory {
-  return { id: "", module: "", versionRange: "", symbols: [], symbolLevel: false, sources: [] };
+  return { id: "", module: "", versionRange: "", symbols: [], symbolLevel: false, sources: [], ecosystem: 0 };
 }
 
 export const Advisory: MessageFns<Advisory> = {
@@ -1089,6 +1261,9 @@ export const Advisory: MessageFns<Advisory> = {
     }
     for (const v of message.sources) {
       writer.uint32(50).string(v!);
+    }
+    if (message.ecosystem !== 0) {
+      writer.uint32(56).int32(message.ecosystem);
     }
     return writer;
   },
@@ -1148,6 +1323,14 @@ export const Advisory: MessageFns<Advisory> = {
           message.sources.push(reader.string());
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.ecosystem = reader.int32() as any;
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1173,6 +1356,7 @@ export const Advisory: MessageFns<Advisory> = {
         ? globalThis.Boolean(object.symbol_level)
         : false,
       sources: globalThis.Array.isArray(object?.sources) ? object.sources.map((e: any) => globalThis.String(e)) : [],
+      ecosystem: isSet(object.ecosystem) ? ecosystemFromJSON(object.ecosystem) : 0,
     };
   },
 
@@ -1196,6 +1380,9 @@ export const Advisory: MessageFns<Advisory> = {
     if (message.sources?.length) {
       obj.sources = message.sources;
     }
+    if (message.ecosystem !== 0) {
+      obj.ecosystem = ecosystemToJSON(message.ecosystem);
+    }
     return obj;
   },
 
@@ -1210,6 +1397,7 @@ export const Advisory: MessageFns<Advisory> = {
     message.symbols = object.symbols?.map((e) => Symbol.fromPartial(e)) || [];
     message.symbolLevel = object.symbolLevel ?? false;
     message.sources = object.sources?.map((e) => e) || [];
+    message.ecosystem = object.ecosystem ?? 0;
     return message;
   },
 };
@@ -1306,8 +1494,253 @@ export const BuildConfig: MessageFns<BuildConfig> = {
   },
 };
 
+function createBaseEcosystemBuildConfig(): EcosystemBuildConfig {
+  return { ecosystem: 0, targetTriple: "", features: [], pythonVersion: "", extraEnv: {} };
+}
+
+export const EcosystemBuildConfig: MessageFns<EcosystemBuildConfig> = {
+  encode(message: EcosystemBuildConfig, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.ecosystem !== 0) {
+      writer.uint32(8).int32(message.ecosystem);
+    }
+    if (message.targetTriple !== "") {
+      writer.uint32(18).string(message.targetTriple);
+    }
+    for (const v of message.features) {
+      writer.uint32(26).string(v!);
+    }
+    if (message.pythonVersion !== "") {
+      writer.uint32(34).string(message.pythonVersion);
+    }
+    globalThis.Object.entries(message.extraEnv).forEach(([key, value]: [string, string]) => {
+      EcosystemBuildConfig_ExtraEnvEntry.encode({ key: key as any, value }, writer.uint32(42).fork()).join();
+    });
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): EcosystemBuildConfig {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEcosystemBuildConfig();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.ecosystem = reader.int32() as any;
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.targetTriple = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.features.push(reader.string());
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.pythonVersion = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          const entry5 = EcosystemBuildConfig_ExtraEnvEntry.decode(reader, reader.uint32());
+          if (entry5.value !== undefined) {
+            message.extraEnv[entry5.key] = entry5.value;
+          }
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EcosystemBuildConfig {
+    return {
+      ecosystem: isSet(object.ecosystem) ? ecosystemFromJSON(object.ecosystem) : 0,
+      targetTriple: isSet(object.targetTriple)
+        ? globalThis.String(object.targetTriple)
+        : isSet(object.target_triple)
+        ? globalThis.String(object.target_triple)
+        : "",
+      features: globalThis.Array.isArray(object?.features) ? object.features.map((e: any) => globalThis.String(e)) : [],
+      pythonVersion: isSet(object.pythonVersion)
+        ? globalThis.String(object.pythonVersion)
+        : isSet(object.python_version)
+        ? globalThis.String(object.python_version)
+        : "",
+      extraEnv: isObject(object.extraEnv)
+        ? (globalThis.Object.entries(object.extraEnv) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : isObject(object.extra_env)
+        ? (globalThis.Object.entries(object.extra_env) as [string, any][]).reduce(
+          (acc: { [key: string]: string }, [key, value]: [string, any]) => {
+            acc[key] = globalThis.String(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: EcosystemBuildConfig): unknown {
+    const obj: any = {};
+    if (message.ecosystem !== 0) {
+      obj.ecosystem = ecosystemToJSON(message.ecosystem);
+    }
+    if (message.targetTriple !== "") {
+      obj.targetTriple = message.targetTriple;
+    }
+    if (message.features?.length) {
+      obj.features = message.features;
+    }
+    if (message.pythonVersion !== "") {
+      obj.pythonVersion = message.pythonVersion;
+    }
+    if (message.extraEnv) {
+      const entries = globalThis.Object.entries(message.extraEnv) as [string, string][];
+      if (entries.length > 0) {
+        obj.extraEnv = {};
+        entries.forEach(([k, v]) => {
+          obj.extraEnv[k] = v;
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<EcosystemBuildConfig>, I>>(base?: I): EcosystemBuildConfig {
+    return EcosystemBuildConfig.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<EcosystemBuildConfig>, I>>(object: I): EcosystemBuildConfig {
+    const message = createBaseEcosystemBuildConfig();
+    message.ecosystem = object.ecosystem ?? 0;
+    message.targetTriple = object.targetTriple ?? "";
+    message.features = object.features?.map((e) => e) || [];
+    message.pythonVersion = object.pythonVersion ?? "";
+    message.extraEnv = (globalThis.Object.entries(object.extraEnv ?? {}) as [string, string][]).reduce(
+      (acc: { [key: string]: string }, [key, value]: [string, string]) => {
+        if (value !== undefined) {
+          acc[key] = globalThis.String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseEcosystemBuildConfig_ExtraEnvEntry(): EcosystemBuildConfig_ExtraEnvEntry {
+  return { key: "", value: "" };
+}
+
+export const EcosystemBuildConfig_ExtraEnvEntry: MessageFns<EcosystemBuildConfig_ExtraEnvEntry> = {
+  encode(message: EcosystemBuildConfig_ExtraEnvEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): EcosystemBuildConfig_ExtraEnvEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEcosystemBuildConfig_ExtraEnvEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EcosystemBuildConfig_ExtraEnvEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: EcosystemBuildConfig_ExtraEnvEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<EcosystemBuildConfig_ExtraEnvEntry>, I>>(
+    base?: I,
+  ): EcosystemBuildConfig_ExtraEnvEntry {
+    return EcosystemBuildConfig_ExtraEnvEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<EcosystemBuildConfig_ExtraEnvEntry>, I>>(
+    object: I,
+  ): EcosystemBuildConfig_ExtraEnvEntry {
+    const message = createBaseEcosystemBuildConfig_ExtraEnvEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
 function createBaseAnalyzeRequest(): AnalyzeRequest {
-  return { moduleRoot: "", entrypoints: [], buildConfig: undefined, advisories: [] };
+  return { moduleRoot: "", entrypoints: [], buildConfig: undefined, advisories: [], ecosystemBuildConfig: undefined };
 }
 
 export const AnalyzeRequest: MessageFns<AnalyzeRequest> = {
@@ -1323,6 +1756,9 @@ export const AnalyzeRequest: MessageFns<AnalyzeRequest> = {
     }
     for (const v of message.advisories) {
       Advisory.encode(v!, writer.uint32(34).fork()).join();
+    }
+    if (message.ecosystemBuildConfig !== undefined) {
+      EcosystemBuildConfig.encode(message.ecosystemBuildConfig, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -1366,6 +1802,14 @@ export const AnalyzeRequest: MessageFns<AnalyzeRequest> = {
           message.advisories.push(Advisory.decode(reader, reader.uint32()));
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.ecosystemBuildConfig = EcosystemBuildConfig.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1393,6 +1837,11 @@ export const AnalyzeRequest: MessageFns<AnalyzeRequest> = {
       advisories: globalThis.Array.isArray(object?.advisories)
         ? object.advisories.map((e: any) => Advisory.fromJSON(e))
         : [],
+      ecosystemBuildConfig: isSet(object.ecosystemBuildConfig)
+        ? EcosystemBuildConfig.fromJSON(object.ecosystemBuildConfig)
+        : isSet(object.ecosystem_build_config)
+        ? EcosystemBuildConfig.fromJSON(object.ecosystem_build_config)
+        : undefined,
     };
   },
 
@@ -1410,6 +1859,9 @@ export const AnalyzeRequest: MessageFns<AnalyzeRequest> = {
     if (message.advisories?.length) {
       obj.advisories = message.advisories.map((e) => Advisory.toJSON(e));
     }
+    if (message.ecosystemBuildConfig !== undefined) {
+      obj.ecosystemBuildConfig = EcosystemBuildConfig.toJSON(message.ecosystemBuildConfig);
+    }
     return obj;
   },
 
@@ -1424,6 +1876,9 @@ export const AnalyzeRequest: MessageFns<AnalyzeRequest> = {
       ? BuildConfig.fromPartial(object.buildConfig)
       : undefined;
     message.advisories = object.advisories?.map((e) => Advisory.fromPartial(e)) || [];
+    message.ecosystemBuildConfig = (object.ecosystemBuildConfig !== undefined && object.ecosystemBuildConfig !== null)
+      ? EcosystemBuildConfig.fromPartial(object.ecosystemBuildConfig)
+      : undefined;
     return message;
   },
 };
