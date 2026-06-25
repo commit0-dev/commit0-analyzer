@@ -1,18 +1,19 @@
 # anst-analyzer
 
-An OSS, CI-native, reachability-first software composition analysis (SCA) tool. It analyzes Go modules and JavaScript/TypeScript packages, lists dependency CVEs, marks each one **reachable**, **not reachable**, or **unknown**, then emits SARIF 2.1, JSON, or a human-readable table and exits non-zero when a policy threshold is crossed.
+An OSS, CI-native, reachability-first software composition analysis (SCA) tool. It analyzes Go modules, JavaScript/TypeScript packages, Rust crates, and Python projects, lists dependency CVEs, marks each one **reachable**, **not reachable**, or **unknown**, then emits SARIF 2.1, JSON, or a human-readable table and exits non-zero when a policy threshold is crossed.
 
-The key differentiator vs `govulncheck` / `npm audit`: SARIF `codeFlows` call-path proofs, a policy-as-code gate, and a multi-language architecture (Go + npm/JS/TS today; PyPI, Cargo on the roadmap).
+The key differentiator vs `govulncheck` / `npm audit`: SARIF `codeFlows` call-path proofs, a policy-as-code gate, and a multi-language architecture (Go, JS/TS, Rust, Python; Java deferred).
 
 ## How it works
 
 ```
-Project root (Go module, npm workspace, or both)
+Project root (Go, JS/TS, Rust, Python — auto-detected or --language selectable)
    └─> Advisory resolver (Go vuln DB + OSV.dev offline bundle, --source selectable)
           └─> AnalyzeRequest (root + entrypoints + advisories + ecosystem config)
-                 ├─> go-reachability plugin  (go/ssa + VTA call graph; import-level fallback on unsupported generics)
-                 └─> js-reachability plugin  (demand-driven call graph into dependency source;
-                 │                            symbol-level via advisory fix-patch extraction)
+                 ├─> go-reachability plugin          (go/ssa + VTA call graph; import-level fallback on unsupported generics)
+                 ├─> js-reachability plugin          (call graph into dependency source; symbol-level via fix patches)
+                 ├─> rust-reachability plugin        (cargo metadata + RustSec; package-level reachability)
+                 └─> python-reachability plugin      (ast-driven call graph; lockfile-static resolver; positive-reachability model)
                         └─> Findings (streamed, confidence-tiered, source-attributed)
                                └─> Renderers (SARIF 2.1 / JSON / table)
                                       └─> Policy gate (exit 0 / 1 / 3)
@@ -40,11 +41,17 @@ go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
 # Scan a Go module
 anst scan /path/to/go-module
 
-# Scan an npm workspace (requires JS plugin to be built)
+# Scan an npm workspace
 anst scan /path/to/npm-project --language js
 
-# Auto-detect (polyglot: runs both plugins if both go.mod and package.json are present)
-anst scan /path/to/monorepo --language auto
+# Scan a Rust crate
+anst scan /path/to/rust-project --language rust
+
+# Scan a Python project
+anst scan /path/to/python-project --language python
+
+# Auto-detect: runs all detected ecosystems (Go, JS/TS, Rust, Python)
+anst scan /path/to/monorepo
 ```
 
 ## Supported ecosystems
@@ -53,19 +60,26 @@ anst scan /path/to/monorepo --language auto
 |-----------|-----------------|----------------------|-----------------|
 | **Go** | Go modules (`go.mod`) | Symbol-level (VTA call graph); degrades to import-level on generic-heavy code (an x/tools limitation) | Go vuln DB + OSV.dev |
 | **JavaScript / TypeScript** | npm, Yarn, pnpm (workspaces) | Into-dependency call graph (direct + transitive); symbol-level via advisory fix patches (`--symbols`) | OSV.dev npm bundle |
+| **Rust** | Cargo (`Cargo.toml`) | Package-level (no static call graph); symbol hints from RustSec | OSV.dev crates.io + RustSec |
+| **Python** | Lockfile-static: uv.lock, poetry.lock, requirements.txt, pyproject.toml | Call-graph-driven positive reachability (sound under dynamism); symbol-level via `--symbols` | OSV.dev PyPI |
 
-Findings cover the full installed closure (direct **and** transitive). Vulnerabilities reachable only through a `devDependency` subtree are tagged `dev_only` and reported without failing the gate; runtime-reachable findings gate. Add `--symbols` to resolve the vulnerable exported symbols a fix patch touched (fetched from the advisory's fix commit, cached, offline-degrading) and emit `SYMBOL_REACHABLE` with a SARIF code path.
+Findings cover the full installed closure (direct **and** transitive). Add `--symbols` to resolve the vulnerable exported symbols a fix patch touched (fetched from the advisory's fix commit, cached, offline-degrading) and emit `SYMBOL_REACHABLE` with a SARIF code path.
 
-**npm confidence tiers for JS/TS:**
+**JS/TS dependency types:** Vulnerabilities reachable only through a `devDependency` subtree are tagged `dev_only` and reported without failing the gate; runtime-reachable findings gate.
 
-| Confidence | Meaning |
-|---|---|
-| `PACKAGE_REACHABLE` | The vulnerable package is imported and reachable from an entry point. |
-| `SYMBOL_REACHABLE` | A concrete call path to the vulnerable export was found (via advisory fix-patch symbol extraction, `--symbols`). |
-| `NOT_REACHABLE` | The package is installed but no import path reaches it. |
-| `UNKNOWN` | Dynamic `require()`, `eval`, or incomplete graph — reachability indeterminate. |
+**Python dependency types:** Each finding is tagged `dep_type` = runtime | optional-extra | dev | test | docs (from the manifest). Non-runtime findings do not fail the gate by default; use `--gate-on` to customize this behavior.
 
-**Phantom dependency:** A package installed (hoisted from a workspace root) but not declared in a workspace's own `package.json` is tagged `phantom (undeclared)` in the finding. Phantom reachable vulnerabilities gate identically to explicit deps.
+**Phantom dependency (JS/TS):** A package installed (hoisted from a workspace root) but not declared in a workspace's own `package.json` is tagged `phantom (undeclared)` in the finding. Phantom reachable vulnerabilities gate identically to explicit deps.
+
+## Python value-prop: Positive reachability model
+
+On dynamic languages like Python, sound **negative** reachability (`NOT_REACHABLE` suppression) is mostly impossible — config-driven `importlib.import_module()` can load arbitrary packages. `anst-analyzer` inverts the model: focus on what you **provably use**, segment by dependency type, and accept that a hyper-dynamic app yields `UNKNOWN` by design (correct, not a limitation).
+
+**Positive reachability is sound under dynamism:** `SYMBOL_REACHABLE` and `PACKAGE_REACHABLE` findings are always sound lower bounds on actual use. **Negative reachability is not:** `NOT_REACHABLE` on a dynamic app is a false negative, so it is never surfaced for gate purposes (only auditable in SARIF).
+
+**Dependency-type segmentation:** Python findings include `dep_type` (runtime, optional-extra, dev, test, docs). By default, non-runtime findings do not gate; use `--gate-on reachable` to suppress `UNKNOWN` on non-runtime deps, or `--gate-on all` to gate every non-NOT_REACHABLE finding.
+
+**Scan completeness:** An incomplete scan (e.g., a call-graph analysis unable to fully trace a hyper-dynamic app) exits 3, never 0. Exit 0 always means "scan completed + policy clean," never "scan incomplete + assumed safe."
 
 ## Repository layout
 
@@ -90,6 +104,10 @@ plugins/
     testdata/projects/  npm/yarn/pnpm fixture projects (generated by build-fixtures.mjs,
     │                   regenerated per test run; node_modules + lockfiles gitignored)
     dist/               Compiled binary + oxc-binding/ napi sidecar (gitignored; built via make)
+  rust-reachability/    Rust reachability plugin (cargo metadata + RustSec advisory fetch)
+    testdata/crates/    Hermetic Cargo fixture crates (integration tests)
+  python-reachability/  Python reachability plugin (ast-driven call graph; lockfile-static)
+    testdata/projects/  Python project fixtures with lockfiles (integration tests)
 pkg/contract/           Versioned gRPC plugin contract wrappers and helpers
   anstv1/               Generated protobuf/gRPC Go stubs (committed)
 proto/anst/v1/          Canonical plugin.proto source
@@ -101,25 +119,20 @@ testdata/
 
 ## Large repositories
 
-Both plugins are hardened for very large real-world repos. The npm plugin isolates the
-oxc parser in a child-process worker pool — a native parser crash on a dependency bundle
-degrades that file to an `UNKNOWN` boundary and respawns the worker instead of killing the
-scan — and collapses and memoizes the transitive-closure work so memory stays flat. The Go
-plugin recovers the x/tools method-set panic on generic-heavy code and falls back to sound
-import-level reachability. With telemetry (`ANST_DEBUG=1`) you can see per-phase timing.
-Reference scans: Renovate (~8.5k reachable files) and istio (~325 Go deps) both complete in
-well under two minutes.
+All plugins are hardened for very large real-world repos. The JS plugin isolates the oxc parser in a child-process worker pool — a native parser crash on a dependency bundle degrades that file to an `UNKNOWN` boundary and respawns the worker instead of killing the scan — and collapses and memoizes the transitive-closure work so memory stays flat. The Go plugin recovers the x/tools method-set panic on generic-heavy code and falls back to sound import-level reachability. The Python plugin uses a ProcessPool with file-size and long-line guards to safely sandbox AST parsing. With telemetry (`ANST_DEBUG=1`) you can see per-phase timing. Reference scans: Renovate (~8.5k reachable files), ripgrep (61 Rust crates), and istio (~325 Go deps) all complete in well under two minutes.
 
 ## Confidence tiers (all languages)
 
 | Confidence | Meaning | Gate-eligible? |
 |---|---|---|
-| `SYMBOL_REACHABLE` | Concrete call path found to the vulnerable symbol | Yes |
+| `SYMBOL_REACHABLE` | Concrete call path found to the vulnerable symbol (Go, JS, Python with `--symbols`) | Yes |
 | `PACKAGE_REACHABLE` | Vulnerable package imported and reachable; symbol unconfirmed | Yes |
 | `NOT_REACHABLE` | No call-graph path found (graph is complete) | No (suppressed) |
-| `UNKNOWN` | Reachability undetermined (dynamic code, eval, reflection, …) | Yes |
+| `UNKNOWN` | Reachability undetermined (dynamic code, incomplete analysis, reflection, build mismatch, …) | Yes |
 
-**`unknown ≠ safe`.** An `UNKNOWN` finding is always surfaced. Only `NOT_REACHABLE` findings may be suppressed by the policy gate.
+**Core invariant: `unknown ≠ safe`.** An `UNKNOWN` finding is always surfaced and always counts toward the gate (unless narrowed by `--gate-on` on Python non-runtime deps). Only `NOT_REACHABLE` findings may be suppressed by the policy gate.
+
+For dynamic languages (Python, etc.), `UNKNOWN` is common and correct — it means the tool completed its analysis but cannot prove reachability under dynamism. Exit 3 signals this incomplete-but-analyzed state; exit 0 always means "complete analysis + policy clean."
 
 ## JS plugin distribution
 

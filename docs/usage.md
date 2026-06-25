@@ -2,9 +2,9 @@
 
 ## Overview
 
-`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules and JavaScript/TypeScript packages. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to import-only scanners.
+`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules, JavaScript/TypeScript packages, Rust crates, and Python projects. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to install-only scanners.
 
-**Differentiator vs `govulncheck` / `npm audit`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. For Go, advisory symbol data comes from the same Go vulnerability database (`vuln.go.dev`), so symbol-level precision is equivalent; the differentiation is SARIF output, policy gating, and the plugin architecture. For JS/TS, the differentiator is package-level import-graph reachability (with Jelly symbol enrichment as fast-follow) versus `npm audit`'s install-only scope.
+**Differentiator vs `govulncheck` / `npm audit`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. For Go, advisory symbol data comes from the same Go vulnerability database (`vuln.go.dev`), so symbol-level precision is equivalent; the differentiation is SARIF output, policy gating, and multi-ecosystem support. For JS/TS, the differentiator is package-level import-graph reachability versus `npm audit`'s install-only scope. For Python, the differentiator is AST-driven call-graph analysis that works without code execution (lockfile-static), with positive-reachability-focused confidence tiers suited to dynamic languages. For Rust, anst-analyzer provides reachability checking where Cargo.audit and other tools offer only dependency-level scanning.
 
 ## Installation
 
@@ -20,7 +20,9 @@ Scans a project for reachable dependency vulnerabilities. The path defaults to t
 
 - **Go:** must contain `go.mod`
 - **JS/TS:** must contain `package.json` (npm, Yarn, or pnpm workspace)
-- **Polyglot:** both `go.mod` and `package.json` present — both plugins run and findings merge
+- **Rust:** must contain `Cargo.toml`
+- **Python:** must contain `pyproject.toml` or `requirements.txt`
+- **Polyglot:** any combination of the above — each detected ecosystem's plugin runs and findings merge
 
 **Pipeline:**
 1. Detect ecosystems at the project root (`--language` overrides auto-detect).
@@ -36,8 +38,10 @@ Scans a project for reachable dependency vulnerabilities. The path defaults to t
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--format` | `sarif` | Output format: `sarif`, `json`, or `table` |
-| `--language` | `auto` | Ecosystem: `auto`, `go`, or `js` |
+| `--language` | `auto` | Ecosystem: `auto`, `go`, `js`, `rust`, `python`, or `java`; `auto` detects and runs all present ecosystems |
+| `--symbols` | `false` | Resolve vulnerable-symbol data from advisory fix patches (network, cached) to enable symbol-level reachability; degrades to package-level when unavailable |
 | `--policy` | _(none)_ | Path to a YAML policy file |
+| `--gate-on` | _(none)_ | Confidence floor for gate failures: `reachable` (SYMBOL+PACKAGE only), `reachable+unknown` (gates UNKNOWN on runtime deps too), `all` (gate all non-NOT_REACHABLE findings). Overrides policy file if set. |
 | `--db-snapshot` | _(none)_ | Path to a pinned advisory snapshot directory (read-only; never fetched or mutated) |
 | `--offline` | `false` | Disable network access; use existing writable cache or `--db-snapshot` |
 | `--update` | `false` | Force re-fetch of advisory data even when the cached version is current |
@@ -65,17 +69,19 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 | Source token | Description |
 |---|---|
 | `go-vuln-db` | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
-| `osv` | OSV.dev offline bundle. For Go: `osv-vulnerabilities.storage.googleapis.com/Go/all.zip`. For npm/JS: `osv-vulnerabilities.storage.googleapis.com/npm/all.zip`. Package-level data for both ecosystems. |
+| `osv` | OSV.dev offline bundle. Multiple ecosystems: Go, npm/JS, Rust (crates.io), Python (PyPI). Package-level data. |
 
-**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For JS-only scans, `--source osv` is automatically used.
+**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For Rust-only or Python-only scans, `--source osv` is automatically used.
 
 **Honest coverage notes:**
-- For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto the existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and future non-Go ecosystem support.
+- For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and multi-ecosystem support.
 - For JS/TS, OSV.dev's npm bundle is the **only** supported advisory source. It is package-level (no symbol-level data). The JS plugin uses import-graph reachability to reduce install-scope noise.
+- For Rust, OSV.dev includes crates.io advisories plus RustSec advisory data (OSV curates RustSec feeds). Rust reachability is package-level (no static call graph available).
+- For Python, OSV.dev includes PyPI advisories. Python reachability is based on positive import-and-call-graph analysis (lockfile-static, no code execution required). Dynamic languages yield UNKNOWN by design when the app's importlib behavior cannot be statically determined.
 
 **Cache directories:**
 - Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
-- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/` (Go) and `$XDG_CACHE_HOME/anst-analyzer/osv/npm/` (npm) on Linux; same under `~/Library/Caches/anst-analyzer/osv/` on macOS.
+- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/`, `osv/npm/`, `osv/crates-io/`, `osv/PyPI/` on Linux; same structure under `~/Library/Caches/anst-analyzer/osv/` on macOS.
 
 #### Advisory DB Modes
 
@@ -96,6 +102,15 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 ```sh
 # Online mode (default): fetch from both sources on first run, use caches thereafter.
 anst-analyzer scan
+
+# Scan a Rust crate with symbol-level enrichment (if available).
+anst-analyzer scan /path/to/rust-crate --language rust --symbols
+
+# Scan a Python project; dep_type segmentation active by default (non-runtime deps don't gate).
+anst-analyzer scan /path/to/python-project --language python
+
+# Gate only on provably reachable findings; suppress UNKNOWN on non-runtime deps.
+anst-analyzer scan /path/to/python-project --gate-on reachable
 
 # Query only the Go vuln DB (skip OSV).
 anst-analyzer scan --source go-vuln-db
