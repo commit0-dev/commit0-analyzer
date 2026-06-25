@@ -39,6 +39,6 @@ func Span(name string) func() {
 	start := time.Now()
 	return func() {
 		ms := time.Since(start).Milliseconds()
-		fmt.Fprintf(out, "telemetry: phase=%s ms=%d\n", name, ms)
+		_, _ = fmt.Fprintf(out, "telemetry: phase=%s ms=%d\n", name, ms)
 	}
 }

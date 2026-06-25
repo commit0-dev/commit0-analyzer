@@ -71,7 +71,7 @@ func Extract(ctx context.Context, pluginBin, patch string, files []FileContent) 
 	// Build the request payload.
 	pfiles := make([]pluginFileContent, 0, len(files))
 	for _, f := range files {
-		pfiles = append(pfiles, pluginFileContent{Path: f.Path, Content: f.Content})
+		pfiles = append(pfiles, pluginFileContent(f))
 	}
 	req := pluginRequest{Patch: patch, Files: pfiles}
 

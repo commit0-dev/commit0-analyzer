@@ -135,12 +135,17 @@ func isPathSegment(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
-			(c >= 'A' && c <= 'Z') || c == '.' || c == '_' || c == '-') {
+		if !isPathSegmentChar(c) {
 			return false
 		}
 	}
 	return true
+}
+
+// isPathSegmentChar reports whether c is allowed in a GitHub owner/repo segment.
+func isPathSegmentChar(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') || c == '.' || c == '_' || c == '-'
 }
 
 // isHexSHA returns true when s is a lowercase or uppercase hex string of
@@ -150,11 +155,16 @@ func isHexSHA(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if !isHexChar(c) {
 			return false
 		}
 	}
 	return true
+}
+
+// isHexChar reports whether c is a hexadecimal digit (either case).
+func isHexChar(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 // FetchFix fetches the unified diff and changed source-file contents for the
