@@ -1,0 +1,8 @@
+{
+  "name": "pnpm-scoped-store",
+  "version": "1.0.0",
+  "dependencies": {
+    "@scope/pkg": "^1.0.0",
+    "@scope/peered": "^1.0.0"
+  }
+}

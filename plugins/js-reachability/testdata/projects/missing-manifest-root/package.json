@@ -1,0 +1,10 @@
+{
+  "name": "missing-manifest-root",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./index.js",
+  "dependencies": {
+    "vuln-pkg": "^2.0.0",
+    "dep-with-child": "^1.0.0"
+  }
+}

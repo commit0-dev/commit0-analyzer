@@ -1,0 +1,35 @@
+{
+  "name": "anst-js-reachability",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JS/TS SCA reachability plugin for anst-analyzer",
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/main.ts --compile --outfile dist/anst-js-reachability",
+    "generate": "npx ts-proto-gen",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "corpus:report": "npx tsx scripts/corpus-report.ts",
+    "jelly:crosscheck": "npx tsx scripts/jelly-crosscheck.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
+    "@grpc/grpc-js": "^1.12.0",
+    "@grpc/proto-loader": "^0.7.15",
+    "oxc-parser": "0.72.3",
+    "ts-morph": "24.0.0",
+    "yaml": "2.7.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "ts-proto": "^2.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true,
+    "protobufjs@7.6.4": true,
+    "fsevents@2.3.3": true
+  }
+}

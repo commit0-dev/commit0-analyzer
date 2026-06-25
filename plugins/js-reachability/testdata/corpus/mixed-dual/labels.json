@@ -1,0 +1,12 @@
+{
+  "comment": "Mixed/dual package — CJS entry imports vuln pkg. Coverage: module-system=mixed/dual, reachable=direct.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-mixed-dual",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["src/cjs-entry.cjs"]
+}

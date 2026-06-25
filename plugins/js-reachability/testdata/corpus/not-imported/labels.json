@@ -1,0 +1,12 @@
+{
+  "comment": "Installed but never imported — engine must return NOT_REACHABLE. Coverage: not-reachable=installed-never-imported.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-not-imported",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "NOT_REACHABLE"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

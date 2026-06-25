@@ -1,0 +1,11 @@
+{
+  "name": "hoisted-dynamic-pkg",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./index.js",
+  "dependencies": {
+    "dep-zero": "^1.0.0",
+    "dep-withdep": "^1.0.0",
+    "hoisted-vuln": "^1.0.0"
+  }
+}

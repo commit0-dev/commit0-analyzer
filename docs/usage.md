@@ -2,9 +2,9 @@
 
 ## Overview
 
-`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to import-only scanners.
+`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules and JavaScript/TypeScript packages. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to import-only scanners.
 
-**Differentiator vs `govulncheck`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. Advisory symbol data is sourced from the same Go vulnerability database, so symbol-level precision is equivalent; the differentiation is in output format, policy gating, and the plugin architecture.
+**Differentiator vs `govulncheck` / `npm audit`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. For Go, advisory symbol data comes from the same Go vulnerability database (`vuln.go.dev`), so symbol-level precision is equivalent; the differentiation is SARIF output, policy gating, and the plugin architecture. For JS/TS, the differentiator is package-level import-graph reachability (with Jelly symbol enrichment as fast-follow) versus `npm audit`'s install-only scope.
 
 ## Installation
 
@@ -16,30 +16,36 @@ go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
 
 ### `anst-analyzer scan [path]`
 
-Scans a Go module for reachable dependency vulnerabilities.
+Scans a project for reachable dependency vulnerabilities. The path defaults to the current directory. Supported project roots:
 
-`path` defaults to the current directory. It must contain a `go.mod` file.
+- **Go:** must contain `go.mod`
+- **JS/TS:** must contain `package.json` (npm, Yarn, or pnpm workspace)
+- **Polyglot:** both `go.mod` and `package.json` present — both plugins run and findings merge
 
 **Pipeline:**
-1. Resolve module dependencies via `go list -m -json all`.
-2. Query the advisory service (Go vuln DB snapshot) for each dependency.
-3. Build an `AnalyzeRequest` with advisory data and build config.
-4. Drive the `go-reachability` plugin through the host subprocess transport (go-plugin / gRPC over stdio).
-5. Render findings in the requested format.
-6. Evaluate the policy gate and exit with the appropriate code.
+1. Detect ecosystems at the project root (`--language` overrides auto-detect).
+2. Resolve dependencies per ecosystem (Go: `go list -m -json all`; JS: parse lockfile).
+3. Fetch advisories from enabled sources (Go vuln DB, OSV.dev npm bundle).
+4. Drive the appropriate plugins through the host subprocess transport (gRPC over stdio).
+5. Merge and sort findings deterministically.
+6. Render in the requested format.
+7. Evaluate the policy gate and exit with the appropriate code.
 
 #### Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--format` | `sarif` | Output format: `sarif`, `json`, or `table` |
+| `--language` | `auto` | Ecosystem: `auto`, `go`, or `js` |
 | `--policy` | _(none)_ | Path to a YAML policy file |
-| `--db-snapshot` | `$XDG_CACHE_HOME/anst-analyzer/vuln-db` | Path to a pinned advisory snapshot directory |
-| `--offline` | `false` | Disable network access; requires `--db-snapshot` |
+| `--db-snapshot` | _(none)_ | Path to a pinned advisory snapshot directory (read-only; never fetched or mutated) |
+| `--offline` | `false` | Disable network access; use existing writable cache or `--db-snapshot` |
+| `--update` | `false` | Force re-fetch of advisory data even when the cached version is current |
 | `--fail-on` | `high` | Minimum severity to fail: `low`, `medium`, `high`, `critical` |
-| `--goos` | _(host GOOS)_ | GOOS override for build config |
-| `--goarch` | _(host GOARCH)_ | GOARCH override for build config |
-| `--tags` | _(none)_ | Comma-separated build tags |
+| `--source` | `go-vuln-db,osv` | Comma-separated advisory sources: `go-vuln-db`, `osv` (see below) |
+| `--goos` | _(host GOOS)_ | GOOS override for Go build config |
+| `--goarch` | _(host GOARCH)_ | GOARCH override for Go build config |
+| `--tags` | _(none)_ | Comma-separated Go build tags |
 | `--plugin-binary` | _(auto-built)_ | Path to pre-built `go-reachability` plugin binary |
 
 #### Exit Codes
@@ -52,15 +58,61 @@ Scans a Go module for reachable dependency vulnerabilities.
 
 Code `2` is intentionally unused (reserved by Go's runtime panic exit and govulncheck).
 
+#### Advisory Sources
+
+`anst-analyzer` queries one or more advisory sources per scan. Use `--source` to select which sources are active:
+
+| Source token | Description |
+|---|---|
+| `go-vuln-db` | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
+| `osv` | OSV.dev offline bundle. For Go: `osv-vulnerabilities.storage.googleapis.com/Go/all.zip`. For npm/JS: `osv-vulnerabilities.storage.googleapis.com/npm/all.zip`. Package-level data for both ecosystems. |
+
+**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For JS-only scans, `--source osv` is automatically used.
+
+**Honest coverage notes:**
+- For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto the existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and future non-Go ecosystem support.
+- For JS/TS, OSV.dev's npm bundle is the **only** supported advisory source. It is package-level (no symbol-level data). The JS plugin uses import-graph reachability to reduce install-scope noise.
+
+**Cache directories:**
+- Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
+- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/` (Go) and `$XDG_CACHE_HOME/anst-analyzer/osv/npm/` (npm) on Linux; same under `~/Library/Caches/anst-analyzer/osv/` on macOS.
+
+#### Advisory DB Modes
+
+`anst-analyzer scan` operates in three distinct advisory-data modes:
+
+| Mode | Flags | Behaviour |
+|------|-------|-----------|
+| **Online** (default) | _(none)_ | Fetches advisories from both enabled sources into writable local caches. Only re-fetches when the upstream data is newer than the cached version. |
+| **Offline** | `--offline` | Reads existing caches; never contacts the network. If `--source` explicitly includes `osv` and the OSV cache is absent, the scan is marked **incomplete** (exit 3). |
+| **Pinned snapshot** | `--db-snapshot <dir>` | Pins the Go vuln DB to a pre-built snapshot directory (read-only, manifest-verified). OSV is silently skipped when its cache is absent (backward-compatible; use `--source go-vuln-db` to be explicit). |
+
+**First-run note:** The first `scan` without `--db-snapshot` downloads advisory data from `vuln.go.dev` and the OSV bundle. This adds network latency once per advisory-DB version update. Subsequent scans reuse the local caches.
+
+**Failure handling:** A fetch failure marks the scan **incomplete** (exit 3), never a silent pass. Secondary-source failures (e.g. OSV download error) warn to stderr and mark the scan incomplete but do **not** abort — the primary (Go vuln DB) findings still gate. A Go vuln DB failure with no usable cache exits 3.
+
 #### Examples
 
 ```sh
-# Scan current directory, emit SARIF, exit 1 if any HIGH+ finding is reachable.
+# Online mode (default): fetch from both sources on first run, use caches thereafter.
 anst-analyzer scan
 
-# Scan a specific module with a pinned offline snapshot.
+# Query only the Go vuln DB (skip OSV).
+anst-analyzer scan --source go-vuln-db
+
+# Force a re-fetch of all enabled sources even when caches are current.
+anst-analyzer scan --update
+
+# Offline mode: use existing local caches, no network access.
+anst-analyzer scan --offline
+
+# Offline with only Go vuln DB (OSV cache not needed).
+anst-analyzer scan --offline --source go-vuln-db
+
+# Pinned snapshot for reproducible CI (Go-DB read-only, never fetched).
 anst-analyzer scan /path/to/mymodule \
   --db-snapshot /path/to/vuln-db-snapshot \
+  --source go-vuln-db \
   --offline
 
 # JSON output, gate on CRITICAL only.
@@ -72,9 +124,11 @@ anst-analyzer scan --format table --policy policy.yaml
 # Offline determinism: two runs with same inputs produce byte-identical SARIF.
 GOPROXY=off anst-analyzer scan /path/to/module \
   --db-snapshot /pinned/snapshot \
+  --source go-vuln-db \
   --offline > run1.sarif
 GOPROXY=off anst-analyzer scan /path/to/module \
   --db-snapshot /pinned/snapshot \
+  --source go-vuln-db \
   --offline > run2.sarif
 diff run1.sarif run2.sarif   # must be empty
 ```
@@ -125,12 +179,10 @@ If the ratio exceeds 1.5× on your target, switch to RTA via `--algorithm rta` a
 
 ## Advisory Snapshot Management
 
-`anst-analyzer` uses a **fetch-and-cache-only** model. It never redistributes advisory data; offline mode uses your own pre-fetched cache.
+`anst-analyzer` uses a **fetch-and-cache-only** model. It fetches your own copy of the Go vulnerability database into a local cache; it never redistributes advisory data.
 
-```sh
-# Not yet implemented: use govulncheck's DB or fetch OSV JSON manually.
-# Pinned snapshot format: a directory of OSV JSON files + anst-snapshot-manifest.json
-# (generated by the cache layer when it fetches from vuln.go.dev).
-```
+**Default writable cache:** `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) or `$HOME/Library/Caches/anst-analyzer/vuln-db` (macOS).
 
-The snapshot manifest records a SHA-256 content digest. Two scans using the same snapshot directory produce byte-identical output (offline determinism contract).
+**Pinned snapshot format:** a directory of OSV JSON files plus `anst-snapshot-manifest.json` (generated by the cache layer when it fetches from `vuln.go.dev`). The manifest records a SHA-256 content digest and the `modified` timestamp from the DB at fetch time.
+
+Two scans using the same pinned snapshot directory produce byte-identical output (offline determinism contract).

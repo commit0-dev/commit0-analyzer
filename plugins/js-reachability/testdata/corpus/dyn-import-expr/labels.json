@@ -1,0 +1,12 @@
+{
+  "comment": "Dynamic import(expression) — engine cannot statically resolve the specifier → UNKNOWN. Coverage: unknown=dynamic-import-expression.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-dyn-import-expr",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "UNKNOWN"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

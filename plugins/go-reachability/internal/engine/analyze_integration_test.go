@@ -23,10 +23,38 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/tools/go/callgraph"
+	"golang.org/x/tools/go/ssa"
 
 	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
 	"github.com/ducthinh993/anst-analyzer/plugins/go-reachability/internal/engine"
 )
+
+// TestAnalyze_DegradesOnCallGraphPanic asserts that when the call-graph builder
+// panics — as x/tools ssautil does on some generic programs (ForEachElement on
+// an uninstantiated type parameter, observed on istio) — Analyze recovers and
+// falls back to sound import-level reachability instead of crashing the plugin.
+// An imported vulnerable package must be PACKAGE_REACHABLE, never a false
+// NOT_REACHABLE and never a process crash.
+func TestAnalyze_DegradesOnCallGraphPanic(t *testing.T) {
+	modRoot := fixtureDir(t, "direct-call") // imports vulnlib
+	req := &anstv1.AnalyzeRequest{
+		ModuleRoot: modRoot,
+		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+	}
+	panicBuilder := func(*ssa.Program, []*ssa.Function) (*callgraph.Graph, string, error) {
+		panic("ForEachElement called on type containing *types.TypeParam")
+	}
+
+	findings, err := engine.Analyze(context.Background(), req, panicBuilder)
+	require.NoError(t, err, "Analyze must recover the builder panic, not error or crash")
+	require.NotEmpty(t, findings)
+
+	f := findingForAdvisory(t, findings, "TEST-VULN-001")
+	assert.Equal(t, anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, f.GetConfidence(),
+		"an imported vulnerable package must be PACKAGE_REACHABLE under degrade, never NOT_REACHABLE")
+	assert.Equal(t, "degraded-import-level", f.GetProperties()["algorithm"])
+}
 
 // fixtureDir returns the absolute path to a fixture module directory.
 // It resolves relative to this test file's location.

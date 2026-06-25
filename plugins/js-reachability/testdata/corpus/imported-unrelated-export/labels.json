@@ -1,0 +1,14 @@
+{
+  "comment": "Imported but only an unrelated export is used (not the vuln symbol). Without symbol enrichment the engine cannot distinguish which export is called, so it conservatively returns PACKAGE_REACHABLE. This is intentional: once symbol-level advisories land this case splits into NOT_REACHABLE. Label reflects current engine capability, not a bug. Coverage: not-reachable=imported-unrelated-export (FP-suppression future).",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-imported-unrelated",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "symbolLevel": false,
+      "expectedTier": "PACKAGE_REACHABLE",
+      "note": "Conservative PACKAGE_REACHABLE until symbol enrichment — this is a known FP at manifest level, documented not suppressed."
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "dep-closure-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "pkg-a": "^1.0.0",
+    "pkg-e": "^3.0.0"
+  },
+  "devDependencies": {
+    "pkg-c": "^1.0.0"
+  }
+}

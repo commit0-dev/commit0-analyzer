@@ -1,0 +1,12 @@
+{
+  "comment": "Dynamic require(variable) — engine cannot statically resolve the specifier → UNKNOWN. Coverage: unknown=dynamic-require-variable.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-dyn-require-var",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "UNKNOWN"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

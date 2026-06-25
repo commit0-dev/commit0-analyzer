@@ -27,6 +27,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       proto: ${{ steps.filter.outputs.proto }}
+      js: ${{ steps.filter.outputs.js }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -47,6 +48,10 @@ jobs:
               - 'buf.yaml'
               - 'buf.gen.yaml'
               - 'pkg/contract/anstv1/**'
+              - '.github/workflows/ci.yml'
+            js:
+              - 'plugins/js-reachability/**'
+              - 'testdata/js/**'
               - '.github/workflows/ci.yml'
 
   proto:
@@ -107,11 +112,66 @@ jobs:
           version: latest
           args: --timeout=5m
 
+  js-test:
+    name: JS/TS Reachability Plugin — typecheck + corpus
+    needs: changes
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/js-reachability
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test (includes corpus harness)
+        # globalSetup rebuilds corpus node_modules/lockfiles from source — fresh-tree safe.
+        run: npx vitest run
+      - name: Jelly cross-check (informational, non-blocking)
+        # Runs Jelly on the corpus and emits a triage diff.
+        # Skip-with-warning if Jelly/network absent; always exits 0.
+        continue-on-error: true
+        run: npx tsx scripts/jelly-crosscheck.ts
+
+  js-e2e:
+    # Build the JS plugin binary and run Go E2E tests that require it.
+    # Runs on ubuntu-latest (linux-x64 napi sidecar); darwin-arm64 tests run
+    # locally via 'make build-js-plugin && go test ./internal/cli/... ./internal/host/...'.
+    # Full five-target sidecar cross-builds happen in the release CI matrix (not here).
+    name: JS E2E — Go host integration
+    needs: changes
+    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Build JS plugin (binary + napi sidecar)
+        # build-js-plugin installs npm deps, compiles via bun, and places the
+        # platform-appropriate napi sidecar in dist/oxc-binding/.
+        run: make build-js-plugin
+      - name: Run Go E2E tests (cli + host)
+        # Telemetry is disabled in-process: each test writes GOTELEMETRY=mode=off
+        # under its own TempDir HOME via disableGoTelemetry(). No env override needed.
+        run: go test ./internal/cli/... ./internal/host/...
+
   ci:
     # Single required status check. Passes when heavy jobs succeed OR are skipped
     # (docs-only changes), fails if any heavy job failed or was cancelled.
     name: CI
-    needs: [changes, proto, build-test]
+    needs: [changes, proto, build-test, js-test, js-e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -120,8 +180,10 @@ jobs:
           changes="${{ needs.changes.result }}"
           proto="${{ needs.proto.result }}"
           build="${{ needs.build-test.result }}"
-          echo "changes=$changes proto=$proto build-test=$build"
-          for r in "$changes" "$proto" "$build"; do
+          js="${{ needs.js-test.result }}"
+          jse2e="${{ needs.js-e2e.result }}"
+          echo "changes=$changes proto=$proto build-test=$build js-test=$js js-e2e=$jse2e"
+          for r in "$changes" "$proto" "$build" "$js" "$jse2e"; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
               echo "::error::a required CI job did not succeed"
               exit 1

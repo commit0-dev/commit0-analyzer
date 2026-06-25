@@ -1,0 +1,15 @@
+{
+  "name": "transitive-cross-pkg",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./index.js",
+  "dependencies": {
+    "dep-a": "^1.0.0",
+    "dep-b": "^1.0.0",
+    "dep-c": "^1.0.0",
+    "dep-e": "^1.0.0"
+  },
+  "devDependencies": {
+    "dep-dev": "^1.0.0"
+  }
+}

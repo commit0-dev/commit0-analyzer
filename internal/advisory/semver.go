@@ -29,7 +29,7 @@ func versionInRange(version string, r VersionRange) bool {
 		}
 	}
 
-	// Check upper bound (Fixed is exclusive).
+	// Check upper bound: Fixed is exclusive, LastAffected is inclusive.
 	if r.Fixed != "" {
 		fixed := canonical(r.Fixed)
 		if !semver.IsValid(fixed) {
@@ -37,6 +37,14 @@ func versionInRange(version string, r VersionRange) bool {
 		}
 		if semver.Compare(version, fixed) >= 0 {
 			return false // version >= fixed
+		}
+	} else if r.LastAffected != "" {
+		lastAffected := canonical(r.LastAffected)
+		if !semver.IsValid(lastAffected) {
+			return false
+		}
+		if semver.Compare(version, lastAffected) > 0 {
+			return false // version > last_affected
 		}
 	}
 

@@ -1,0 +1,10 @@
+{
+  "name": "resolve-fixtures",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "@scope/helper": "^1.0.0",
+    "exports-pkg": "^1.0.0"
+  }
+}

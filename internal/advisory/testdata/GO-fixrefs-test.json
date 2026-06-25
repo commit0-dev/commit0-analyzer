@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.3.1",
+  "id": "GO-FIXREFS-TEST",
+  "modified": "2024-06-01T00:00:00Z",
+  "published": "2024-01-15T00:00:00Z",
+  "aliases": ["CVE-2024-99999"],
+  "summary": "Test advisory for fix-reference extraction",
+  "details": "Used to verify that GitHub commit URLs are surfaced on Advisory.FixRefs regardless of reference type, while non-commit URLs are excluded.",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "github.com/example/fixrefpkg"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "2.0.0"}
+          ]
+        }
+      ],
+      "ecosystem_specific": {
+        "imports": []
+      }
+    }
+  ],
+  "references": [
+    {"type": "WEB",      "url": "https://example.com/blog/vuln-notice"},
+    {"type": "ADVISORY", "url": "https://pkg.go.dev/vuln/GO-FIXREFS-TEST"},
+    {"type": "WEB",      "url": "https://github.com/example/fixrefpkg/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {"type": "FIX",      "url": "https://github.com/example/fixrefpkg/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+    {"type": "FIX",      "url": "https://github.com/example/fixrefpkg/pull/42"}
+  ]
+}

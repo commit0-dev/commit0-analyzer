@@ -1,0 +1,9 @@
+{
+  "name": "@corpus-transitive-ws/lib",
+  "version": "1.0.0",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "dependencies": {
+    "serialize-javascript": "^3.0.0"
+  }
+}

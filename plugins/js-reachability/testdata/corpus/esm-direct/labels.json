@@ -1,0 +1,12 @@
+{
+  "comment": "ESM import — direct call into vuln pkg from entrypoint. Coverage: module-system=ESM, reachable=direct.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-esm-direct",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}

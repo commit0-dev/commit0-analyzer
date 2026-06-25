@@ -24,7 +24,7 @@ func loadFixture(t *testing.T, name string) []byte {
 func TestParseOSV_SymbolLevel(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
 
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GO-2024-0001", adv.ID)
@@ -53,7 +53,7 @@ func TestParseOSV_SymbolLevel(t *testing.T) {
 func TestParseOSV_PackageLevel(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0002.json")
 
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GO-2024-0002", adv.ID)
@@ -65,7 +65,7 @@ func TestParseOSV_PackageLevel(t *testing.T) {
 // affected range is matched.
 func TestVersionRangeFiltering_AffectedVersion(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	// v1.0.0 is in [0, 1.2.3) — should be affected.
@@ -76,7 +76,7 @@ func TestVersionRangeFiltering_AffectedVersion(t *testing.T) {
 // fixed boundary is NOT matched.
 func TestVersionRangeFiltering_FixedVersion(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	// v1.2.3 is the fixed version — should NOT be affected.
@@ -89,7 +89,7 @@ func TestVersionRangeFiltering_FixedVersion(t *testing.T) {
 // with a non-zero introduced boundary.
 func TestVersionRangeFiltering_IntroducedVersion(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0003.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	// v0.9.0 is before introduced — should NOT be affected.
@@ -115,26 +115,26 @@ func TestGoVulnDBClient_Query(t *testing.T) {
 	ctx := context.Background()
 
 	// Query for github.com/example/vulnpkg at v1.0.0 — expect GO-2024-0001.
-	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	advisories, err := client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advisories, 1)
 	assert.Equal(t, "GO-2024-0001", advisories[0].ID)
 	assert.True(t, advisories[0].SymbolLevel)
 
 	// Query for github.com/example/vulnpkg at fixed version — expect nothing.
-	advisories, err = client.Query(ctx, "github.com/example/vulnpkg", "v1.2.3")
+	advisories, err = client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.2.3")
 	require.NoError(t, err)
 	assert.Empty(t, advisories)
 
 	// Query for github.com/example/pkgonly at v1.0.0 — expect GO-2024-0002, package-level.
-	advisories, err = client.Query(ctx, "github.com/example/pkgonly", "v1.0.0")
+	advisories, err = client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/pkgonly"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advisories, 1)
 	assert.Equal(t, "GO-2024-0002", advisories[0].ID)
 	assert.False(t, advisories[0].SymbolLevel)
 
 	// Query for a module with no advisories.
-	advisories, err = client.Query(ctx, "github.com/example/safe", "v1.0.0")
+	advisories, err = client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/safe"}, "v1.0.0")
 	require.NoError(t, err)
 	assert.Empty(t, advisories)
 }
@@ -144,7 +144,7 @@ func TestGoVulnDBClient_Query(t *testing.T) {
 func TestParseOSV_WithdrawnTimestamp(t *testing.T) {
 	data := loadFixture(t, "GO-2025-3408.json")
 
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "GO-2025-3408", adv.ID)
@@ -171,7 +171,7 @@ func TestGoVulnDBClient_Query_WithdrawnExcluded(t *testing.T) {
 	client := &goVulnDBClient{dbDir: dbDir}
 	ctx := context.Background()
 
-	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	advisories, err := client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	assert.Empty(t, advisories,
 		"withdrawn advisory GO-2025-3408 must not appear in Query results")
@@ -196,16 +196,159 @@ func TestGoVulnDBClient_Query_NonWithdrawnStillReturned(t *testing.T) {
 
 	// v1.0.0 is in [0, 1.2.3) for GO-2024-0001 (active) and in [0, 2.0.0) for
 	// GO-2025-3408 (withdrawn). Only the non-withdrawn one must be returned.
-	advisories, err := client.Query(ctx, "github.com/example/vulnpkg", "v1.0.0")
+	advisories, err := client.Query(ctx, Package{Ecosystem: EcosystemGo, Name: "github.com/example/vulnpkg"}, "v1.0.0")
 	require.NoError(t, err)
 	require.Len(t, advisories, 1, "only the non-withdrawn advisory should be returned")
 	assert.Equal(t, "GO-2024-0001", advisories[0].ID)
 }
 
+// TestExtractVersionRanges_MultiPair verifies that an events array with multiple
+// introduced/fixed pairs produces one VersionRange per pair (none dropped).
+// OSV semantics: [{introduced:0},{fixed:1.2.0},{introduced:2.0.0},{fixed:2.1.0}]
+// → two disjoint ranges [0,1.2.0) and [2.0.0,2.1.0).
+func TestExtractVersionRanges_MultiPair(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "0"},
+		{Fixed: "1.2.0"},
+		{Introduced: "2.0.0"},
+		{Fixed: "2.1.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 2, "two disjoint ranges expected")
+	assert.Equal(t, VersionRange{Introduced: "", Fixed: "1.2.0"}, got[0])
+	assert.Equal(t, VersionRange{Introduced: "2.0.0", Fixed: "2.1.0"}, got[1])
+}
+
+// TestExtractVersionRanges_LastAffectedInclusive verifies that a last_affected event
+// closes the range with an inclusive upper bound.
+func TestExtractVersionRanges_LastAffectedInclusive(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "0"},
+		{LastAffected: "1.2.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 1)
+	assert.Equal(t, VersionRange{Introduced: "", LastAffected: "1.2.0"}, got[0])
+}
+
+// TestExtractVersionRanges_SinglePairUnchanged verifies that a simple single-pair
+// events list still produces exactly one VersionRange (regression guard).
+func TestExtractVersionRanges_SinglePairUnchanged(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "0"},
+		{Fixed: "1.5.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 1)
+	assert.Equal(t, VersionRange{Introduced: "", Fixed: "1.5.0"}, got[0])
+}
+
+// TestExtractVersionRanges_OpenEnded verifies that an introduced event with no
+// closing fixed/last_affected produces an open-ended range.
+func TestExtractVersionRanges_OpenEnded(t *testing.T) {
+	events := []osvEvent{
+		{Introduced: "1.0.0"},
+	}
+	got := extractVersionRanges(events)
+	require.Len(t, got, 1)
+	assert.Equal(t, VersionRange{Introduced: "1.0.0"}, got[0])
+}
+
+// TestAffectsVersion_MultiPair_Go verifies that Advisory.AffectsVersion correctly
+// handles two disjoint ranges for the Go ecosystem:
+//   - 1.1.0 is in [0, 1.2.0)        → affected
+//   - 1.5.0 is between the ranges    → NOT affected
+//   - 2.0.5 is in [2.0.0, 2.1.0)    → affected
+//   - 2.5.0 is past the upper range  → NOT affected
+func TestAffectsVersion_MultiPair_Go(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemGo,
+		VersionRanges: []VersionRange{
+			{Introduced: "", Fixed: "1.2.0"},
+			{Introduced: "2.0.0", Fixed: "2.1.0"},
+		},
+	}
+
+	assert.True(t, adv.AffectsVersion("v1.1.0"), "v1.1.0 in [0,1.2.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v1.5.0"), "v1.5.0 between ranges must NOT be affected")
+	assert.True(t, adv.AffectsVersion("v2.0.5"), "v2.0.5 in [2.0.0,2.1.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v2.5.0"), "v2.5.0 past upper range must NOT be affected")
+}
+
+// TestAffectsVersion_LastAffected_Go verifies inclusive upper bound semantics for the
+// Go ecosystem: last_affected version itself IS affected, one patch above is NOT.
+func TestAffectsVersion_LastAffected_Go(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemGo,
+		VersionRanges: []VersionRange{
+			{Introduced: "", LastAffected: "1.2.0"},
+		},
+	}
+
+	assert.True(t, adv.AffectsVersion("v1.2.0"), "v1.2.0 (last_affected) must be affected (inclusive)")
+	assert.False(t, adv.AffectsVersion("v1.2.1"), "v1.2.1 above last_affected must NOT be affected")
+	assert.True(t, adv.AffectsVersion("v1.0.0"), "v1.0.0 below last_affected must be affected")
+}
+
+// TestAffectsVersion_MultiPair_ParsedFromOSV verifies end-to-end parsing of a
+// multi-pair OSV JSON record for the Go ecosystem.
+func TestAffectsVersion_MultiPair_ParsedFromOSV(t *testing.T) {
+	// Synthesize an OSV record with two disjoint ranges in a single SEMVER block.
+	rawJSON := []byte(`{
+		"id": "TEST-MULTI-0001",
+		"affected": [{
+			"package": {"ecosystem": "Go", "name": "github.com/example/multipkg"},
+			"ranges": [{
+				"type": "SEMVER",
+				"events": [
+					{"introduced": "0"},
+					{"fixed": "1.2.0"},
+					{"introduced": "2.0.0"},
+					{"fixed": "2.1.0"}
+				]
+			}]
+		}]
+	}`)
+
+	adv, err := parseOSVRecord(rawJSON, EcosystemGo)
+	require.NoError(t, err)
+	require.Len(t, adv.VersionRanges, 2, "two disjoint ranges must be parsed")
+
+	assert.True(t, adv.AffectsVersion("v1.1.0"), "v1.1.0 in [0,1.2.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v1.5.0"), "v1.5.0 between ranges must NOT be affected")
+	assert.True(t, adv.AffectsVersion("v2.0.5"), "v2.0.5 in [2.0.0,2.1.0) must be affected")
+	assert.False(t, adv.AffectsVersion("v2.5.0"), "v2.5.0 past upper range must NOT be affected")
+}
+
+// TestAffectsVersion_LastAffected_ParsedFromOSV verifies end-to-end parsing of a
+// last_affected bound from OSV JSON for the Go ecosystem.
+func TestAffectsVersion_LastAffected_ParsedFromOSV(t *testing.T) {
+	rawJSON := []byte(`{
+		"id": "TEST-LASTAFFECTED-0001",
+		"affected": [{
+			"package": {"ecosystem": "Go", "name": "github.com/example/lastpkg"},
+			"ranges": [{
+				"type": "SEMVER",
+				"events": [
+					{"introduced": "0"},
+					{"last_affected": "1.2.0"}
+				]
+			}]
+		}]
+	}`)
+
+	adv, err := parseOSVRecord(rawJSON, EcosystemGo)
+	require.NoError(t, err)
+	require.Len(t, adv.VersionRanges, 1)
+
+	assert.True(t, adv.AffectsVersion("v1.2.0"), "v1.2.0 (last_affected inclusive) must be affected")
+	assert.False(t, adv.AffectsVersion("v1.2.1"), "v1.2.1 above last_affected must NOT be affected")
+}
+
 // TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
-	adv, err := parseOSVRecord(data)
+	adv, err := parseOSVRecord(data, EcosystemGo)
 	require.NoError(t, err)
 
 	proto := adv.ToProto()

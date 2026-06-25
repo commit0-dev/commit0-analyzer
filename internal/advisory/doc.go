@@ -5,7 +5,7 @@
 // The only advisory source in the MVP is the Go vulnerability database
 // (https://vuln.go.dev). It is the only public source that reliably carries
 // symbol-level data (specific vulnerable functions/methods), which is required
-// for CONFIDENCE_SYMBOL_REACHABLE findings in Phase 4.
+// for CONFIDENCE_SYMBOL_REACHABLE findings.
 //
 // Multi-source advisory resolution (OSV.dev, GHSA) is a roadmap item deferred
 // from the MVP. Those sources are package-level only; adding them increases CVE

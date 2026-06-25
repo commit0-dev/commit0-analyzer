@@ -1,0 +1,7 @@
+{
+  "name": "@pnpm-mv/app",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^4.16.6"
+  }
+}

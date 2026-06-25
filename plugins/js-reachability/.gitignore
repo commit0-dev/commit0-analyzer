@@ -1,0 +1,20 @@
+# Build output — compiled binary and sidecar placed here by bun build --compile
+dist/
+
+# TypeScript incremental compilation output (tsc --build)
+dist-ts/
+*.tsbuildinfo
+
+# npm dependencies — never committed
+node_modules/
+
+# Local test artifacts
+coverage/
+.nyc_output/
+
+# OS / editor noise
+.DS_Store
+*.pem
+
+# src/gen/ is deliberately NOT listed here — generated stubs are committed
+# (parity with Go's committed pkg/contract/anstv1/*.pb.go stubs).

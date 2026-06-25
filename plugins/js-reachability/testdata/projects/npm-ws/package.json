@@ -1,0 +1,11 @@
+{
+  "name": "npm-ws-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "dependencies": {
+    "semver": "^7.6.0"
+  }
+}

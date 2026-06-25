@@ -1,0 +1,12 @@
+{
+  "comment": "Transitive reachability: app -> local lib -> vuln pkg across workspaces. Coverage: reachable=transitive-workspace.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-transitive-ws",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "PACKAGE_REACHABLE"
+    }
+  ],
+  "entrypoints": ["packages/app/src/index.js"]
+}

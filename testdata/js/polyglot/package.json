@@ -1,0 +1,7 @@
+{
+  "name": "polyglot",
+  "version": "1.0.0",
+  "description": "Polyglot fixture with both go.mod and package.json for ecosystem detection testing.",
+  "main": "index.js",
+  "private": true
+}

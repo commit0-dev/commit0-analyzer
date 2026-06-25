@@ -1,0 +1,8 @@
+{
+  "name": "pnpm-peer-suffix-root",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "@scope/helper": "^1.0.0"
+  }
+}

@@ -19,7 +19,7 @@ import (
 //
 // The builder parameter is pluggable so callers (tests, runner) can select the
 // call-graph algorithm. Pass nil to use DefaultGraphBuilder (VTA on CHA base).
-func Analyze(ctx context.Context, req *anstv1.AnalyzeRequest, builder GraphBuilder) ([]*anstv1.Finding, error) {
+func Analyze(ctx context.Context, req *anstv1.AnalyzeRequest, builder GraphBuilder) (result []*anstv1.Finding, retErr error) {
 	if builder == nil {
 		builder = DefaultGraphBuilder
 	}
@@ -55,6 +55,23 @@ func Analyze(ctx context.Context, req *anstv1.AnalyzeRequest, builder GraphBuild
 		return allUnknown(req, goos, goarch, tags, AlgorithmVTA,
 			"packages.Load failed: "+err.Error()), nil
 	}
+
+	// Degrade-on-panic. The SSA / call-graph / reachability stages route through
+	// x/tools ssautil method-set enumeration, which raises an intentional panic
+	// on programs that use generics (ForEachElement on a type containing a
+	// *types.TypeParam — observed on istio; unfixable in x/tools v0.46.0, the
+	// latest release). Recover and fall back to import-level reachability rather
+	// than crash the whole plugin: a vulnerable package absent from the loaded
+	// import closure is genuinely unreachable (NOT_REACHABLE, sound), and an
+	// imported one is PACKAGE_REACHABLE (symbol-level precision unavailable).
+	// This keeps the analysis sound (never a false NOT_REACHABLE) and complete.
+	defer func() {
+		if r := recover(); r != nil {
+			result = degradedAnalysis(req, pkgs, goos, goarch, tags,
+				fmt.Sprintf("call-graph analysis unavailable (x/tools generics limitation): %v", r))
+			retErr = nil
+		}
+	}()
 
 	// Collect IllTyped packages for per-finding UNKNOWN promotion (Red Team Crit #4).
 	illTypedMods := collectIllTypedModules(pkgs)
@@ -212,6 +229,84 @@ func allUnknown(req *anstv1.AnalyzeRequest, goos, goarch string, tags []string, 
 		})
 	}
 	return findings
+}
+
+// degradedAnalysis is the sound fallback when the SSA / call-graph stages cannot
+// run (e.g. the x/tools generics method-set panic). It computes import-level
+// reachability directly from the loaded package set — no SSA — so it never
+// triggers the panic. Soundness: a vulnerable package absent from the loaded
+// import closure is genuinely unreachable (NOT_REACHABLE); an imported one is
+// PACKAGE_REACHABLE (the call graph that would refine it to symbol level is
+// unavailable). The "degraded-import-level" algorithm marks the trade-off.
+func degradedAnalysis(req *anstv1.AnalyzeRequest, pkgs []*packages.Package, goos, goarch string, tags []string, reason string) []*anstv1.Finding {
+	imported := loadedPackagePaths(pkgs)
+	props := map[string]string{
+		"goos":            goos,
+		"goarch":          goarch,
+		"algorithm":       "degraded-import-level",
+		"degraded_reason": reason,
+	}
+	if len(tags) > 0 {
+		props["tags"] = strings.Join(tags, ",")
+	}
+	var findings []*anstv1.Finding
+	for _, adv := range req.GetAdvisories() {
+		conf := anstv1.Confidence_CONFIDENCE_NOT_REACHABLE
+		if advisoryPackageImported(imported, adv) {
+			conf = anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+		}
+		findings = append(findings, &anstv1.Finding{
+			Advisory:   &anstv1.AdvisoryRef{Id: adv.GetId()},
+			Module:     adv.GetModule(),
+			Confidence: conf,
+			Properties: copyProps(props),
+		})
+	}
+	return findings
+}
+
+// loadedPackagePaths returns the import paths of every package in the loaded
+// closure. With NeedDeps the closure is the full transitive import graph, so a
+// path's presence means it is imported (directly or transitively).
+func loadedPackagePaths(pkgs []*packages.Package) map[string]struct{} {
+	paths := make(map[string]struct{})
+	packages.Visit(pkgs, func(p *packages.Package) bool {
+		if p.PkgPath != "" {
+			paths[p.PkgPath] = struct{}{}
+		}
+		return true
+	}, nil)
+	return paths
+}
+
+// advisoryPackageImported reports whether the advisory's vulnerable package(s)
+// or module appear in the loaded import closure.
+func advisoryPackageImported(imported map[string]struct{}, adv *anstv1.Advisory) bool {
+	for _, sym := range adv.GetSymbols() {
+		if pathImported(imported, sym.GetPackage()) {
+			return true
+		}
+	}
+	return pathImported(imported, adv.GetModule())
+}
+
+// pathImported reports whether target is imported, as an exact package path or
+// as a parent of an imported package path (a module path matches when any
+// package under it is imported). Empty target never matches.
+func pathImported(imported map[string]struct{}, target string) bool {
+	if target == "" {
+		return false
+	}
+	if _, ok := imported[target]; ok {
+		return true
+	}
+	prefix := target + "/"
+	for p := range imported {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectIllTypedModules walks loaded packages and returns module path → error

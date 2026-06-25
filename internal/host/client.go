@@ -55,11 +55,13 @@ type LaunchOptions struct {
 //     not read ANST_PLUGIN_MAGIC_COOKIE will be rejected before any RPC.
 //
 //   - Hash pinning: when m.SHA256 != "" and opts.SkipHashCheck == false,
-//     go-plugin's SecureConfig computes SHA-256 of the binary and compares it to
-//     the manifest value before exec; a mismatch aborts the launch. Note that in
-//     the default self-build flow the manifest hash is computed from the same
-//     artifact, so this only guards the TOCTOU window, not supply-chain integrity
-//     (see Manifest doc).
+//     VerifyHash is called first to check ALL artifacts (main binary and every
+//     AdditionalArtifacts entry such as the napi sidecar). go-plugin's
+//     SecureConfig then re-verifies the main binary immediately before exec.
+//     Together these close the TOCTOU window and ensure the sidecar is never
+//     skipped on the real launch path. Note that in the default self-build flow
+//     the manifest hash is computed from the same artifact, so this only guards
+//     the TOCTOU window, not supply-chain integrity (see Manifest doc).
 //
 //   - Protocol compatibility: MetadataResponse.ProtocolVersion is parsed and
 //     checked with contract.Compatible. A different MAJOR is always rejected;
@@ -70,6 +72,16 @@ type LaunchOptions struct {
 //     MetadataResponse passes the version check but is treated as broken or
 //     lying and is rejected. Version compat alone cannot prove liveness.
 func Launch(ctx context.Context, m *Manifest, opts LaunchOptions) (*PluginClient, error) {
+	// Verify ALL artifact hashes (main binary + every AdditionalArtifacts entry,
+	// e.g. the napi sidecar) before starting the subprocess. This ensures the
+	// sidecar check is never bypassed on the real launch path.
+	// SkipHashCheck and an empty SHA256 both skip this (test-only escape hatch).
+	if !opts.SkipHashCheck && m.SHA256 != "" {
+		if err := m.VerifyHash(); err != nil {
+			return nil, fmt.Errorf("launch %s: artifact integrity check failed: %w", m.Name, err)
+		}
+	}
+
 	// Build SecureConfig for binary hash pinning.
 	var secureConfig *goplugin.SecureConfig
 	if !opts.SkipHashCheck && m.SHA256 != "" {

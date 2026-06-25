@@ -1,0 +1,7 @@
+{
+  "name": "empty-pkg",
+  "version": "1.0.0",
+  "description": "Minimal JS fixture with no dependencies for scan smoke testing.",
+  "main": "index.js",
+  "private": true
+}

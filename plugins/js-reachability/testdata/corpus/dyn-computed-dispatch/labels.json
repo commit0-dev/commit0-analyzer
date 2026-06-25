@@ -1,0 +1,12 @@
+{
+  "comment": "Computed-member dispatch: the ONLY path to serialize-javascript is through handlers[name]() where the key is dynamic. The engine detects obj[expr]() as a dynamic-dispatch frontier and cannot statically resolve which handler is called, so the verdict must be UNKNOWN. Coverage: unknown=computed-member-dispatch.",
+  "advisories": [
+    {
+      "id": "GHSA-corpus-dyn-computed-dispatch",
+      "package": "serialize-javascript",
+      "version": "3.0.0",
+      "expectedTier": "UNKNOWN"
+    }
+  ],
+  "entrypoints": ["src/index.js"]
+}
