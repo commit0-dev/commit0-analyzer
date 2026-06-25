@@ -1,0 +1,19 @@
+[[package]]
+name = "requests"
+version = "2.31.0"
+category = "main"
+
+[[package]]
+name = "aiohttp"
+version = "3.9.1"
+category = "main"
+
+[[package]]
+name = "pytest"
+version = "7.4.0"
+category = "dev"
+
+[[package]]
+name = "black"
+version = "22.3.0"
+category = "dev"

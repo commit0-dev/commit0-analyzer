@@ -1,0 +1,23 @@
+[project]
+name = "myapp"
+version = "1.0.0"
+dependencies = [
+    "requests>=2.28",
+    "aiohttp>=3.8",
+]
+
+[project.optional-dependencies]
+cache = ["redis>=4.0"]
+docs = ["sphinx>=5.0"]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+]
+test = [
+    "pytest-cov>=3.0",
+]
+docs = [
+    "sphinx-rtd-theme>=1.0",
+]
