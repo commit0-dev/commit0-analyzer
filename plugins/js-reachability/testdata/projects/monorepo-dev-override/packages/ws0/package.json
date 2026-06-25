@@ -1,0 +1,7 @@
+{
+  "name": "@mdo/ws0",
+  "version": "1.0.0",
+  "devDependencies": {
+    "pkg-x": "^1.0.0"
+  }
+}
