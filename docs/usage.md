@@ -100,17 +100,19 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 #### Examples
 
 ```sh
-# Online mode (default): fetch from both sources on first run, use caches thereafter.
-anst-analyzer scan
+# Zero-config (default): point it at any project. anst auto-detects every
+# ecosystem present (Go, JS/TS, Rust, Python) and scans them all — no --language.
+anst-analyzer scan /path/to/project
 
-# Scan a Rust crate with symbol-level enrichment (if available).
-anst-analyzer scan /path/to/rust-crate --language rust --symbols
+# Symbol-level enrichment from advisory fix patches, where available.
+anst-analyzer scan /path/to/project --symbols
 
-# Scan a Python project; dep_type segmentation active by default (non-runtime deps don't gate).
-anst-analyzer scan /path/to/python-project --language python
-
-# Gate only on provably reachable findings; suppress UNKNOWN on non-runtime deps.
+# Python dep_type segmentation is on by default (non-runtime deps don't gate);
+# gate only on provably-reachable findings, suppressing UNKNOWN on non-runtime deps:
 anst-analyzer scan /path/to/python-project --gate-on reachable
+
+# Optional: narrow to a single ecosystem for speed (--language defaults to auto).
+anst-analyzer scan /path/to/rust-crate --language rust
 
 # Query only the Go vuln DB (skip OSV).
 anst-analyzer scan --source go-vuln-db

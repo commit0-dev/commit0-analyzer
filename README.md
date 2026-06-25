@@ -38,20 +38,17 @@ make lint             # golangci-lint run (falls back to go vet if not installed
 ```sh
 go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
 
-# Scan a Go module
-anst scan /path/to/go-module
+# That's the whole interface: point it at any project. anst auto-detects
+# every ecosystem present (Go, JS/TS, Rust, Python) and scans them all —
+# no language flag, the same as npm audit / trivy / osv-scanner.
+anst scan /path/to/project
 
-# Scan an npm workspace
-anst scan /path/to/npm-project --language js
-
-# Scan a Rust crate
-anst scan /path/to/rust-project --language rust
-
-# Scan a Python project
-anst scan /path/to/python-project --language python
-
-# Auto-detect: runs all detected ecosystems (Go, JS/TS, Rust, Python)
+# Polyglot monorepo? Every detected ecosystem is scanned in one run.
 anst scan /path/to/monorepo
+
+# Optional: narrow to one ecosystem for speed. --language defaults to auto;
+# you never need to pass it.
+anst scan /path/to/project --language rust
 ```
 
 ## Supported ecosystems
