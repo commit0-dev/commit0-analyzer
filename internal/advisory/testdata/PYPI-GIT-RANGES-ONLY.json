@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.7.3",
+  "id": "OSV-TEST-GIT-RANGES",
+  "modified": "2022-11-09T00:00:27Z",
+  "published": "2022-10-22T00:00:27Z",
+  "summary": "GIT-range-only advisory — Undecidable (not a version-falsifiable range)",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "testpillow"
+      },
+      "ranges": [
+        {
+          "type": "GIT",
+          "repo": "https://github.com/example/testpillow",
+          "events": [
+            {"introduced": "bb2016794f1f9bf9e4726727080e1beb789823fb"},
+            {"fixed": "f7363c1091c70356d92e56abfca6b65bef9e7b26"}
+          ]
+        }
+      ],
+      "versions": ["9.1.0", "9.1.1", "9.2.0"]
+    }
+  ]
+}

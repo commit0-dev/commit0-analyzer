@@ -160,6 +160,52 @@ func cmpInt(a, b int) int {
 	}
 }
 
+// npmVersionInRangeV is the tri-state variant of npmVersionInRange.
+//
+// Returns:
+//   - VersionAffected when version falls within the range.
+//   - VersionNotAffected when version is provably outside the range.
+//   - VersionUndecidable when the version or a bound cannot be parsed — the
+//     caller must treat this as "possibly affected" and flag incomplete=true.
+func npmVersionInRangeV(version string, r VersionRange) VersionVerdict {
+	qv, err := parseNPMVersion(version)
+	if err != nil {
+		return VersionUndecidable
+	}
+
+	// Lower bound: Introduced is inclusive.
+	if r.Introduced != "" && r.Introduced != "0" {
+		iv, err := parseNPMVersion(r.Introduced)
+		if err != nil {
+			return VersionUndecidable
+		}
+		if compareNPMVersions(qv, iv) < 0 {
+			return VersionNotAffected // version < introduced
+		}
+	}
+
+	// Upper bound: Fixed is exclusive, LastAffected is inclusive.
+	if r.Fixed != "" {
+		fv, err := parseNPMVersion(r.Fixed)
+		if err != nil {
+			return VersionUndecidable
+		}
+		if compareNPMVersions(qv, fv) >= 0 {
+			return VersionNotAffected // version >= fixed
+		}
+	} else if r.LastAffected != "" {
+		lv, err := parseNPMVersion(r.LastAffected)
+		if err != nil {
+			return VersionUndecidable
+		}
+		if compareNPMVersions(qv, lv) > 0 {
+			return VersionNotAffected // version > last_affected
+		}
+	}
+
+	return VersionAffected
+}
+
 // npmVersionInRange reports whether the given npm version string falls within the
 // OSV SEMVER range r, using node-semver comparison semantics.
 //
@@ -171,6 +217,9 @@ func cmpInt(a, b int) int {
 //
 // If either the query version or a bound cannot be parsed, the function returns
 // false conservatively (unknown → not matched → no false positive).
+//
+// Deprecated: prefer npmVersionInRangeV, which returns a tri-state verdict so
+// that parse errors are never silently treated as not-affected.
 func npmVersionInRange(version string, r VersionRange) bool {
 	qv, err := parseNPMVersion(version)
 	if err != nil {

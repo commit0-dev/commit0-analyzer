@@ -10,6 +10,19 @@ const EcosystemGo = "Go"
 // OSV schema value used by https://osv.dev (the npm/all.zip bundle).
 const EcosystemNPM = "npm"
 
+// EcosystemCratesIO is the canonical ecosystem tag for Rust crates, matching
+// the OSV schema value used by https://osv.dev (the crates.io/all.zip bundle)
+// and the RustSec advisory database.
+const EcosystemCratesIO = "crates.io"
+
+// EcosystemPyPI is the canonical ecosystem tag for Python packages, matching
+// the OSV schema value used by https://osv.dev (the PyPI/all.zip bundle).
+const EcosystemPyPI = "PyPI"
+
+// EcosystemMaven is the canonical ecosystem tag for Maven (Java/JVM) packages,
+// matching the OSV schema value used by https://osv.dev (the Maven/all.zip bundle).
+const EcosystemMaven = "Maven"
+
 // Package identifies a package within a specific language ecosystem.
 // It is the unit of identity passed to Source.Query so that a single source
 // implementation can serve multiple ecosystems or decline to handle ecosystems

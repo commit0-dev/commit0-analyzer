@@ -345,6 +345,466 @@ func TestAffectsVersion_LastAffected_ParsedFromOSV(t *testing.T) {
 	assert.False(t, adv.AffectsVersion("v1.2.1"), "v1.2.1 above last_affected must NOT be affected")
 }
 
+// ─── AffectsVersionV tri-state tests ─────────────────────────────────────────
+
+// TestAffectsVersionV_Go verifies that the tri-state comparator correctly
+// classifies Go versions: affected, not-affected, and undecidable (unparseable).
+func TestAffectsVersionV_Go(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemGo,
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "1.2.0"},
+		},
+	}
+
+	cases := []struct {
+		version string
+		want    VersionVerdict
+		label   string
+	}{
+		{"v1.1.0", VersionAffected, "v1.1.0 in [1.0.0,1.2.0) must be Affected"},
+		{"v1.2.0", VersionNotAffected, "v1.2.0 at Fixed must be NotAffected (exclusive upper)"},
+		{"v0.9.0", VersionNotAffected, "v0.9.0 below Introduced must be NotAffected"},
+		{"not-a-version", VersionUndecidable, "unparseable version must be Undecidable, NOT NotAffected"},
+		{"", VersionUndecidable, "empty version must be Undecidable, NOT NotAffected"},
+		{"1.1.0", VersionUndecidable, "missing v-prefix is unparseable for Go semver → Undecidable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			got := adv.AffectsVersionV(tc.version)
+			if got != tc.want {
+				t.Errorf("AffectsVersionV(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAffectsVersionV_NPM verifies tri-state comparator for the npm ecosystem.
+func TestAffectsVersionV_NPM(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemNPM,
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "1.5.0"},
+		},
+	}
+
+	cases := []struct {
+		version string
+		want    VersionVerdict
+		label   string
+	}{
+		{"1.2.0", VersionAffected, "1.2.0 in [1.0.0,1.5.0) must be Affected"},
+		{"1.5.0", VersionNotAffected, "1.5.0 at Fixed must be NotAffected (exclusive)"},
+		{"0.9.0", VersionNotAffected, "0.9.0 below Introduced must be NotAffected"},
+		{"not-a-version", VersionUndecidable, "unparseable npm version must be Undecidable"},
+		{"", VersionUndecidable, "empty npm version must be Undecidable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			got := adv.AffectsVersionV(tc.version)
+			if got != tc.want {
+				t.Errorf("AffectsVersionV(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAffectsVersionV_CratesIO verifies that crates.io uses Go-semver comparison
+// (SemVer 2.0.0) and that an unparseable version returns Undecidable.
+func TestAffectsVersionV_CratesIO(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemCratesIO,
+		VersionRanges: []VersionRange{
+			{Introduced: "0.1.0", Fixed: "0.2.0"},
+		},
+	}
+
+	cases := []struct {
+		version string
+		want    VersionVerdict
+		label   string
+	}{
+		{"v0.1.5", VersionAffected, "v0.1.5 in [0.1.0,0.2.0) must be Affected"},
+		{"v0.2.0", VersionNotAffected, "v0.2.0 at Fixed must be NotAffected"},
+		{"not-a-version", VersionUndecidable, "unparseable crates.io version must be Undecidable"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			got := adv.AffectsVersionV(tc.version)
+			if got != tc.want {
+				t.Errorf("AffectsVersionV(%q) = %v, want %v", tc.version, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAffectsVersionV_UnknownEcosystem verifies that an unrecognised ecosystem
+// always returns Undecidable (never NotAffected), even for a "valid" semver string.
+// This is critical: an unknown ecosystem must never silently drop an advisory.
+func TestAffectsVersionV_UnknownEcosystem(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: "UnknownEcosystem",
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "2.0.0"},
+		},
+	}
+
+	got := adv.AffectsVersionV("v1.5.0")
+	if got != VersionUndecidable {
+		t.Errorf("AffectsVersionV on unknown ecosystem got %v, want VersionUndecidable", got)
+	}
+}
+
+// TestAffectsVersionV_PyPI verifies PEP 440 routing in AffectsVersionV for PyPI advisories.
+// The PEP 440 comparator is now implemented in pep440.go; this test was previously a
+// placeholder guard (expecting Undecidable while unimplemented). It now verifies correct
+// PEP 440 semantics: parse errors → Undecidable; valid versions → Affected/NotAffected.
+func TestAffectsVersionV_PyPI_Undecidable(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemPyPI,
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "2.0.0"},
+		},
+	}
+
+	// PEP 440 is now implemented: 1.5.0 is inside [1.0.0, 2.0.0).
+	if got := adv.AffectsVersionV("1.5.0"); got != VersionAffected {
+		t.Errorf("AffectsVersionV on PyPI: 1.5.0 in [1.0.0,2.0.0) got %v, want VersionAffected", got)
+	}
+	// An unparseable version must still return Undecidable, never NotAffected.
+	if got := adv.AffectsVersionV(""); got != VersionUndecidable {
+		t.Errorf("AffectsVersionV on PyPI: empty version got %v, want VersionUndecidable", got)
+	}
+	if got := adv.AffectsVersionV("garbage"); got != VersionUndecidable {
+		t.Errorf("AffectsVersionV on PyPI: garbage version got %v, want VersionUndecidable", got)
+	}
+}
+
+// TestAffectsVersionV_Maven_Undecidable verifies that Maven (not yet implemented)
+// returns Undecidable rather than NotAffected.
+func TestAffectsVersionV_Maven_Undecidable(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem: EcosystemMaven,
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "2.0.0"},
+		},
+	}
+
+	got := adv.AffectsVersionV("1.5.0")
+	if got != VersionUndecidable {
+		t.Errorf("AffectsVersionV on Maven (unimplemented) got %v, want VersionUndecidable", got)
+	}
+}
+
+// TestAffectsVersionV_EmptyRanges verifies that an advisory with no version ranges
+// returns Undecidable (cannot prove not-affected with no range data).
+func TestAffectsVersionV_EmptyRanges(t *testing.T) {
+	adv := &Advisory{
+		Ecosystem:     EcosystemGo,
+		VersionRanges: nil,
+	}
+	got := adv.AffectsVersionV("v1.0.0")
+	if got != VersionUndecidable {
+		t.Errorf("AffectsVersionV with empty VersionRanges got %v, want VersionUndecidable", got)
+	}
+}
+
+// TestAffectsVersionV_GoNPMRegression verifies that AffectsVersionV and AffectsVersion
+// agree on matched + not-matched valid versions for Go and npm (no regression for existing
+// callers that still use the bool form).
+func TestAffectsVersionV_GoNPMRegression(t *testing.T) {
+	goAdv := &Advisory{
+		Ecosystem: EcosystemGo,
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "1.3.0"},
+		},
+	}
+	npmAdv := &Advisory{
+		Ecosystem: EcosystemNPM,
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "1.3.0"},
+		},
+	}
+
+	goHits := []string{"v1.0.0", "v1.1.0", "v1.2.9"}
+	goMiss := []string{"v1.3.0", "v0.9.9", "v2.0.0"}
+	npmHits := []string{"1.0.0", "1.1.0", "1.2.9"}
+	npmMiss := []string{"1.3.0", "0.9.9", "2.0.0"}
+
+	for _, v := range goHits {
+		if goAdv.AffectsVersionV(v) != VersionAffected {
+			t.Errorf("Go: AffectsVersionV(%q) should be Affected", v)
+		}
+		if !goAdv.AffectsVersion(v) {
+			t.Errorf("Go regression: AffectsVersion(%q) should be true", v)
+		}
+	}
+	for _, v := range goMiss {
+		if goAdv.AffectsVersionV(v) != VersionNotAffected {
+			t.Errorf("Go: AffectsVersionV(%q) should be NotAffected", v)
+		}
+		if goAdv.AffectsVersion(v) {
+			t.Errorf("Go regression: AffectsVersion(%q) should be false", v)
+		}
+	}
+	for _, v := range npmHits {
+		if npmAdv.AffectsVersionV(v) != VersionAffected {
+			t.Errorf("npm: AffectsVersionV(%q) should be Affected", v)
+		}
+	}
+	for _, v := range npmMiss {
+		if npmAdv.AffectsVersionV(v) != VersionNotAffected {
+			t.Errorf("npm: AffectsVersionV(%q) should be NotAffected", v)
+		}
+	}
+}
+
+// TestOSVLookup_UndecidableMarksIncomplete verifies that advisoryIndex.lookup
+// sets Incomplete=true on an advisory when AffectsVersionV returns Undecidable,
+// rather than silently dropping the advisory (which would be a false negative).
+func TestOSVLookup_UndecidableMarksIncomplete(t *testing.T) {
+	// Build an index with a single Go advisory in range [1.0.0, 2.0.0).
+	adv := Advisory{
+		ID:    "TEST-UNDECIDABLE-0001",
+		Module: "github.com/example/pkg",
+		VersionRanges: []VersionRange{
+			{Introduced: "1.0.0", Fixed: "2.0.0"},
+		},
+	}
+	idx := &advisoryIndex{
+		byName: map[string][]Advisory{
+			"github.com/example/pkg": {adv},
+		},
+	}
+
+	pkg := Package{Ecosystem: EcosystemGo, Name: "github.com/example/pkg"}
+
+	// Valid version in range: should be Affected, Incomplete=false.
+	results := idx.lookup(pkg, "v1.5.0", []string{"test-source"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for affected version, got %d", len(results))
+	}
+	if results[0].Incomplete {
+		t.Error("Affected advisory must NOT be marked Incomplete")
+	}
+
+	// Unparseable version: must appear in results with Incomplete=true (not dropped).
+	results = idx.lookup(pkg, "not-a-semver", []string{"test-source"})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for undecidable version (must not drop), got %d", len(results))
+	}
+	if !results[0].Incomplete {
+		t.Error("Undecidable advisory must be marked Incomplete=true")
+	}
+
+	// Version clearly outside range: should be dropped (only safe drop).
+	results = idx.lookup(pkg, "v3.0.0", []string{"test-source"})
+	if len(results) != 0 {
+		t.Errorf("NotAffected version should be dropped, got %d results", len(results))
+	}
+}
+
+// TestDirSourceQuery_UndecidableMarksIncomplete verifies that dirSource.query
+// marks an advisory Incomplete=true for an unparseable version rather than dropping it.
+func TestDirSourceQuery_UndecidableMarksIncomplete(t *testing.T) {
+	// Write a minimal OSV advisory to a temp dir.
+	dir := t.TempDir()
+	rawJSON := []byte(`{
+		"id": "GO-UNDECIDABLE-TEST-0001",
+		"affected": [{
+			"package": {"ecosystem": "Go", "name": "github.com/example/testpkg"},
+			"ranges": [{
+				"type": "SEMVER",
+				"events": [{"introduced": "0"}, {"fixed": "2.0.0"}]
+			}]
+		}]
+	}`)
+	err := os.WriteFile(filepath.Join(dir, "GO-UNDECIDABLE-TEST-0001.json"), rawJSON, 0600)
+	if err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	ds := &dirSource{dir: dir, sources: []string{"test-source"}}
+	pkg := Package{Ecosystem: EcosystemGo, Name: "github.com/example/testpkg"}
+
+	// Valid version in range.
+	results, err := ds.query(t.Context(), pkg, "v1.0.0")
+	if err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for affected version, got %d", len(results))
+	}
+	if results[0].Incomplete {
+		t.Error("Affected advisory must NOT be marked Incomplete")
+	}
+
+	// Unparseable version: must appear with Incomplete=true, not be dropped.
+	results, err = ds.query(t.Context(), pkg, "not-a-semver")
+	if err != nil {
+		t.Fatalf("query error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for undecidable version (must not drop), got %d", len(results))
+	}
+	if !results[0].Incomplete {
+		t.Error("Undecidable advisory must be marked Incomplete=true")
+	}
+}
+
+// ─── PyPI ECOSYSTEM range type regression (litellm false-positive fix) ───────
+
+// TestParseOSVRecord_PyPI_EcosystemRangeType is the regression test encoding the
+// mlflow/litellm false-positive bug: OSV PyPI records use range type "ECOSYSTEM"
+// (not "SEMVER"). Before the fix, ECOSYSTEM ranges were silently skipped, leaving
+// VersionRanges empty → AffectsVersionV returned VersionUndecidable → advisory
+// was kept with Incomplete=true for every queried version → 585 false positives.
+//
+// Contract after fix:
+//   - ECOSYSTEM-typed ranges MUST be parsed into VersionRanges.
+//   - A version above the fixed bound (e.g. mlflow 3.14.0 vs fixed 2.10.0) MUST
+//     return VersionNotAffected and MUST NOT appear in query results.
+//   - A version inside the range (e.g. mlflow 2.5.0) MUST return VersionAffected.
+func TestParseOSVRecord_PyPI_EcosystemRangeType(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "PYPI-MLFLOW-TEST.json")
+	adv, err := parseOSVRecord(data, EcosystemPyPI)
+	require.NoError(t, err)
+
+	// The ECOSYSTEM range [0, 2.10.0) must be parsed into VersionRanges.
+	require.NotEmpty(t, adv.VersionRanges,
+		"ECOSYSTEM-typed OSV ranges must be parsed into VersionRanges (was being silently skipped)")
+	assert.Equal(t, "mlflow", adv.Module)
+
+	// mlflow 3.14.0 is ABOVE fixed=2.10.0 → must be NotAffected (the false-positive case).
+	adv.Ecosystem = EcosystemPyPI
+	verdict := adv.AffectsVersionV(canonical("3.14.0")) // canonical → "v3.14.0"
+	assert.Equal(t, VersionNotAffected, verdict,
+		"mlflow 3.14.0 >= fixed 2.10.0: must be VersionNotAffected, not VersionUndecidable")
+
+	// mlflow 2.5.0 is inside [0, 2.10.0) → must be Affected (true positive must survive).
+	verdict = adv.AffectsVersionV(canonical("2.5.0"))
+	assert.Equal(t, VersionAffected, verdict,
+		"mlflow 2.5.0 in [0, 2.10.0): must be VersionAffected")
+
+	// mlflow 2.10.0 is at the fixed boundary (exclusive) → must be NotAffected.
+	verdict = adv.AffectsVersionV(canonical("2.10.0"))
+	assert.Equal(t, VersionNotAffected, verdict,
+		"mlflow 2.10.0 == fixed 2.10.0 (exclusive bound): must be VersionNotAffected")
+}
+
+// TestParseOSVRecord_PyPI_LastAffected verifies that an ECOSYSTEM range with
+// last_affected (inclusive upper bound) is also correctly parsed. The case:
+// GHSA-43c4-9qgj-x742, last_affected=2.14.1 — mlflow 3.14.0 must NOT match.
+func TestParseOSVRecord_PyPI_LastAffected(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "PYPI-LAST-AFFECTED-TEST.json")
+	adv, err := parseOSVRecord(data, EcosystemPyPI)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, adv.VersionRanges,
+		"ECOSYSTEM ranges with last_affected must be parsed")
+	assert.Equal(t, "2.14.1", adv.VersionRanges[0].LastAffected,
+		"last_affected value must be preserved in VersionRange")
+
+	adv.Ecosystem = EcosystemPyPI
+
+	// 3.14.0 > 2.14.1 (inclusive upper) → NotAffected.
+	verdict := adv.AffectsVersionV(canonical("3.14.0"))
+	assert.Equal(t, VersionNotAffected, verdict,
+		"mlflow 3.14.0 > last_affected 2.14.1: must be VersionNotAffected")
+
+	// 2.14.1 == last_affected (inclusive) → Affected.
+	verdict = adv.AffectsVersionV(canonical("2.14.1"))
+	assert.Equal(t, VersionAffected, verdict,
+		"mlflow 2.14.1 == last_affected 2.14.1 (inclusive): must be VersionAffected")
+
+	// 1.0.0 < last_affected → Affected.
+	verdict = adv.AffectsVersionV(canonical("1.0.0"))
+	assert.Equal(t, VersionAffected, verdict,
+		"mlflow 1.0.0 < last_affected 2.14.1: must be VersionAffected")
+}
+
+// TestDirSource_Query_PyPI_EcosystemRangeDrop verifies the full query path:
+// a PyPI advisory with ECOSYSTEM ranges must drop out-of-range versions
+// and return in-range versions, through dirSource.query.
+func TestDirSource_Query_PyPI_EcosystemRangeDrop(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-MLFLOW-TEST.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-MLFLOW-TEST.json"), data, 0o644))
+
+	ds := &dirSource{dir: dir, sources: []string{"test"}}
+	ctx := context.Background()
+	pkg := Package{Ecosystem: EcosystemPyPI, Name: "mlflow"}
+
+	// 3.14.0 is above fixed 2.10.0 → must NOT appear in results (the false-positive case).
+	results, err := ds.query(ctx, pkg, "3.14.0")
+	require.NoError(t, err)
+	assert.Empty(t, results,
+		"mlflow@3.14.0 must be dropped: it is above fixed=2.10.0 (was a false positive before fix)")
+
+	// 2.5.0 is inside [0, 2.10.0) → must appear as VersionAffected (true positive).
+	results, err = ds.query(ctx, pkg, "2.5.0")
+	require.NoError(t, err)
+	require.Len(t, results, 1,
+		"mlflow@2.5.0 must match: it is inside [0, 2.10.0)")
+	assert.False(t, results[0].Incomplete,
+		"true-positive result must not be marked Incomplete")
+
+	// 2.10.0 is the fixed boundary (exclusive) → must NOT appear.
+	results, err = ds.query(ctx, pkg, "2.10.0")
+	require.NoError(t, err)
+	assert.Empty(t, results,
+		"mlflow@2.10.0 must be dropped: it equals fixed=2.10.0 (exclusive bound)")
+}
+
+// TestParseOSVRecord_PyPI_Severity verifies that CVSS_V3 severity data from the
+// OSV severity[] array is parsed and stored on the Advisory.Severity field.
+// The fixture PYPI-MLFLOW-TEST.json carries a CVSS:3.1 score with base score 9.8
+// (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H) → maps to SeverityCritical.
+func TestParseOSVRecord_PyPI_Severity(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "PYPI-MLFLOW-TEST.json")
+	adv, err := parseOSVRecord(data, EcosystemPyPI)
+	require.NoError(t, err)
+
+	// CVSS base score 9.8 → Critical.
+	assert.Equal(t, SeverityCritical, adv.Severity,
+		"CVSS:3.1 score 9.8 must map to SeverityCritical")
+}
+
+// TestParseOSVRecord_PyPI_SeverityHigh verifies that a CVSS_V3 score in the High
+// band (7.0–8.9) maps to SeverityHigh. GHSA-43c4-9qgj-x742 has a score of 7.5
+// (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N).
+func TestParseOSVRecord_PyPI_SeverityHigh(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "PYPI-LAST-AFFECTED-TEST.json")
+	adv, err := parseOSVRecord(data, EcosystemPyPI)
+	require.NoError(t, err)
+
+	assert.Equal(t, SeverityHigh, adv.Severity,
+		"CVSS:3.1 score 7.5 must map to SeverityHigh")
+}
+
+// TestParseOSVRecord_NoSeverity verifies that an OSV record without a severity
+// array leaves Severity at SeverityUnspecified (the zero value).
+func TestParseOSVRecord_NoSeverity(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "GO-2024-0001.json") // has no severity[]
+	adv, err := parseOSVRecord(data, EcosystemGo)
+	require.NoError(t, err)
+
+	assert.Equal(t, SeverityUnspecified, adv.Severity,
+		"advisory without severity array must have SeverityUnspecified")
+}
+
 // TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
