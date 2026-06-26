@@ -65,6 +65,9 @@ type ecosystems struct {
 	hasJava   bool // pom.xml, build.gradle, or build.gradle.kts present
 	hasDotnet bool // packages.lock.json, packages.config, or *.csproj present
 	hasPhp    bool // composer.lock or composer.json present
+	hasRuby   bool // Gemfile.lock present
+	hasElixir bool // mix.lock or rebar.lock present
+	hasDart   bool // pubspec.lock or pubspec.yaml present
 }
 
 // detectEcosystems checks moduleRoot for the well-known manifest files of each
@@ -151,14 +154,20 @@ func resolveLanguage(lang string, e ecosystems) (ecosystems, error) {
 		return ecosystems{hasDotnet: true}, nil
 	case "php":
 		return ecosystems{hasPhp: true}, nil
+	case "ruby":
+		return ecosystems{hasRuby: true}, nil
+	case "elixir":
+		return ecosystems{hasElixir: true}, nil
+	case "dart":
+		return ecosystems{hasDart: true}, nil
 	default:
-		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java|dotnet|php", lang)
+		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java|dotnet|php|ruby|elixir|dart", lang)
 	}
 }
 
 // warnUnsupportedEcosystems writes a warning to w for every ecosystem in eco
 // that is detected (or explicitly selected via --language) but has no scan
-// path yet (rust, python, java, dotnet, php). It returns true when any such
+// path yet (rust, python, java, dotnet, php, ruby, elixir, dart). It returns true when any such
 // ecosystem is present, signalling that the caller must set incomplete=true.
 //
 // "unknown ≠ safe": a detected ecosystem with no scan path MUST surface as an
@@ -183,6 +192,9 @@ func warnUnsupportedEcosystems(eco ecosystems, w io.Writer) bool {
 		{eco.hasJava, "java"},
 		{eco.hasDotnet, "dotnet"},
 		{eco.hasPhp, "php"},
+		{eco.hasRuby, "ruby"},
+		{eco.hasElixir, "elixir"},
+		{eco.hasDart, "dart"},
 	}
 	incomplete := false
 	for _, u := range pending {
@@ -292,13 +304,14 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp {
+	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp && !eco.hasRuby && !eco.hasElixir && !eco.hasDart {
 		fmt.Fprintf(os.Stderr,
 			"anst-analyzer scan: %s contains no recognised ecosystem manifest "+
 				"(go.mod, package.json, Cargo.toml, pyproject.toml, requirements.txt, "+
 				"pom.xml, build.gradle, build.gradle.kts, "+
 				"packages.lock.json, packages.config, *.csproj, "+
-				"composer.lock, composer.json); nothing to scan\n",
+				"composer.lock, composer.json, Gemfile.lock, Gemfile, "+
+				"mix.lock, rebar.lock, pubspec.lock, pubspec.yaml); nothing to scan\n",
 			moduleRoot)
 		return policy.ExitOperationalError
 	}
@@ -1024,18 +1037,33 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			continue
 		}
 		if !complete {
-			// Phase-0 (no static parser yet) or parse error with no err value:
-			// degrade identically to warnUnsupportedEcosystems so the operator sees
-			// a clear coverage gap warning and the scan exits 3, not 0.
-			fmt.Fprintf(os.Stderr,
-				"warning: %s ecosystem detected but no %s scan path is available yet; "+
-					"%s deps were not checked for vulnerabilities; scan marked incomplete\n",
-				laneAAdapter.Language, laneAAdapter.Language, laneAAdapter.Language)
+			// An incomplete closure. Mark the scan incomplete (→ exit 3, never a
+			// false-clean exit 0) and split on whether we have anything to query.
 			incomplete = true
-			continue
+			if len(deps) == 0 {
+				// No usable closure: no static parser, an unrecognised lockfile, or a
+				// manifest with nothing statically resolvable. Nothing to query.
+				fmt.Fprintf(os.Stderr,
+					"warning: %s ecosystem detected but its dependency closure could not be "+
+						"resolved statically; %s deps were not checked for vulnerabilities; "+
+						"scan marked incomplete\n",
+					laneAAdapter.Language, laneAAdapter.Language)
+				continue
+			}
+			// Partial closure: declared/direct deps resolved, but the full transitive
+			// closure is unknown (e.g. Maven pom.xml or a .NET .csproj without running
+			// the build tool). Fall through to query OSV for the KNOWN deps — a match on
+			// a resolved dep is a sound PACKAGE_REACHABLE positive — while the scan stays
+			// incomplete so the unresolved portion never reads as a false-clean.
+			fmt.Fprintf(os.Stderr,
+				"warning: %s dependency closure is partial (declared/direct deps only; "+
+					"transitives unresolved without running the build tool); the known deps "+
+					"were checked but the scan is marked incomplete\n",
+				laneAAdapter.Language)
 		}
 
-		// complete=true: query OSV advisories for the resolved closure.
+		// Query OSV advisories for the resolved closure (full when complete=true,
+		// declared/direct-only when this is a partial closure that fell through above).
 		// OSV is the only source with coverage for Lane-A ecosystems; go-vuln-db covers
 		// only "Go" and returns (nil,nil) for all others.
 		if len(deps) > 0 && !selectedSources[advisory.SourceOSV] {

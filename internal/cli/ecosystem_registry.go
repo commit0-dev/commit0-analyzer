@@ -144,6 +144,12 @@ func laneAAdapterActive(lang string, eco ecosystems) bool {
 		return eco.hasDotnet
 	case "php":
 		return eco.hasPhp
+	case "ruby":
+		return eco.hasRuby
+	case "elixir":
+		return eco.hasElixir
+	case "dart":
+		return eco.hasDart
 	default:
 		return false
 	}
@@ -160,6 +166,12 @@ func setLaneAFlag(e *ecosystems, lang string) {
 		e.hasDotnet = true
 	case "php":
 		e.hasPhp = true
+	case "ruby":
+		e.hasRuby = true
+	case "elixir":
+		e.hasElixir = true
+	case "dart":
+		e.hasDart = true
 	}
 }
 
@@ -174,6 +186,12 @@ func clearLaneAFlag(e *ecosystems, lang string) {
 		e.hasDotnet = false
 	case "php":
 		e.hasPhp = false
+	case "ruby":
+		e.hasRuby = false
+	case "elixir":
+		e.hasElixir = false
+	case "dart":
+		e.hasDart = false
 	}
 }
 
