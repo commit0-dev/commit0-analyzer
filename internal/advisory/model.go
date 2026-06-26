@@ -160,17 +160,18 @@ const (
 
 // AffectsVersionV is the tri-state version of AffectsVersion.
 //
-// Routing is ecosystem-aware:
-//   - npm: uses node-semver semantics via npmVersionInRangeV.
-//   - Go: uses the Go-semver path via versionInRangeV (requires "v"-prefixed canonical form).
-//   - crates.io: uses Cargo SemVer semantics via cargoVersionInRangeV. Cargo versions
-//     never carry a "v" prefix, so the leading "v" added by canonical() is stripped here.
-//   - PyPI: uses PEP 440 semantics via pep440VersionInRangeV.
-//   - Unknown/unimplemented ecosystem: returns VersionUndecidable.
+// Routing is ecosystem-aware, delegating to the comparator registered for
+// a.Ecosystem via [RegisterComparator]. The built-in registrations cover Go,
+// npm, crates.io, and PyPI. New ecosystems register their comparator in their
+// own file's init() without editing this function.
+//
+// When no comparator is registered for a.Ecosystem, or when a comparator
+// returns VersionUndecidable, the caller must treat the advisory as "still
+// possibly affected" and emit a synthetic UNKNOWN finding + set incomplete=true.
 //
 // A parse error in any comparator returns VersionUndecidable, never
-// VersionNotAffected. The caller must treat Undecidable as "still possibly
-// affected" and emit a synthetic UNKNOWN finding + set incomplete=true.
+// VersionNotAffected. This ensures that an unparseable or unrouted version
+// does not silently drop an advisory host-side (which would be a false negative).
 func (a *Advisory) AffectsVersionV(version string) VersionVerdict {
 	if len(a.VersionRanges) == 0 {
 		// No ranges to check. Fall through to versions-list matching if available.
@@ -190,30 +191,16 @@ func (a *Advisory) AffectsVersionV(version string) VersionVerdict {
 		return VersionNotAffected
 	}
 
+	// Look up the ecosystem-specific comparator. An unregistered ecosystem is
+	// undecidable for every range — never silently not-affected.
+	cmp := lookupComparator(a.Ecosystem)
+	if cmp == nil {
+		return VersionUndecidable
+	}
+
 	hasUndecidable := false
 	for _, r := range a.VersionRanges {
-		var v VersionVerdict
-		switch a.Ecosystem {
-		case EcosystemNPM:
-			v = npmVersionInRangeV(version, r)
-		case EcosystemGo:
-			// Go semver requires the "v"-prefixed canonical form.
-			v = versionInRangeV(version, r)
-		case EcosystemCratesIO:
-			// Cargo versions never carry a "v" prefix. The call path (lookup /
-			// dirSource.query) applies canonical() before calling AffectsVersionV,
-			// which adds a leading "v". Strip it here so cargoVersionInRangeV
-			// receives the bare form it expects (e.g. "1.2.3" not "v1.2.3").
-			cargoVer := strings.TrimPrefix(version, "v")
-			v = cargoVersionInRangeV(cargoVer, r)
-		case EcosystemPyPI:
-			// PyPI uses PEP 440 semantics (ECOSYSTEM type in OSV, not SEMVER).
-			v = pep440VersionInRangeV(version, r)
-		default:
-			// Unknown ecosystem: cannot compare → undecidable for every range.
-			return VersionUndecidable
-		}
-		switch v {
+		switch v := cmp(version, r); v {
 		case VersionAffected:
 			return VersionAffected
 		case VersionUndecidable:

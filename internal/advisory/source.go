@@ -23,6 +23,26 @@ const EcosystemPyPI = "PyPI"
 // matching the OSV schema value used by https://osv.dev (the Maven/all.zip bundle).
 const EcosystemMaven = "Maven"
 
+// EcosystemNuGet is the canonical ecosystem tag for .NET/NuGet packages, matching
+// the OSV schema value used by https://osv.dev (the NuGet/all.zip bundle).
+const EcosystemNuGet = "NuGet"
+
+// EcosystemPackagist is the canonical ecosystem tag for PHP/Composer packages,
+// matching the OSV schema value used by https://osv.dev (the Packagist/all.zip bundle).
+const EcosystemPackagist = "Packagist"
+
+// EcosystemRubyGems is the canonical ecosystem tag for Ruby gems, matching the
+// OSV schema value used by https://osv.dev (the RubyGems/all.zip bundle).
+const EcosystemRubyGems = "RubyGems"
+
+// EcosystemHex is the canonical ecosystem tag for Elixir/Erlang packages on
+// Hex.pm, matching the OSV schema value used by https://osv.dev (the Hex/all.zip bundle).
+const EcosystemHex = "Hex"
+
+// EcosystemPub is the canonical ecosystem tag for Dart/Flutter packages on
+// pub.dev, matching the OSV schema value used by https://osv.dev (the Pub/all.zip bundle).
+const EcosystemPub = "Pub"
+
 // Package identifies a package within a specific language ecosystem.
 // It is the unit of identity passed to Source.Query so that a single source
 // implementation can serve multiple ecosystems or decline to handle ecosystems

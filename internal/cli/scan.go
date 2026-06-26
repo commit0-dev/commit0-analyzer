@@ -56,28 +56,73 @@ type scanFlags struct {
 //   - Rust:   Cargo.toml
 //   - Python: pyproject.toml OR requirements.txt
 //   - Java:   pom.xml OR build.gradle OR build.gradle.kts
+//   - .NET:   packages.lock.json OR packages.config OR *.csproj
 type ecosystems struct {
 	hasGo     bool // go.mod present
 	hasJS     bool // package.json present
 	hasRust   bool // Cargo.toml present
 	hasPython bool // pyproject.toml or requirements.txt present
 	hasJava   bool // pom.xml, build.gradle, or build.gradle.kts present
+	hasDotnet bool // packages.lock.json, packages.config, or *.csproj present
+	hasPhp    bool // composer.lock or composer.json present
 }
 
 // detectEcosystems checks moduleRoot for the well-known manifest files of each
 // supported ecosystem. It never errors; an absent file simply leaves the field
 // false (unknown ≠ safe: the caller decides what to do with an empty set).
+//
+// Plugin-backed ecosystems (Go, JS/TS, Rust, Python) are detected by hardcoded
+// manifest names here. Lane-A ecosystems (Java, .NET, and future additions) are
+// detected via the adapter registry in ecosystem_registry.go: their detect-file
+// names live in the adapter's DetectFiles field, not in this function. Adding a
+// new Lane-A ecosystem only requires registering its adapter — no edits to
+// detectEcosystems.
+//
+// DetectFiles entries that start with "*." are treated as suffix-glob patterns
+// (e.g., "*.csproj") and match any non-directory file in moduleRoot with that
+// extension. This avoids hardcoding project-specific filenames for ecosystems
+// where the manifest name varies per project (e.g., .NET SDK-style .csproj files).
 func detectEcosystems(moduleRoot string) ecosystems {
 	var e ecosystems
 	stat := func(name string) bool {
 		_, err := os.Stat(filepath.Join(moduleRoot, name))
 		return err == nil
 	}
+	// hasFileSuffix returns true when any non-directory file in moduleRoot ends
+	// with suffix (case-insensitive). Used for "*.ext" glob DetectFiles entries.
+	hasFileSuffix := func(suffix string) bool {
+		entries, err := os.ReadDir(moduleRoot)
+		if err != nil {
+			return false
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), strings.ToLower(suffix)) {
+				return true
+			}
+		}
+		return false
+	}
 	e.hasGo = stat("go.mod")
 	e.hasJS = stat("package.json")
 	e.hasRust = stat("Cargo.toml")
 	e.hasPython = stat("pyproject.toml") || stat("requirements.txt")
-	e.hasJava = stat("pom.xml") || stat("build.gradle") || stat("build.gradle.kts")
+	// Lane-A ecosystems: detection is driven by the adapter registry so that
+	// new ecosystems only need to update DetectFiles in ecosystem_registry.go.
+	// "*.ext" patterns are matched with hasFileSuffix; all others use stat.
+	for _, a := range LaneAAdapters() {
+		for _, f := range a.DetectFiles {
+			var matched bool
+			if strings.HasPrefix(f, "*.") {
+				matched = hasFileSuffix(f[1:]) // e.g., "*.csproj" → ".csproj"
+			} else {
+				matched = stat(f)
+			}
+			if matched {
+				setLaneAFlag(&e, a.Language)
+				break
+			}
+		}
+	}
 	return e
 }
 
@@ -102,8 +147,12 @@ func resolveLanguage(lang string, e ecosystems) (ecosystems, error) {
 		return ecosystems{hasPython: true}, nil
 	case "java":
 		return ecosystems{hasJava: true}, nil
+	case "dotnet":
+		return ecosystems{hasDotnet: true}, nil
+	case "php":
+		return ecosystems{hasPhp: true}, nil
 	default:
-		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java", lang)
+		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java|dotnet|php", lang)
 	}
 }
 
@@ -237,11 +286,13 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava {
+	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp {
 		fmt.Fprintf(os.Stderr,
 			"anst-analyzer scan: %s contains no recognised ecosystem manifest "+
 				"(go.mod, package.json, Cargo.toml, pyproject.toml, requirements.txt, "+
-				"pom.xml, build.gradle, build.gradle.kts); nothing to scan\n",
+				"pom.xml, build.gradle, build.gradle.kts, "+
+				"packages.lock.json, packages.config, *.csproj, "+
+				"composer.lock, composer.json); nothing to scan\n",
 			moduleRoot)
 		return policy.ExitOperationalError
 	}
@@ -916,19 +967,8 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 								severityByID[advs[i].ID] = advs[i].Severity
 							}
 							// Tag advisory with dep's classification for the gate.
-							// Conservative: if the same advisory is reported for multiple deps
-							// with different types, "runtime" wins (most restrictive).
-							if existing, ok := depTypeByAdvID[advs[i].ID]; !ok || existing != "runtime" {
-								dt := dep.DepType
-								if dt == "" {
-									dt = "runtime" // conservative default
-								}
-								if dt == "runtime" {
-									depTypeByAdvID[advs[i].ID] = "runtime"
-								} else if !ok {
-									depTypeByAdvID[advs[i].ID] = dt
-								}
-							}
+							// Conservative: "runtime" wins; empty dep-type is runtime (unknown ≠ safe).
+							mergeDepType(depTypeByAdvID, advs[i].ID, dep.DepType)
 						}
 					}
 				}
@@ -936,18 +976,213 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 	}
 
-	// ── 5e. Unsupported ecosystems (python when plugin absent, java, and rust
+	// ── 5e. Lane-A adapter registry — lockfile-static resolve and OSV query ──
+	//
+	// For each registered Lane-A adapter that is active in this scan (detected by
+	// the presence of its manifest files, or explicitly selected via --language),
+	// call ParseLockfile to obtain the resolved dependency closure, then query OSV
+	// advisories for each dep using the same OSV bundle infrastructure as the Go,
+	// npm, crates.io, and PyPI paths above.
+	//
+	// "unknown ≠ safe" invariants:
+	//   - ParseLockfile returning complete=false means the closure cannot be fully
+	//     determined (missing lockfile, parse error, or requires running a build
+	//     tool). The scan is marked incomplete; no OSV query is performed for that
+	//     ecosystem (a partial closure would produce false NOT_REACHABLE for the
+	//     missing portion).
+	//   - OSV is the only source with coverage for these ecosystems; when OSV is
+	//     not in the selected sources and deps were resolved, warn + mark incomplete.
+	//   - After this block, clear the Lane-A ecosystem flags from unsupportedEco so
+	//     warnUnsupportedEcosystems does not emit a duplicate warning for them.
+	//
+	// Lane-A findings are generated here (not by a plugin) because there is no
+	// reachability plugin for these ecosystems. OSV advisory matches are converted
+	// directly to PACKAGE_REACHABLE findings (max confidence for lockfile-static
+	// analysis — no call-graph data). Undecidable advisory matches (version parse
+	// error or unrecognised ecosystem) are converted to CONFIDENCE_UNKNOWN findings
+	// with Incomplete=true so the policy gate exits 3 (not 0, which would be a
+	// false-clean pass violating "unknown ≠ safe").
+	var laneAFindings []*anstv1.Finding
+	for _, laneAAdapter := range LaneAAdapters() {
+		if !laneAAdapterActive(laneAAdapter.Language, eco) {
+			continue
+		}
+
+		deps, complete, parseErr := laneAAdapter.ParseLockfile(moduleRoot)
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s lockfile parse failed: %v; "+
+					"%s deps were not checked for vulnerabilities; scan marked incomplete\n",
+				laneAAdapter.Language, parseErr, laneAAdapter.Language)
+			incomplete = true
+			continue
+		}
+		if !complete {
+			// Phase-0 (no static parser yet) or parse error with no err value:
+			// degrade identically to warnUnsupportedEcosystems so the operator sees
+			// a clear coverage gap warning and the scan exits 3, not 0.
+			fmt.Fprintf(os.Stderr,
+				"warning: %s ecosystem detected but no %s scan path is available yet; "+
+					"%s deps were not checked for vulnerabilities; scan marked incomplete\n",
+				laneAAdapter.Language, laneAAdapter.Language, laneAAdapter.Language)
+			incomplete = true
+			continue
+		}
+
+		// complete=true: query OSV advisories for the resolved closure.
+		// OSV is the only source with coverage for Lane-A ecosystems; go-vuln-db covers
+		// only "Go" and returns (nil,nil) for all others.
+		if len(deps) > 0 && !selectedSources[advisory.SourceOSV] {
+			fmt.Fprintf(os.Stderr,
+				"warning: %s deps found but no %s-capable advisory source is selected "+
+					"(osv.dev covers %s; go-vuln-db does not); "+
+					"%s packages were not checked for vulnerabilities; scan marked incomplete\n",
+				laneAAdapter.Language, laneAAdapter.Language, laneAAdapter.Ecosystem, laneAAdapter.Language)
+			incomplete = true
+		}
+
+		if len(deps) > 0 && selectedSources[advisory.SourceOSV] {
+			cacheDir, cacheErr := os.UserCacheDir()
+			if cacheErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				return policy.ExitOperationalError
+			}
+			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+
+			laneAOSV := advisory.NewOSVBundleSource(osvCacheDir)
+			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+				laneAOSV.BaseURL = override
+			}
+			laneAOSV.ForceUpdate = flags.update
+
+			addLaneAOSV := true
+			if !flags.offline && flags.dbSnapshot == "" {
+				if refreshErr := laneAOSV.Refresh(ctx, laneAAdapter.Ecosystem); refreshErr != nil {
+					fmt.Fprintf(os.Stderr,
+						"warning: OSV %s source refresh failed (%s): %v; scan marked incomplete\n",
+						laneAAdapter.Language, advisory.SourceOSV, refreshErr)
+					incomplete = true
+					addLaneAOSV = false
+				}
+			} else {
+				if !osvCacheDirExists(osvCacheDir, laneAAdapter.Ecosystem) {
+					if flags.sourceExplicit {
+						fmt.Fprintf(os.Stderr,
+							"warning: OSV %s cache not populated at %s (run without --offline to fetch); "+
+								"OSV %s source skipped, scan marked incomplete\n",
+							laneAAdapter.Language,
+							filepath.Join(osvCacheDir, laneAAdapter.Ecosystem),
+							laneAAdapter.Language)
+						incomplete = true
+					}
+					addLaneAOSV = false
+				}
+			}
+
+			if addLaneAOSV {
+				laneAMultiSrc := advisory.NewMultiSource(advisory.NamedSource{
+					Name: advisory.SourceOSV,
+					S:    laneAOSV,
+				})
+
+				for _, dep := range deps {
+					// Apply adapter-specific name normalization.
+					// Default (NormalizeName==nil) is identity: Maven coordinates are
+					// case-sensitive and OSV records preserve their case; do NOT lowercase.
+					// A future PyPI adapter would set NormalizeName=strings.ToLower.
+					normalizedName := dep.Name
+					if laneAAdapter.NormalizeName != nil {
+						normalizedName = laneAAdapter.NormalizeName(normalizedName)
+					}
+					pkg := advisory.Package{Ecosystem: laneAAdapter.Ecosystem, Name: normalizedName}
+					advs, queryErr := laneAMultiSrc.Query(ctx, pkg, dep.Version)
+
+					var srcIncomplete *advisory.SourcesIncompleteError
+					if queryErr != nil && errors.As(queryErr, &srcIncomplete) {
+						for i, name := range srcIncomplete.FailedSources {
+							fmt.Fprintf(os.Stderr,
+								"warning: advisory source %q failed for %s pkg %s@%s: %v\n",
+								name, laneAAdapter.Language, dep.Name, dep.Version, srcIncomplete.Errors[i])
+						}
+						incomplete = true
+					} else if queryErr != nil {
+						var staleWarn *advisory.StalenessWarningError
+						if errors.As(queryErr, &staleWarn) {
+							fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
+							advs = staleWarn.Advisories
+						} else {
+							fmt.Fprintf(os.Stderr,
+								"anst-analyzer scan: advisory query %s pkg %s@%s: %v\n",
+								laneAAdapter.Language, dep.Name, dep.Version, queryErr)
+							incomplete = true
+							continue
+						}
+					}
+
+					for i := range advs {
+						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
+						if advs[i].Incomplete {
+							incomplete = true
+						}
+						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						if advs[i].ID != "" {
+							sourcesByID[advs[i].ID] = advs[i].Sources
+							if advs[i].Severity != advisory.SeverityUnspecified {
+								severityByID[advs[i].ID] = advs[i].Severity
+							}
+							// Dep-type segmentation for the gate (same semantics as Python path):
+							// "runtime" wins; empty dep-type is treated as runtime (unknown ≠ safe).
+							mergeDepType(depTypeByAdvID, advs[i].ID, dep.DepType)
+						}
+
+						// Generate a Lane-A finding directly from the advisory match.
+						// No reachability plugin exists for these ecosystems; the host converts
+						// OSV advisory matches into PACKAGE_REACHABLE findings.
+						// Undecidable matches become CONFIDENCE_UNKNOWN + Incomplete=true so
+						// the policy gate correctly exits 3 rather than silently passing clean.
+						laneAConf := anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+						if advs[i].Incomplete {
+							laneAConf = anstv1.Confidence_CONFIDENCE_UNKNOWN
+						}
+						laneAFindings = append(laneAFindings, &anstv1.Finding{
+							Advisory: &anstv1.AdvisoryRef{
+								Id:      advs[i].ID,
+								Aliases: append([]string(nil), advs[i].Aliases...),
+							},
+							Module:     dep.Name,
+							Confidence: laneAConf,
+							Incomplete: advs[i].Incomplete,
+							Pillar:     "sca",
+							Language:   laneAAdapter.Language,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// ── 5f. Unsupported ecosystems (python when plugin absent, and rust
 	// when the rust plugin binary is absent) ──────────────────────────────────
 	//
 	// Warn and mark incomplete (→ exit 3) for every detected ecosystem that
 	// has no scan path (no advisory query, no plugin), mirroring the
 	// npm-no-capable-source guard above.
+	//
+	// Lane-A adapters that ran in step 5e (whether complete or incomplete) are
+	// removed from unsupportedEco before the call so warnUnsupportedEcosystems
+	// does not emit a duplicate warning for those ecosystems.
 	unsupportedEco := eco // copy; reduce below as plugins are confirmed
 	if rustManifest != nil {
 		unsupportedEco.hasRust = false // Rust plugin binary is available
 	}
 	if pythonManifest != nil {
 		unsupportedEco.hasPython = false // Python plugin binary is available
+	}
+	// Clear Lane-A ecosystems: they were handled by the registry loop above.
+	for _, laneAAdapter := range LaneAAdapters() {
+		if laneAAdapterActive(laneAAdapter.Language, eco) {
+			clearLaneAFlag(&unsupportedEco, laneAAdapter.Language)
+		}
 	}
 	if warnUnsupportedEcosystems(unsupportedEco, os.Stderr) {
 		incomplete = true
@@ -1083,6 +1318,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 		findings = append(findings, pr.Findings...)
 	}
+	// Merge Lane-A findings generated in step 5e. These were produced directly
+	// from OSV advisory matches without a plugin; stampAdvisorySeverity,
+	// stampDepType, and stampSources apply equally to them because severityByID,
+	// depTypeByAdvID, and sourcesByID were all populated during step 5e.
+	findings = append(findings, laneAFindings...)
 	// Check whether any finding carries the synthetic partiality marker.
 	// This covers plugins that ran to completion but detected their own analysis gap.
 	if hasPartialityMarker(findings) {

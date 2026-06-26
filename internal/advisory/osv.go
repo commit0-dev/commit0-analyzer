@@ -25,6 +25,30 @@ const SourceOSV = "osv.dev"
 // Reference: https://google.github.io/osv-scanner/usage/offline-mode/
 const osvDefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
+// OSVBundleEcosystems lists every ecosystem whose advisory bundle is available
+// at the OSV GCS bucket (<osvDefaultBaseURL>/<ecosystem>/all.zip).
+//
+// These are the ecosystem names accepted by OSVBundleSource.Refresh — passing
+// any of these values to Refresh will download and extract the corresponding
+// bundle from osv.dev. The names match the "ecosystem" field in OSV JSON records
+// and are therefore also correct for Package.Ecosystem when calling Query.
+//
+// Each entry corresponds to an EcosystemXxx constant declared in source.go so
+// callers do not use raw strings. When a new ecosystem is added to osv.dev,
+// add its constant to source.go and append it here.
+var OSVBundleEcosystems = []string{
+	EcosystemGo,
+	EcosystemNPM,
+	EcosystemCratesIO,
+	EcosystemPyPI,
+	EcosystemMaven,
+	EcosystemNuGet,
+	EcosystemPackagist,
+	EcosystemRubyGems,
+	EcosystemHex,
+	EcosystemPub,
+}
+
 // Zip-bomb guards. These apply per-file, per-entry-count, and in aggregate
 // across the entire extracted bundle. Bundle sizes vary widely by ecosystem:
 // the Go bundle is ~20 MiB, but the npm bundle is ~333 MiB uncompressed across
