@@ -77,7 +77,7 @@ group:missing-version:=compileClasspath
 empty=
 `
 
-// minimal pom.xml with runtime and test scopes
+// minimal pom.xml with runtime and test scopes — all versions are concrete literals.
 const pomXMLWithDeps = `<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -104,6 +104,88 @@ const pomXMLWithDeps = `<?xml version="1.0" encoding="UTF-8"?>
             <artifactId>jackson-databind</artifactId>
             <version>2.14.2</version>
             <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+</project>
+`
+
+// pom.xml that mixes a property-ref version (undecidable) with a literal version.
+const pomXMLWithPropertyRef = `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>1.0.0</version>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+            <version>${spring.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.14.2</version>
+        </dependency>
+    </dependencies>
+</project>
+`
+
+// pom.xml with no <dependencies> section at all.
+const pomXMLNoDeps = `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>1.0.0</version>
+</project>
+`
+
+// pom.xml with optional=true and provided scope — both map to "dev".
+const pomXMLWithOptional = `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>1.0.0</version>
+    <dependencies>
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>optional-lib</artifactId>
+            <version>1.0.0</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>provided-lib</artifactId>
+            <version>2.0.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>runtime-lib</artifactId>
+            <version>3.0.0</version>
+        </dependency>
+    </dependencies>
+</project>
+`
+
+// pom.xml that resolves a missing version from <dependencyManagement>.
+const pomXMLWithDependencyManagement = `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>1.0.0</version>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-core</artifactId>
+                <version>5.3.27</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
         </dependency>
     </dependencies>
 </project>
@@ -298,16 +380,17 @@ func TestMavenAdapter_GradleLockfile_NoSubprocess(t *testing.T) {
 
 // ── pom.xml-only fallback (no gradle.lockfile) ────────────────────────────────
 
-// TestMavenAdapter_PomOnly_ReturnsIncomplete verifies that when only pom.xml is
-// present (no gradle.lockfile), the adapter returns complete=false. The pom.xml
-// only carries declared direct dependencies; the full transitive Maven closure
-// requires running `mvn help:effective-pom` (ACE risk) — so we cannot provide a
-// complete closure and must signal incomplete=true to the caller.
+// TestMavenAdapter_PomXML_AllLiteralVersions verifies that when only pom.xml is
+// present (no gradle.lockfile) and ALL direct dependency versions are concrete
+// literals, the adapter returns the declared deps with complete=false.
 //
-// The LaneAAdapter contract requires nil deps when complete=false (NEVER return a
-// partial closure with complete=false — that would produce false NOT_REACHABLE for
-// the missing transitive portion).
-func TestMavenAdapter_PomOnly_ReturnsIncomplete(t *testing.T) {
+// complete is ALWAYS false for the pom.xml path: pom.xml covers only DIRECT
+// declared deps; the full TRANSITIVE closure requires `mvn help:effective-pom`
+// (ACE risk on untrusted repos). A project vulnerable only through a transitive
+// dep would otherwise produce zero findings and exit 0 — a silent false-clean.
+// complete=false ensures the caller marks the scan incomplete (exit 3) so a
+// clean direct-dep pom.xml scan never passes as safe. "unknown ≠ safe".
+func TestMavenAdapter_PomXML_AllLiteralVersions(t *testing.T) {
 	adapter := findMavenAdapter(t)
 	require.NotNil(t, adapter, "real Maven adapter must be registered")
 
@@ -317,10 +400,179 @@ func TestMavenAdapter_PomOnly_ReturnsIncomplete(t *testing.T) {
 	deps, complete, err := adapter.ParseLockfile(dir)
 	require.NoError(t, err, "pom.xml-only parse must not error")
 	assert.False(t, complete,
-		"pom.xml-only → complete=false (transitive closure requires running mvn; ACE risk)")
-	assert.Nil(t, deps,
-		"LaneAAdapter contract: NEVER return a partial closure with complete=false; "+
-			"a partial dep list would produce false NOT_REACHABLE for missing transitives")
+		"pom.xml path → complete=ALWAYS false (direct deps only; transitives unknown; "+
+			"a transitive-only vuln must not silently exit 0)")
+	require.Len(t, deps, 3, "pomXMLWithDeps has 3 direct deps")
+
+	byName := map[string]ResolvedDep{}
+	for _, d := range deps {
+		byName[d.Name] = d
+	}
+
+	spring := byName["org.springframework:spring-core"]
+	assert.Equal(t, "5.3.27", spring.Version)
+	assert.Equal(t, "runtime", spring.DepType, "no scope → default compile → runtime")
+
+	junit := byName["junit:junit"]
+	assert.Equal(t, "4.13.2", junit.Version)
+	assert.Equal(t, "dev", junit.DepType, "scope=test → dev")
+
+	jackson := byName["com.fasterxml.jackson.core:jackson-databind"]
+	assert.Equal(t, "2.14.2", jackson.Version)
+	assert.Equal(t, "runtime", jackson.DepType, "scope=runtime → runtime")
+}
+
+// TestMavenAdapter_PomXML_NoDeps_ReturnsIncomplete verifies that a pom.xml with
+// no <dependencies> section returns complete=false with nil deps. Without declared
+// deps we cannot know whether the project truly has none (parent POM may add deps),
+// so we degrade to incomplete rather than claiming a clean zero-dep closure.
+func TestMavenAdapter_PomXML_NoDeps_ReturnsIncomplete(t *testing.T) {
+	adapter := findMavenAdapter(t)
+	require.NotNil(t, adapter, "real Maven adapter must be registered")
+
+	dir := t.TempDir()
+	writeLockfile(t, dir, "pom.xml", pomXMLNoDeps)
+
+	deps, complete, err := adapter.ParseLockfile(dir)
+	require.NoError(t, err, "pom.xml with no deps must not error")
+	assert.False(t, complete,
+		"pom.xml with no <dependencies> → complete=false (parent POM may add transitives)")
+	assert.Nil(t, deps)
+}
+
+// TestMavenAdapter_PomXML_PropertyRef_Incomplete verifies that a pom.xml whose
+// deps include a property-reference version (${...}) is skipped and the closure
+// is marked incomplete. The literal-version dep is still returned (not dropped),
+// but complete=false signals the caller that some deps could not be resolved.
+//
+// "unknown ≠ safe": a dep with an undecidable version might be vulnerable; the
+// caller must set incomplete=true rather than silently treating it as safe.
+func TestMavenAdapter_PomXML_PropertyRef_Incomplete(t *testing.T) {
+	adapter := findMavenAdapter(t)
+	require.NotNil(t, adapter, "real Maven adapter must be registered")
+
+	dir := t.TempDir()
+	writeLockfile(t, dir, "pom.xml", pomXMLWithPropertyRef)
+
+	deps, complete, err := adapter.ParseLockfile(dir)
+	require.NoError(t, err, "pom.xml with property ref must not error")
+	assert.False(t, complete,
+		"pom.xml with ${...} version → complete=false (property ref is undecidable without mvn)")
+	// The literal-version dep (jackson-databind) must still be returned.
+	require.Len(t, deps, 1, "only the literal-version dep must be returned; property-ref dep skipped")
+	assert.Equal(t, "com.fasterxml.jackson.core:jackson-databind", deps[0].Name)
+	assert.Equal(t, "2.14.2", deps[0].Version)
+}
+
+// TestMavenAdapter_PomXML_Optional_DepType verifies that <optional>true</optional>
+// deps and <scope>provided</scope> deps are classified as "dev", not "runtime".
+func TestMavenAdapter_PomXML_Optional_DepType(t *testing.T) {
+	adapter := findMavenAdapter(t)
+	require.NotNil(t, adapter, "real Maven adapter must be registered")
+
+	dir := t.TempDir()
+	writeLockfile(t, dir, "pom.xml", pomXMLWithOptional)
+
+	deps, complete, err := adapter.ParseLockfile(dir)
+	require.NoError(t, err)
+	assert.False(t, complete,
+		"pom.xml path → complete=ALWAYS false (direct deps only; transitives unknown)")
+	require.Len(t, deps, 3)
+
+	byName := map[string]ResolvedDep{}
+	for _, d := range deps {
+		byName[d.Name] = d
+	}
+
+	opt := byName["com.example:optional-lib"]
+	assert.Equal(t, "dev", opt.DepType,
+		"<optional>true</optional> → DepType must be 'dev'")
+
+	prov := byName["com.example:provided-lib"]
+	assert.Equal(t, "dev", prov.DepType,
+		"<scope>provided</scope> → DepType must be 'dev'")
+
+	rt := byName["com.example:runtime-lib"]
+	assert.Equal(t, "runtime", rt.DepType,
+		"no scope, not optional → DepType must be 'runtime'")
+}
+
+// TestMavenAdapter_PomXML_DependencyManagement_VersionResolution verifies that
+// a dep in <dependencies> with no explicit <version> is resolved via
+// <dependencyManagement>. If the version in dependencyManagement is a literal,
+// the dep is emitted; if it is a property ref or absent, the dep is skipped.
+func TestMavenAdapter_PomXML_DependencyManagement_VersionResolution(t *testing.T) {
+	adapter := findMavenAdapter(t)
+	require.NotNil(t, adapter, "real Maven adapter must be registered")
+
+	dir := t.TempDir()
+	writeLockfile(t, dir, "pom.xml", pomXMLWithDependencyManagement)
+
+	deps, complete, err := adapter.ParseLockfile(dir)
+	require.NoError(t, err)
+	assert.False(t, complete,
+		"pom.xml path → complete=ALWAYS false (direct deps only; transitives unknown)")
+	require.Len(t, deps, 1, "one dep resolved via dependencyManagement")
+	assert.Equal(t, "org.springframework:spring-core", deps[0].Name)
+	assert.Equal(t, "5.3.27", deps[0].Version)
+}
+
+// TestParsePomXML_DirectFunc tests the parsePomXML function directly,
+// independent of the adapter registration machinery.
+func TestParsePomXML_DirectFunc(t *testing.T) {
+	dir := t.TempDir()
+	writeLockfile(t, dir, "pom.xml", pomXMLWithDeps)
+
+	deps, complete, err := parsePomXML(dir)
+	require.NoError(t, err)
+	assert.False(t, complete,
+		"parsePomXML NEVER returns complete=true (direct deps only; transitives unknown)")
+	require.Len(t, deps, 3)
+}
+
+// TestParsePomXML_DirectDepsEmittedForOSV verifies that parsePomXML returns the
+// declared deps even when complete=false, so they remain available for OSV query
+// by any caller that handles the partial-closure case. This is the key correctness
+// invariant: a vulnerable direct dep (e.g. log4j-core 2.14.1) must appear in the
+// returned slice so the scan loop can report it as PACKAGE_REACHABLE.
+func TestParsePomXML_DirectDepsEmittedForOSV(t *testing.T) {
+	const log4jVuln = `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <groupId>com.example</groupId>
+    <artifactId>vuln-app</artifactId>
+    <version>1.0.0</version>
+    <dependencies>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.14.1</version>
+        </dependency>
+    </dependencies>
+</project>
+`
+	dir := t.TempDir()
+	writeLockfile(t, dir, "pom.xml", log4jVuln)
+
+	deps, complete, err := parsePomXML(dir)
+	require.NoError(t, err)
+	assert.False(t, complete,
+		"pom.xml path is always incomplete (transitives unknown)")
+	require.Len(t, deps, 1, "log4j-core must be returned for OSV query")
+	assert.Equal(t, "org.apache.logging.log4j:log4j-core", deps[0].Name)
+	assert.Equal(t, "2.14.1", deps[0].Version)
+	assert.Equal(t, "runtime", deps[0].DepType,
+		"no scope → default compile → runtime (not suppressed by dev_only gate)")
+}
+
+// TestParsePomXML_Absent verifies that parsePomXML returns (nil, false, nil)
+// when no pom.xml exists — not an error, just a missing file.
+func TestParsePomXML_Absent(t *testing.T) {
+	dir := t.TempDir()
+
+	deps, complete, err := parsePomXML(dir)
+	assert.NoError(t, err, "absent pom.xml must not error")
+	assert.False(t, complete)
+	assert.Nil(t, deps)
 }
 
 // TestMavenAdapter_PomOnly_NoSubprocess verifies that ParseLockfile does not
