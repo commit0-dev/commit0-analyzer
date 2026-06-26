@@ -480,8 +480,8 @@ func TestAffectsVersionV_PyPI_Undecidable(t *testing.T) {
 	}
 }
 
-// TestAffectsVersionV_Maven_Undecidable verifies that Maven (not yet implemented)
-// returns Undecidable rather than NotAffected.
+// TestAffectsVersionV_Maven_Undecidable verifies the tri-state Maven comparator:
+// inside the range → Affected; outside → NotAffected; unparseable → Undecidable.
 func TestAffectsVersionV_Maven_Undecidable(t *testing.T) {
 	adv := &Advisory{
 		Ecosystem: EcosystemMaven,
@@ -490,9 +490,17 @@ func TestAffectsVersionV_Maven_Undecidable(t *testing.T) {
 		},
 	}
 
-	got := adv.AffectsVersionV("1.5.0")
-	if got != VersionUndecidable {
-		t.Errorf("AffectsVersionV on Maven (unimplemented) got %v, want VersionUndecidable", got)
+	// 1.5.0 is inside [1.0.0, 2.0.0) → must be Affected.
+	if got := adv.AffectsVersionV("1.5.0"); got != VersionAffected {
+		t.Errorf("AffectsVersionV on Maven: 1.5.0 in [1.0.0,2.0.0) got %v, want VersionAffected", got)
+	}
+	// 2.5.0 is above Fixed (exclusive) → must be NotAffected.
+	if got := adv.AffectsVersionV("2.5.0"); got != VersionNotAffected {
+		t.Errorf("AffectsVersionV on Maven: 2.5.0 above [1.0.0,2.0.0) got %v, want VersionNotAffected", got)
+	}
+	// An unparseable version must return Undecidable, never NotAffected.
+	if got := adv.AffectsVersionV(""); got != VersionUndecidable {
+		t.Errorf("AffectsVersionV on Maven: empty version got %v, want VersionUndecidable", got)
 	}
 }
 
