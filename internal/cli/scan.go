@@ -158,8 +158,8 @@ func resolveLanguage(lang string, e ecosystems) (ecosystems, error) {
 
 // warnUnsupportedEcosystems writes a warning to w for every ecosystem in eco
 // that is detected (or explicitly selected via --language) but has no scan
-// path yet (rust, python, java). It returns true when any such ecosystem is
-// present, signalling that the caller must set incomplete=true.
+// path yet (rust, python, java, dotnet, php). It returns true when any such
+// ecosystem is present, signalling that the caller must set incomplete=true.
 //
 // "unknown ≠ safe": a detected ecosystem with no scan path MUST surface as an
 // incomplete scan (exit 3) rather than a false-clean pass (exit 0). This
@@ -176,7 +176,13 @@ func warnUnsupportedEcosystems(eco ecosystems, w io.Writer) bool {
 	pending := []unsupported{
 		{eco.hasRust, "rust"},
 		{eco.hasPython, "python"},
+		// Lane-A ecosystems (java, dotnet, php) are cleared by the registry loop
+		// when their adapter ran; they remain here as a symmetric backstop so a
+		// detected-but-unscanned Lane-A ecosystem still surfaces as incomplete
+		// rather than passing false-clean (unknown ≠ safe).
 		{eco.hasJava, "java"},
+		{eco.hasDotnet, "dotnet"},
+		{eco.hasPhp, "php"},
 	}
 	incomplete := false
 	for _, u := range pending {
