@@ -67,7 +67,7 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 | Source | Coverage | Symbol-level data |
 |---|---|---|
 | `go-vuln-db` (`vuln.go.dev`) | Go modules | Yes — the primary source for symbol-level precision. |
-| `osv` (`osv.dev` offline bundle) | Go, npm/JS, Rust (crates.io), Python (PyPI) | No — package-level only. |
+| `osv` (`osv.dev` offline bundle) | Go, npm/JS, Rust (crates.io), Python (PyPI), Maven (JVM), NuGet (.NET), Packagist (PHP) | No — package-level only (all ecosystems). |
 
 **Honest Go-coverage note:** OSV.dev's "Go" ecosystem dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go modules, OSV adds **near-zero additional advisory coverage** — the merge layer collapses OSV entries back onto existing Go-DB symbol-level advisories. This is by design and expected. OSV is enabled by default because it exercises the multi-source dedup/merge path and makes adding non-Go ecosystems cheap. The value is **architectural**, not coverage-based.
 
@@ -82,6 +82,12 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 **For Rust:** OSV.dev includes crates.io advisories and RustSec data. Rust reachability is package-level (no static call graph available in the current implementation). Symbol hints may come from RustSec advisory metadata but are not propagated as SYMBOL_REACHABLE findings.
 
 **For Python:** OSV.dev includes PyPI advisories. Python reachability uses a call-graph-driven analysis on the installed environment (lockfile-static; no code execution). For dynamic apps, UNKNOWN is correct and expected — the tool cannot prove reachability under `importlib.import_module()` and similar dynamic patterns. NOT_REACHABLE is never surfaced for gate purposes on Python (negative reachability is unsound on dynamic languages).
+
+**For JVM (Java/Kotlin/Scala):** OSV.dev includes Maven Central advisories. Reachability is package-level only (lockfile-static, no bytecode analysis available). Version matching uses Apache Maven ComparableVersion ordering. Dependency types (dev vs runtime) come from Maven `<scope>` (test, provided → dev) and Gradle configurations.
+
+**For .NET:** OSV.dev includes NuGet package advisories. Reachability is package-level only (lockfile-static, no static call graph available). Version matching uses NuGet SemVer-2 with 4-part versions and floating ranges. Dependency types come from `.csproj` `<PrivateAssets>All</PrivateAssets>` markup (if present); lockfile-only scans default all packages to runtime (documented trade-off, incomplete without `dotnet restore`).
+
+**For PHP:** OSV.dev includes Packagist advisories. Reachability is package-level only (lockfile-static, no static call graph available). Version matching respects Composer stability flags (stable, RC, beta, alpha, dev). Dependency types come from `composer.lock` sections: `packages` (runtime) vs `packages-dev` (dev).
 
 ### Live fetch and caching
 
@@ -134,6 +140,40 @@ The Python plugin performs AST-driven call-graph analysis on a lockfile-static r
 **Negative reachability (NOT_REACHABLE):** On a dynamic app, `NOT_REACHABLE` is unsound — a package's absence from the static call graph does not prove it is unused (config-driven imports could load it at runtime). Accordingly, `NOT_REACHABLE` findings never gate, and `--gate-on reachable` suppresses `UNKNOWN` on non-runtime deps to focus on provable vulnerabilities.
 
 **Ceiling:** Python reachability is call-graph-driven (positive model). The maximum confidence is `SYMBOL_REACHABLE` (with `--symbols`); `PACKAGE_REACHABLE` when symbol-level data is unavailable.
+
+### JVM (Java / Kotlin / Scala)
+
+The JVM analyzer resolves dependencies from Maven `pom.xml` or Gradle `gradle.lockfile` (and `build.gradle[.kts]` for detection). Entry points are all declared library and application dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** JVM reachability is package-level only. There is no bytecode or call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Manifest-only scans (`.pom` without lockfile) are incomplete. Gradle projects require `gradle.lockfile` or `--offline false` to auto-detect and resolve. Multi-module projects are detected and scanned from the root; subdirectory-only manifests may not be fully detected (shared root-detection limitation).
+
+### .NET
+
+The .NET analyzer resolves dependencies from NuGet lockfiles (`packages.lock.json`, `project.assets.json`) or declared dependencies in `.csproj` files. Entry points are all declared package references. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** .NET reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** `.csproj`-only scans (without a generated lockfile) report only declared dependencies and are marked **incomplete** (exit 3) — transitive dependencies cannot be resolved without running `dotnet restore`. Lockfile-only scans default all packages to runtime dep_type (a documented trade-off when `.csproj` with `<PrivateAssets>` tags is absent). Multi-project solutions are detected and scanned from the root; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+### PHP
+
+The PHP analyzer resolves dependencies from the `composer.lock` lockfile. Entry points are all declared package dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** PHP reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Requires `composer.lock` (generated by `composer install`). The analyzer never runs `composer` — it is lockfile-static and sandbox-safe. Multi-project composer setups are detected from the root only; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+## Multi-Project Detection Limitation
+
+All analyzers (including plugins) detect ecosystems at the **project root** only. In multi-module solutions or monorepos where manifests live exclusively in subdirectories:
+- Go: `.go.mod` in subdirectories may not be detected.
+- JVM: `pom.xml` or `gradle.lockfile` in subdirectories may not be detected.
+- .NET: Multiple `.csproj` files in subdirectories of a shared solution may not all be detected.
+- PHP: Multiple `composer.json` + `composer.lock` pairs in subdirectories may not all be detected.
+
+This is a **known limitation** (recursive detection is future work). Workaround: run `anst scan` from the lowest common root containing all manifests, or explicitly pass `--language <lang>` to narrow scope when scanning from the desired project root.
 
 ## Performance Budget
 

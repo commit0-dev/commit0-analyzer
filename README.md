@@ -1,19 +1,20 @@
 # anst-analyzer
 
-An OSS, CI-native, reachability-first software composition analysis (SCA) tool. It analyzes Go modules, JavaScript/TypeScript packages, Rust crates, and Python projects, lists dependency CVEs, marks each one **reachable**, **not reachable**, or **unknown**, then emits SARIF 2.1, JSON, or a human-readable table and exits non-zero when a policy threshold is crossed.
+An OSS, CI-native, reachability-first software composition analysis (SCA) tool. It analyzes Go modules, JavaScript/TypeScript packages, Rust crates, Python projects, JVM (Java/Kotlin/Scala), .NET, and PHP applications, lists dependency CVEs, marks each one **reachable**, **not reachable**, or **unknown**, then emits SARIF 2.1, JSON, or a human-readable table and exits non-zero when a policy threshold is crossed.
 
-The key differentiator vs `govulncheck` / `npm audit`: SARIF `codeFlows` call-path proofs, a policy-as-code gate, and a multi-language architecture (Go, JS/TS, Rust, Python; Java deferred).
+The key differentiator vs `govulncheck` / `npm audit`: SARIF `codeFlows` call-path proofs, a policy-as-code gate, and a multi-language architecture (Go, JS/TS, Rust, Python, JVM, .NET, PHP).
 
 ## How it works
 
 ```
-Project root (Go, JS/TS, Rust, Python — auto-detected or --language selectable)
+Project root (Go, JS/TS, Rust, Python, Java, .NET, PHP — auto-detected or --language selectable)
    └─> Advisory resolver (Go vuln DB + OSV.dev offline bundle, --source selectable)
           └─> AnalyzeRequest (root + entrypoints + advisories + ecosystem config)
                  ├─> go-reachability plugin          (go/ssa + VTA call graph; import-level fallback on unsupported generics)
                  ├─> js-reachability plugin          (call graph into dependency source; symbol-level via fix patches)
                  ├─> rust-reachability plugin        (cargo metadata + RustSec; package-level reachability)
-                 └─> python-reachability plugin      (ast-driven call graph; lockfile-static resolver; positive-reachability model)
+                 ├─> python-reachability plugin      (ast-driven call graph; lockfile-static resolver; positive-reachability model)
+                 └─> Lane-A lockfile resolvers       (Maven/Gradle, NuGet, Composer; host-side, lockfile-static, package-level)
                         └─> Findings (streamed, confidence-tiered, source-attributed)
                                └─> Renderers (SARIF 2.1 / JSON / table)
                                       └─> Policy gate (exit 0 / 1 / 3)
@@ -39,7 +40,7 @@ make lint             # golangci-lint run (falls back to go vet if not installed
 go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
 
 # That's the whole interface: point it at any project. anst auto-detects
-# every ecosystem present (Go, JS/TS, Rust, Python) and scans them all —
+# every ecosystem present (Go, JS/TS, Rust, Python, JVM, .NET, PHP) and scans them all —
 # no language flag, the same as npm audit / trivy / osv-scanner.
 anst scan /path/to/project
 
@@ -59,10 +60,19 @@ anst scan /path/to/project --language rust
 | **JavaScript / TypeScript** | npm, Yarn, pnpm (workspaces) | Into-dependency call graph (direct + transitive); symbol-level via advisory fix patches (`--symbols`) | OSV.dev npm bundle |
 | **Rust** | Cargo (`Cargo.toml`) | Package-level (no static call graph); symbol hints from RustSec | OSV.dev crates.io + RustSec |
 | **Python** | Lockfile-static: uv.lock, poetry.lock, requirements.txt, pyproject.toml | Call-graph-driven positive reachability (sound under dynamism); symbol-level via `--symbols` | OSV.dev PyPI |
+| **JVM (Java / Kotlin / Scala)** | Maven (`pom.xml`), Gradle (`gradle.lockfile`, `build.gradle[.kts]`) | Package-level (lockfile-static, no symbol-level data) | OSV.dev Maven |
+| **.NET** | NuGet (`packages.lock.json`, `project.assets.json`, `.csproj` for declared deps) | Package-level (lockfile-static, no symbol-level data); `.csproj` only is incomplete without `dotnet restore` | OSV.dev NuGet |
+| **PHP** | Composer (`composer.lock`) | Package-level (lockfile-static, no symbol-level data) | OSV.dev Packagist |
 
-Findings cover the full installed closure (direct **and** transitive). Add `--symbols` to resolve the vulnerable exported symbols a fix patch touched (fetched from the advisory's fix commit, cached, offline-degrading) and emit `SYMBOL_REACHABLE` with a SARIF code path.
+Findings cover the full installed closure (direct **and** transitive). Add `--symbols` to resolve the vulnerable exported symbols a fix patch touched (fetched from the advisory's fix commit, cached, offline-degrading) and emit `SYMBOL_REACHABLE` with a SARIF code path. Symbol-level enrichment is available for Go, JS/TS, and Python only.
 
 **JS/TS dependency types:** Vulnerabilities reachable only through a `devDependency` subtree are tagged `dev_only` and reported without failing the gate; runtime-reachable findings gate.
+
+**JVM dependency types:** Vulnerabilities tagged as provided scope or test scope (Maven `<scope>`) or test/annotation configurations (Gradle) are marked as `dev` and reported without failing the gate by default.
+
+**.NET dependency types:** Vulnerabilities where the package is marked `<PrivateAssets>All</PrivateAssets>` in `.csproj` are marked as `dev` and reported without failing the gate by default.
+
+**PHP dependency types:** Vulnerabilities in the `require-dev` section of `composer.lock` are marked as `dev` and reported without failing the gate by default.
 
 **Python dependency types:** Each finding is tagged `dep_type` = runtime | optional-extra | dev | test | docs (from the manifest). Non-runtime findings do not fail the gate by default; use `--gate-on` to customize this behavior.
 
