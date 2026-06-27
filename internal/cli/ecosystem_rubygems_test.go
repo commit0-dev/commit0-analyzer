@@ -61,6 +61,45 @@ func TestDetectEcosystems_GemfileManifestOnly(t *testing.T) {
 
 // TestParseGemfileLock_RailsApp verifies that a typical Rails app lockfile is
 // parsed into the full transitive closure with correct names and versions.
+// TestParseGemfileLock_PlatformVariantsDedup verifies that a gem listed once per
+// resolved platform (e.g. "nokogiri (1.19.0-x86_64-linux-gnu)") collapses to a
+// single dependency at its base version. Without platform stripping + dedup, each
+// variant matches the same advisories and multiplies the finding count.
+func TestParseGemfileLock_PlatformVariantsDedup(t *testing.T) {
+	dir := t.TempDir()
+	lock := `GEM
+  remote: https://rubygems.org/
+  specs:
+    nokogiri (1.19.0)
+    nokogiri (1.19.0-aarch64-linux-gnu)
+    nokogiri (1.19.0-arm64-darwin)
+    nokogiri (1.19.0-x86_64-linux-gnu)
+    rack (3.0.0)
+
+PLATFORMS
+  ruby
+  x86_64-linux
+
+DEPENDENCIES
+  nokogiri
+  rack
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Gemfile.lock"), []byte(lock), 0o644))
+
+	deps, complete, err := parseGemfileLock(dir)
+	require.NoError(t, err)
+	assert.True(t, complete)
+
+	var nokogiri []ResolvedDep
+	for _, d := range deps {
+		if d.Name == "nokogiri" {
+			nokogiri = append(nokogiri, d)
+		}
+	}
+	require.Len(t, nokogiri, 1, "nokogiri's four platform variants must collapse to one dependency")
+	assert.Equal(t, "1.19.0", nokogiri[0].Version, "platform suffix must be stripped to the base Gem::Version")
+}
+
 func TestParseGemfileLock_RailsApp(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Gemfile.lock"),

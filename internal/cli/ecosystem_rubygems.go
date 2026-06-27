@@ -120,6 +120,9 @@ func parseGemfileLock(root string) ([]ResolvedDep, bool, error) {
 	defer func() { _ = f.Close() }()
 
 	var deps []ResolvedDep
+	// seen deduplicates (name, version): Bundler lists a gem once per resolved
+	// platform, so the same gem@version appears multiple times.
+	seen := make(map[string]bool)
 	inGemSection := false
 	inSpecs := false
 	firstLine := true
@@ -190,10 +193,27 @@ func parseGemfileLock(root string) ([]ResolvedDep, bool, error) {
 
 		name := m[1]
 		version := m[2]
+		// Strip the platform suffix Bundler appends to a platform-specific gem
+		// (e.g. "nokogiri (1.19.0-x86_64-linux-gnu)"). A Gem::Version never
+		// contains "-" (pre-release segments use "."), so the platform is
+		// everything from the first "-". Without this, every platform variant of
+		// the same gem@version is treated as a distinct dependency and matches
+		// the same advisories, multiplying the finding count (e.g. 9x for a gem
+		// pinned in nine platform variants).
+		if dash := strings.IndexByte(version, '-'); dash >= 0 {
+			version = version[:dash]
+		}
 		if name == "" || version == "" {
 			// Degenerate match: skip without failing.
 			continue
 		}
+
+		// Deduplicate by (name, version): the platform variants collapse to one.
+		key := name + "\x00" + version
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 
 		deps = append(deps, ResolvedDep{
 			Name:    name,
