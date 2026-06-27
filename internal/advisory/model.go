@@ -123,6 +123,15 @@ type Advisory struct {
 	// Not part of the wire proto.
 	Versions []string
 
+	// UndecidableRanges is true when the OSV affected entry carried a non-version
+	// (GIT-commit) range anst cannot compare AND no versions[] enumeration to fall
+	// back on. AffectsVersionV returns VersionUndecidable in that case so the
+	// advisory is forwarded as an UNKNOWN finding rather than silently dropped
+	// (unknown != safe). It distinguishes a GIT-range-only entry (undecidable) from
+	// a truly empty entry with no version constraint at all (not affected).
+	// Not part of the wire proto.
+	UndecidableRanges bool
+
 	// Severity is the vulnerability risk level parsed from the OSV severity[]
 	// array (CVSS v3/v4 base score) or database_specific.severity string.
 	// SeverityUnspecified (zero value) means no severity data was present.
@@ -176,8 +185,17 @@ func (a *Advisory) AffectsVersionV(version string) VersionVerdict {
 	if len(a.VersionRanges) == 0 {
 		// No ranges to check. Fall through to versions-list matching if available.
 		if len(a.Versions) == 0 {
-			// Neither ranges nor a versions list — genuinely undecidable.
-			return VersionUndecidable
+			if a.UndecidableRanges {
+				// A non-version (GIT-commit) range was present but there is no
+				// versions[] enumeration to evaluate it against — genuinely
+				// undecidable. Forward as UNKNOWN rather than dropping (unknown != safe).
+				return VersionUndecidable
+			}
+			// No version constraint at all (no ranges and no versions): the advisory
+			// cannot identify any affected version, so matching it name-only would
+			// fire on every version. Treat it as not affected, matching osv-scanner's
+			// handling of such degenerate records.
+			return VersionNotAffected
 		}
 		// Versions-only entry: match against the explicit enumeration.
 		// The queried version may carry a "v" prefix from canonical(); strip it for

@@ -844,7 +844,7 @@ func TestBuildAdvisoryIndex_PyPI_VersionsOnly(t *testing.T) {
 // ranges are of type GIT (git commit hashes) is forwarded as Undecidable+Incomplete,
 // not silently dropped as NotAffected and not falsely matched as Affected for all
 // versions. GIT hashes are not parseable as PEP 440 versions.
-func TestBuildAdvisoryIndex_PyPI_GitRangeOnly(t *testing.T) {
+func TestBuildAdvisoryIndex_PyPI_GitRangeWithVersions(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -855,13 +855,45 @@ func TestBuildAdvisoryIndex_PyPI_GitRangeOnly(t *testing.T) {
 	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
 	require.NoError(t, err)
 
-	// Any version queried against a GIT-only advisory must be forwarded as
-	// Incomplete=true (Undecidable), not as a definitive match or definitive drop.
-	for _, v := range []string{"9.1.0", "9.1.1", "9.2.0", "12.2.0", "1.0.0"} {
+	// The fixture's only range is GIT-typed but it carries an authoritative
+	// versions[] list ([9.1.0, 9.1.1, 9.2.0]). That list decides affectedness:
+	// a release in the list is Affected (decided, not incomplete)...
+	for _, v := range []string{"9.1.0", "9.1.1", "9.2.0"} {
 		results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpillow"}, canonical(v), []string{"test"})
-		if assert.Len(t, results, 1, "testpillow@%s: GIT-range advisory must be forwarded (Undecidable), not dropped", v) {
+		if assert.Len(t, results, 1, "testpillow@%s is in the versions[] list: must match", v) {
+			assert.False(t, results[0].Incomplete,
+				"testpillow@%s: a versions[] match is decided, not incomplete", v)
+		}
+	}
+	// ...and a release absent from the list is NotAffected → not forwarded (no noise
+	// UNKNOWN), matching osv-scanner's handling of GIT-range advisories.
+	for _, v := range []string{"12.2.0", "1.0.0"} {
+		results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpillow"}, canonical(v), []string{"test"})
+		assert.Empty(t, results,
+			"testpillow@%s is absent from the versions[] list: must be NotAffected (dropped)", v)
+	}
+}
+
+// TestBuildAdvisoryIndex_PyPI_GitRangeNoVersions verifies the safety case: a GIT-only
+// advisory with NO versions[] enumeration cannot be evaluated, so it stays
+// Undecidable and is forwarded as Incomplete=true (UNKNOWN) — never silently dropped
+// (unknown != safe).
+func TestBuildAdvisoryIndex_PyPI_GitRangeNoVersions(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-GIT-RANGE-NO-VERSIONS.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-GIT-RANGE-NO-VERSIONS.json"), data, 0o644))
+
+	ctx := context.Background()
+	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
+	require.NoError(t, err)
+
+	for _, v := range []string{"9.1.0", "12.2.0", "1.0.0"} {
+		results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testgitonly"}, canonical(v), []string{"test"})
+		if assert.Len(t, results, 1, "testgitonly@%s: GIT-only advisory with no versions[] must be forwarded (Undecidable)", v) {
 			assert.True(t, results[0].Incomplete,
-				"testpillow@%s: GIT-range advisory must have Incomplete=true", v)
+				"testgitonly@%s: GIT-only advisory with no versions[] must have Incomplete=true", v)
 		}
 	}
 }

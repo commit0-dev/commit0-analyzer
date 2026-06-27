@@ -504,16 +504,20 @@ func TestAffectsVersionV_Maven_Undecidable(t *testing.T) {
 	}
 }
 
-// TestAffectsVersionV_EmptyRanges verifies that an advisory with no version ranges
-// returns Undecidable (cannot prove not-affected with no range data).
+// TestAffectsVersionV_EmptyRanges verifies the no-ranges cases. An advisory with no
+// version constraint at all (no ranges, no versions) cannot identify any affected
+// version → NotAffected. An advisory that had a non-version (GIT) range but no
+// versions[] fallback is genuinely undecidable → Undecidable (forwarded as UNKNOWN).
 func TestAffectsVersionV_EmptyRanges(t *testing.T) {
-	adv := &Advisory{
-		Ecosystem:     EcosystemGo,
-		VersionRanges: nil,
+	// No ranges and no versions at all → NotAffected (degenerate record).
+	empty := &Advisory{Ecosystem: EcosystemGo, VersionRanges: nil}
+	if got := empty.AffectsVersionV("v1.0.0"); got != VersionNotAffected {
+		t.Errorf("AffectsVersionV with no version constraint got %v, want VersionNotAffected", got)
 	}
-	got := adv.AffectsVersionV("v1.0.0")
-	if got != VersionUndecidable {
-		t.Errorf("AffectsVersionV with empty VersionRanges got %v, want VersionUndecidable", got)
+	// A GIT-range-only entry (UndecidableRanges set, no versions) → Undecidable.
+	git := &Advisory{Ecosystem: EcosystemGo, VersionRanges: nil, UndecidableRanges: true}
+	if got := git.AffectsVersionV("v1.0.0"); got != VersionUndecidable {
+		t.Errorf("AffectsVersionV with a GIT-only range got %v, want VersionUndecidable", got)
 	}
 }
 

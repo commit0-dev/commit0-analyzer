@@ -571,10 +571,11 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 			Module:    aff.Package.Name,
 		}
 
-		// Collect SEMVER/ECOSYSTEM ranges only — skip GIT and other types.
-		// Track whether any GIT (or other non-version) ranges are present: their
-		// bounds are git commit hashes, not versions, so they cannot be compared
-		// with PEP 440 or semver — the advisory must remain Undecidable.
+		// Collect SEMVER/ECOSYSTEM ranges only. GIT and other non-version range
+		// types are skipped — their bounds are commit hashes, not release versions,
+		// so they cannot be compared with PEP 440 or semver. Track whether any such
+		// non-version range was present: when there is also no versions[] list to
+		// fall back on, the entry stays Undecidable (UNKNOWN), not NotAffected.
 		hasNonVersionRanges := false
 		for _, r := range aff.Ranges {
 			t := strings.ToUpper(r.Type)
@@ -590,8 +591,9 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 				}
 			default:
 				// GIT or other non-version range type — bounds are commit hashes,
-				// not parseable as versions. Mark the entry as having non-version ranges
-				// so we do not fall back to the versions[] list as authoritative.
+				// not parseable as release versions. Skip the range; if a versions[]
+				// enumeration is present it is used as the authoritative affected set,
+				// otherwise the entry remains Undecidable (see UndecidableRanges below).
 				hasNonVersionRanges = true
 			}
 		}
@@ -607,20 +609,24 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 			}
 		}
 
-		// When there are no SEMVER/ECOSYSTEM ranges, decide how to handle the entry:
-		//   (a) No ranges of any kind → versions-only entry (e.g. MAL-2026-2144):
-		//       store the versions[] list for exact-membership matching.
-		//   (b) GIT-only ranges → commit-hash bounds cannot be compared with versions;
-		//       leave VersionRanges and Versions empty so AffectsVersionV returns
-		//       VersionUndecidable (forwarded as Incomplete=true). Do NOT use the
-		//       versions[] list as a substitute: it may be incomplete, and
-		//       "unknown ≠ safe" — we must not drop the advisory for unlisted versions.
-		if len(adv.VersionRanges) == 0 && !hasNonVersionRanges && len(aff.Versions) > 0 {
+		// When there are no SEMVER/ECOSYSTEM ranges anst can compare, fall back to
+		// the OSV affected[].versions enumeration as the authoritative affected set:
+		//   (a) No ranges of any kind → versions-only entry (e.g. MAL-2026-2144).
+		//   (b) GIT-only ranges → the commit-hash bounds cannot be compared with
+		//       release versions, but OSV enriches such records with the affected
+		//       released versions in versions[]. Trust that enumeration (as
+		//       osv-scanner does) so a release absent from it is NotAffected rather
+		//       than a noise UNKNOWN — e.g. Pillow 9.4.0 vs OSV-2022-715, which lists
+		//       only [9.1.0, 9.1.1, 9.2.0].
+		if len(adv.VersionRanges) == 0 && len(aff.Versions) > 0 {
 			adv.Versions = append([]string(nil), aff.Versions...)
 		}
-		// If VersionRanges is still empty (GIT-only or no ranges at all with no
-		// versions list), AffectsVersionV will return VersionUndecidable — forwarded
-		// as Incomplete=true.
+		// UndecidableRanges records that the entry had a non-version (GIT) range anst
+		// cannot evaluate AND no versions[] enumeration to fall back on. Such an entry
+		// stays Undecidable (UNKNOWN) — unknown != safe, we must not drop it. A truly
+		// empty entry (no ranges and no versions at all) does NOT set this and is
+		// treated as NotAffected (it cannot identify any affected version).
+		adv.UndecidableRanges = hasNonVersionRanges && len(adv.Versions) == 0
 
 		result = append(result, adv)
 	}
