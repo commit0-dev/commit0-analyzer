@@ -150,6 +150,8 @@ func laneAAdapterActive(lang string, eco ecosystems) bool {
 		return eco.hasElixir
 	case "dart":
 		return eco.hasDart
+	case "swift":
+		return eco.hasSwift
 	default:
 		return false
 	}
@@ -172,6 +174,8 @@ func setLaneAFlag(e *ecosystems, lang string) {
 		e.hasElixir = true
 	case "dart":
 		e.hasDart = true
+	case "swift":
+		e.hasSwift = true
 	}
 }
 
@@ -192,6 +196,8 @@ func clearLaneAFlag(e *ecosystems, lang string) {
 		e.hasElixir = false
 	case "dart":
 		e.hasDart = false
+	case "swift":
+		e.hasSwift = false
 	}
 }
 

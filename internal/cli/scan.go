@@ -68,6 +68,7 @@ type ecosystems struct {
 	hasRuby   bool // Gemfile.lock present
 	hasElixir bool // mix.lock or rebar.lock present
 	hasDart   bool // pubspec.lock or pubspec.yaml present
+	hasSwift  bool // Package.resolved present
 }
 
 // detectEcosystems checks moduleRoot for the well-known manifest files of each
@@ -160,8 +161,10 @@ func resolveLanguage(lang string, e ecosystems) (ecosystems, error) {
 		return ecosystems{hasElixir: true}, nil
 	case "dart":
 		return ecosystems{hasDart: true}, nil
+	case "swift":
+		return ecosystems{hasSwift: true}, nil
 	default:
-		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java|dotnet|php|ruby|elixir|dart", lang)
+		return ecosystems{}, fmt.Errorf("unknown --language value %q: must be one of auto|go|js|rust|python|java|dotnet|php|ruby|elixir|dart|swift", lang)
 	}
 }
 
@@ -195,6 +198,7 @@ func warnUnsupportedEcosystems(eco ecosystems, w io.Writer) bool {
 		{eco.hasRuby, "ruby"},
 		{eco.hasElixir, "elixir"},
 		{eco.hasDart, "dart"},
+		{eco.hasSwift, "swift"},
 	}
 	incomplete := false
 	for _, u := range pending {
@@ -304,14 +308,15 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp && !eco.hasRuby && !eco.hasElixir && !eco.hasDart {
+	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp && !eco.hasRuby && !eco.hasElixir && !eco.hasDart && !eco.hasSwift {
 		fmt.Fprintf(os.Stderr,
 			"anst-analyzer scan: %s contains no recognised ecosystem manifest "+
 				"(go.mod, package.json, Cargo.toml, pyproject.toml, requirements.txt, "+
 				"pom.xml, build.gradle, build.gradle.kts, "+
 				"packages.lock.json, packages.config, *.csproj, "+
 				"composer.lock, composer.json, Gemfile.lock, Gemfile, "+
-				"mix.lock, rebar.lock, pubspec.lock, pubspec.yaml); nothing to scan\n",
+				"mix.lock, rebar.lock, pubspec.lock, pubspec.yaml, "+
+				"Package.resolved); nothing to scan\n",
 			moduleRoot)
 		return policy.ExitOperationalError
 	}

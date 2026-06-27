@@ -43,6 +43,16 @@ const EcosystemHex = "Hex"
 // pub.dev, matching the OSV schema value used by https://osv.dev (the Pub/all.zip bundle).
 const EcosystemPub = "Pub"
 
+// EcosystemSwiftURL is the canonical ecosystem tag for Swift packages distributed
+// via the Swift Package Manager, matching the OSV schema value used by
+// https://osv.dev (the SwiftURL/all.zip bundle).
+//
+// Unlike most ecosystems, SwiftURL package identity is the git repository URL,
+// not a registry name. OSV records store the bare URL without scheme or .git
+// suffix (e.g. "github.com/apple/swift-nio"). The adapter normalizes the
+// Package.resolved location field to match this form before querying.
+const EcosystemSwiftURL = "SwiftURL"
+
 // Package identifies a package within a specific language ecosystem.
 // It is the unit of identity passed to Source.Query so that a single source
 // implementation can serve multiple ecosystems or decline to handle ecosystems

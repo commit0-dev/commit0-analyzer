@@ -47,6 +47,7 @@ var OSVBundleEcosystems = []string{
 	EcosystemRubyGems,
 	EcosystemHex,
 	EcosystemPub,
+	EcosystemSwiftURL,
 }
 
 // Zip-bomb guards. These apply per-file, per-entry-count, and in aggregate
