@@ -1,20 +1,20 @@
 # anst-analyzer
 
-An OSS, CI-native, reachability-first software composition analysis (SCA) tool. It analyzes Go modules, JavaScript/TypeScript packages, Rust crates, Python projects, JVM (Java/Kotlin/Scala), .NET, PHP, Ruby, Elixir, and Dart applications, lists dependency CVEs, marks each one **reachable**, **not reachable**, or **unknown**, then emits SARIF 2.1, JSON, or a human-readable table and exits non-zero when a policy threshold is crossed.
+An OSS, CI-native, reachability-first software composition analysis (SCA) tool. It analyzes Go modules, JavaScript/TypeScript packages, Rust crates, Python projects, JVM (Java/Kotlin/Scala), .NET, PHP, Ruby, Elixir, Dart, and Swift applications, lists dependency CVEs, marks each one **reachable**, **not reachable**, or **unknown**, then emits SARIF 2.1, JSON, or a human-readable table and exits non-zero when a policy threshold is crossed.
 
-The key differentiator vs `govulncheck` / `npm audit`: SARIF `codeFlows` call-path proofs, a policy-as-code gate, and a ten-ecosystem architecture (Go, JS/TS, Rust, Python, JVM, .NET, PHP, Ruby, Elixir, Dart).
+The key differentiator vs `govulncheck` / `npm audit`: SARIF `codeFlows` call-path proofs, a policy-as-code gate, and an eleven-ecosystem architecture (Go, JS/TS, Rust, Python, JVM, .NET, PHP, Ruby, Elixir, Dart, Swift).
 
 ## How it works
 
 ```
-Project root (Go, JS/TS, Rust, Python, Java, .NET, PHP, Ruby, Elixir, Dart — auto-detected or --language selectable)
+Project root (Go, JS/TS, Rust, Python, Java, .NET, PHP, Ruby, Elixir, Dart, Swift — auto-detected or --language selectable)
    └─> Advisory resolver (Go vuln DB + OSV.dev offline bundle, --source selectable)
           └─> AnalyzeRequest (root + entrypoints + advisories + ecosystem config)
                  ├─> go-reachability plugin          (go/ssa + VTA call graph; import-level fallback on unsupported generics)
                  ├─> js-reachability plugin          (call graph into dependency source; symbol-level via fix patches)
                  ├─> rust-reachability plugin        (cargo metadata + RustSec; package-level reachability)
                  ├─> python-reachability plugin      (ast-driven call graph; lockfile-static resolver; positive-reachability model)
-                 └─> Lane-A lockfile resolvers       (Maven/Gradle, NuGet, Composer, RubyGems, Hex, Pub; host-side, lockfile-static, package-level)
+                 └─> Lane-A lockfile resolvers       (Maven/Gradle, NuGet, Composer, RubyGems, Hex, Pub, SwiftPM; host-side, lockfile-static, package-level)
                         └─> Findings (streamed, confidence-tiered, source-attributed)
                                └─> Renderers (SARIF 2.1 / JSON / table)
                                       └─> Policy gate (exit 0 / 1 / 3)
@@ -40,7 +40,7 @@ make lint             # golangci-lint run (falls back to go vet if not installed
 go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
 
 # That's the whole interface: point it at any project. anst auto-detects
-# every ecosystem present (Go, JS/TS, Rust, Python, JVM, .NET, PHP, Ruby, Elixir, Dart) and scans them all —
+# every ecosystem present (Go, JS/TS, Rust, Python, JVM, .NET, PHP, Ruby, Elixir, Dart, Swift) and scans them all —
 # no language flag, the same as npm audit / trivy / osv-scanner.
 anst scan /path/to/project
 
@@ -66,6 +66,7 @@ anst scan /path/to/project --language rust
 | **Ruby** | Bundler (`Gemfile.lock`) | Package-level (lockfile-static, no symbol-level data; `Gemfile` is never evaluated) | OSV.dev RubyGems |
 | **Elixir / Erlang** | Hex (`mix.lock`, `rebar.lock`) | Package-level (lockfile-static, no symbol-level data; `mix.exs` is never evaluated); unparseable lockfile is marked incomplete | OSV.dev Hex |
 | **Dart / Flutter** | Pub (`pubspec.lock`) | Package-level (lockfile-static, no symbol-level data); advisory volume currently thin | OSV.dev Pub |
+| **Swift** | SwiftPM (`Package.resolved`) | Package-level (lockfile-static, SemVer 2.0 version ordering; `Package.swift` manifest is never evaluated); packages identified by git URL | OSV.dev SwiftURL |
 
 Findings cover the full installed closure (direct **and** transitive). Add `--symbols` to resolve the vulnerable exported symbols a fix patch touched (fetched from the advisory's fix commit, cached, offline-degrading) and emit `SYMBOL_REACHABLE` with a SARIF code path. Symbol-level enrichment is available for Go, JS/TS, and Python only.
 
