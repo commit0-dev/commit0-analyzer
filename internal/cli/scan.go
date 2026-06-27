@@ -308,7 +308,24 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		return policy.ExitOperationalError
 	}
 
-	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp && !eco.hasRuby && !eco.hasElixir && !eco.hasDart && !eco.hasSwift {
+	// Discover Lane-A manifests in subdirectories early — before the
+	// nothing-to-scan gate — so that a multi-project layout where NO manifest
+	// lives at the repo root is still recognised and scanned rather than
+	// silently skipped. The result (laneADiscovered, discoveryCapped) is
+	// carried through to step 5e to avoid walking the tree a second time.
+	laneADiscovered, discoveryCapped := discoverLaneAProjectDirs(moduleRoot, LaneAAdapters())
+
+	// A Lane-A subdir manifest counts as "something to scan" even when no root
+	// manifest exists (multi-root project layouts).
+	laneASubdirFound := false
+	for _, dirs := range laneADiscovered {
+		if len(dirs) > 0 {
+			laneASubdirFound = true
+			break
+		}
+	}
+
+	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp && !eco.hasRuby && !eco.hasElixir && !eco.hasDart && !eco.hasSwift && !laneASubdirFound {
 		fmt.Fprintf(os.Stderr,
 			"anst-analyzer scan: %s contains no recognised ecosystem manifest "+
 				"(go.mod, package.json, Cargo.toml, pyproject.toml, requirements.txt, "+
@@ -1002,18 +1019,24 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 	// ── 5e. Lane-A adapter registry — lockfile-static resolve and OSV query ──
 	//
-	// For each registered Lane-A adapter that is active in this scan (detected by
-	// the presence of its manifest files, or explicitly selected via --language),
-	// call ParseLockfile to obtain the resolved dependency closure, then query OSV
-	// advisories for each dep using the same OSV bundle infrastructure as the Go,
-	// npm, crates.io, and PyPI paths above.
+	// Multi-project (subdirectory) detection: before the adapter loop, walk
+	// moduleRoot to discover all directories that contain Lane-A manifests. This
+	// enables scanning multi-project layouts (e.g. a .NET solution with .csproj
+	// in subdirs, a monorepo with per-package composer.lock) without any extra
+	// flags. The walk is bounded by depth and an ignore-list so it stays fast.
+	//
+	// For each active adapter, ParseLockfile is called once per discovered
+	// directory and the results are aggregated (deduped by name@version). If ANY
+	// per-directory parse is incomplete, the aggregate is incomplete.
 	//
 	// "unknown ≠ safe" invariants:
 	//   - ParseLockfile returning complete=false means the closure cannot be fully
 	//     determined (missing lockfile, parse error, or requires running a build
 	//     tool). The scan is marked incomplete; no OSV query is performed for that
-	//     ecosystem (a partial closure would produce false NOT_REACHABLE for the
+	//     sub-result (a partial closure would produce false NOT_REACHABLE for the
 	//     missing portion).
+	//   - A capped discovery (> discoveryMaxDirs matching dirs) → incomplete=true;
+	//     silently truncated discovery must never read as a clean scan.
 	//   - OSV is the only source with coverage for these ecosystems; when OSV is
 	//     not in the selected sources and deps were resolved, warn + mark incomplete.
 	//   - After this block, clear the Lane-A ecosystem flags from unsupportedEco so
@@ -1026,46 +1049,85 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// error or unrecognised ecosystem) are converted to CONFIDENCE_UNKNOWN findings
 	// with Incomplete=true so the policy gate exits 3 (not 0, which would be a
 	// false-clean pass violating "unknown ≠ safe").
+
+	// Handle capped discovery (laneADiscovered and discoveryCapped were computed
+	// in step 1 and carried here to avoid a second walk).
+	if discoveryCapped {
+		fmt.Fprintf(os.Stderr,
+			"warning: Lane-A manifest discovery reached the %d-directory cap; "+
+				"some subdirectories may not have been scanned; scan marked incomplete\n",
+			discoveryMaxDirs)
+		incomplete = true
+	}
+
 	var laneAFindings []*anstv1.Finding
 	for _, laneAAdapter := range LaneAAdapters() {
-		if !laneAAdapterActive(laneAAdapter.Language, eco) {
-			continue
+		// Determine which directories to scan for this adapter.
+		//
+		// Start from directories found by the bounded walk. If the adapter is also
+		// active via root detection (detectEcosystems) or an explicit --language
+		// flag (laneAAdapterActive), ensure moduleRoot appears first so single-root
+		// behaviour is fully preserved.
+		adapterDirs := laneADiscovered[laneAAdapter.Language]
+		if laneAAdapterActive(laneAAdapter.Language, eco) {
+			adapterDirs = ensureRootFirst(adapterDirs, moduleRoot)
+		}
+		if len(adapterDirs) == 0 {
+			continue // adapter not active anywhere in this tree
 		}
 
-		deps, complete, parseErr := laneAAdapter.ParseLockfile(moduleRoot)
-		if parseErr != nil {
-			fmt.Fprintf(os.Stderr,
-				"warning: %s lockfile parse failed: %v; "+
-					"%s deps were not checked for vulnerabilities; scan marked incomplete\n",
-				laneAAdapter.Language, parseErr, laneAAdapter.Language)
-			incomplete = true
-			continue
-		}
-		if !complete {
-			// An incomplete closure. Mark the scan incomplete (→ exit 3, never a
-			// false-clean exit 0) and split on whether we have anything to query.
-			incomplete = true
-			if len(deps) == 0 {
-				// No usable closure: no static parser, an unrecognised lockfile, or a
-				// manifest with nothing statically resolvable. Nothing to query.
+		// Aggregate the dependency closure across all discovered project directories.
+		// Each directory is parsed independently; results are merged and deduped so
+		// OSV is queried exactly once per unique normalised name@version.
+		var aggDeps []ResolvedDep
+		aggComplete := true
+		for _, dir := range adapterDirs {
+			dirDeps, complete, parseErr := laneAAdapter.ParseLockfile(dir)
+			if parseErr != nil {
 				fmt.Fprintf(os.Stderr,
-					"warning: %s ecosystem detected but its dependency closure could not be "+
-						"resolved statically; %s deps were not checked for vulnerabilities; "+
-						"scan marked incomplete\n",
-					laneAAdapter.Language, laneAAdapter.Language)
+					"warning: %s lockfile parse failed (dir %s): %v; "+
+						"%s deps in that directory were not checked; scan marked incomplete\n",
+					laneAAdapter.Language, dir, parseErr, laneAAdapter.Language)
+				incomplete = true
+				aggComplete = false
 				continue
 			}
-			// Partial closure: declared/direct deps resolved, but the full transitive
-			// closure is unknown (e.g. Maven pom.xml or a .NET .csproj without running
-			// the build tool). Fall through to query OSV for the KNOWN deps — a match on
-			// a resolved dep is a sound PACKAGE_REACHABLE positive — while the scan stays
-			// incomplete so the unresolved portion never reads as a false-clean.
-			fmt.Fprintf(os.Stderr,
-				"warning: %s dependency closure is partial (declared/direct deps only; "+
-					"transitives unresolved without running the build tool); the known deps "+
-					"were checked but the scan is marked incomplete\n",
-				laneAAdapter.Language)
+			if !complete {
+				// An incomplete closure for this directory. Mark aggregate incomplete
+				// (→ exit 3, never a false-clean exit 0) and split on whether the
+				// adapter returned anything usable.
+				aggComplete = false
+				if len(dirDeps) == 0 {
+					// No usable closure: no static parser, an unrecognised lockfile, or a
+					// manifest with nothing statically resolvable. Nothing to query.
+					fmt.Fprintf(os.Stderr,
+						"warning: %s ecosystem detected in %s but its dependency closure could not be "+
+							"resolved statically; %s deps there were not checked for vulnerabilities; "+
+							"scan marked incomplete\n",
+						laneAAdapter.Language, dir, laneAAdapter.Language)
+					continue
+				}
+				// Partial closure: declared/direct deps resolved, but the full transitive
+				// closure is unknown (e.g. Maven pom.xml or a .NET .csproj without running
+				// the build tool). Fall through to query OSV for the KNOWN deps — a match
+				// on a resolved dep is a sound PACKAGE_REACHABLE positive — while the scan
+				// stays incomplete so the unresolved portion never reads as a false-clean.
+				fmt.Fprintf(os.Stderr,
+					"warning: %s dependency closure is partial in %s (declared/direct deps only; "+
+						"transitives unresolved without running the build tool); the known deps "+
+						"were checked but the scan is marked incomplete\n",
+					laneAAdapter.Language, dir)
+			}
+			aggDeps = append(aggDeps, dirDeps...)
 		}
+
+		if !aggComplete {
+			incomplete = true
+		}
+
+		// Dedup aggregated deps by normalised name@version before querying OSV.
+		// "runtime" wins when the same dep has different DepTypes across sub-projects.
+		deps := dedupLaneADeps(aggDeps, laneAAdapter.NormalizeName)
 
 		// Query OSV advisories for the resolved closure (full when complete=true,
 		// declared/direct-only when this is a partial closure that fell through above).
@@ -1218,8 +1280,13 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		unsupportedEco.hasPython = false // Python plugin binary is available
 	}
 	// Clear Lane-A ecosystems: they were handled by the registry loop above.
+	// Also clear for adapters that ran solely via subdirectory discovery (i.e.
+	// laneAAdapterActive is false but manifests were found in subdirs); their eco
+	// flag is already false so clearLaneAFlag is a no-op, but the explicit check
+	// ensures we don't accidentally leave a root-detected flag set when discovery
+	// also produced results.
 	for _, laneAAdapter := range LaneAAdapters() {
-		if laneAAdapterActive(laneAAdapter.Language, eco) {
+		if laneAAdapterActive(laneAAdapter.Language, eco) || len(laneADiscovered[laneAAdapter.Language]) > 0 {
 			clearLaneAFlag(&unsupportedEco, laneAAdapter.Language)
 		}
 	}
