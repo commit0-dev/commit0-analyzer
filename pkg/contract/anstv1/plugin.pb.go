@@ -56,6 +56,75 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Ecosystem identifies the package ecosystem / language a plugin operates on.
+// This is an additive discriminator: Go/JS plugins that predate this field
+// may omit it (zero value = ECOSYSTEM_UNKNOWN); the host infers the
+// ecosystem from the plugin's MetadataResponse.supported_languages when the
+// field is absent.
+type Ecosystem int32
+
+const (
+	// ECOSYSTEM_UNKNOWN is the zero/default. Treated as unknown ecosystem.
+	Ecosystem_ECOSYSTEM_UNKNOWN Ecosystem = 0
+	// ECOSYSTEM_GO covers the Go module ecosystem (go.mod / go.sum).
+	Ecosystem_ECOSYSTEM_GO Ecosystem = 1
+	// ECOSYSTEM_NPM covers the npm / Node.js ecosystem (package.json / package-lock.json).
+	Ecosystem_ECOSYSTEM_NPM Ecosystem = 2
+	// ECOSYSTEM_CRATES_IO covers the Rust / Cargo ecosystem (Cargo.toml / Cargo.lock).
+	Ecosystem_ECOSYSTEM_CRATES_IO Ecosystem = 3
+	// ECOSYSTEM_PYPI covers the Python / PyPI ecosystem (pyproject.toml / requirements.txt).
+	Ecosystem_ECOSYSTEM_PYPI Ecosystem = 4
+	// ECOSYSTEM_MAVEN covers the Java / Maven and Gradle ecosystems (pom.xml / build.gradle).
+	Ecosystem_ECOSYSTEM_MAVEN Ecosystem = 5
+)
+
+// Enum value maps for Ecosystem.
+var (
+	Ecosystem_name = map[int32]string{
+		0: "ECOSYSTEM_UNKNOWN",
+		1: "ECOSYSTEM_GO",
+		2: "ECOSYSTEM_NPM",
+		3: "ECOSYSTEM_CRATES_IO",
+		4: "ECOSYSTEM_PYPI",
+		5: "ECOSYSTEM_MAVEN",
+	}
+	Ecosystem_value = map[string]int32{
+		"ECOSYSTEM_UNKNOWN":   0,
+		"ECOSYSTEM_GO":        1,
+		"ECOSYSTEM_NPM":       2,
+		"ECOSYSTEM_CRATES_IO": 3,
+		"ECOSYSTEM_PYPI":      4,
+		"ECOSYSTEM_MAVEN":     5,
+	}
+)
+
+func (x Ecosystem) Enum() *Ecosystem {
+	p := new(Ecosystem)
+	*p = x
+	return p
+}
+
+func (x Ecosystem) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Ecosystem) Descriptor() protoreflect.EnumDescriptor {
+	return file_anst_v1_plugin_proto_enumTypes[0].Descriptor()
+}
+
+func (Ecosystem) Type() protoreflect.EnumType {
+	return &file_anst_v1_plugin_proto_enumTypes[0]
+}
+
+func (x Ecosystem) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Ecosystem.Descriptor instead.
+func (Ecosystem) EnumDescriptor() ([]byte, []int) {
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{0}
+}
+
 // Confidence describes how certain the analyzer is that a vulnerable symbol or
 // package is actually reachable from an entry point.
 //
@@ -114,11 +183,11 @@ func (x Confidence) String() string {
 }
 
 func (Confidence) Descriptor() protoreflect.EnumDescriptor {
-	return file_anst_v1_plugin_proto_enumTypes[0].Descriptor()
+	return file_anst_v1_plugin_proto_enumTypes[1].Descriptor()
 }
 
 func (Confidence) Type() protoreflect.EnumType {
-	return &file_anst_v1_plugin_proto_enumTypes[0]
+	return &file_anst_v1_plugin_proto_enumTypes[1]
 }
 
 func (x Confidence) Number() protoreflect.EnumNumber {
@@ -127,7 +196,7 @@ func (x Confidence) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Confidence.Descriptor instead.
 func (Confidence) EnumDescriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{0}
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{1}
 }
 
 // Severity classifies the impact of a vulnerability.
@@ -171,11 +240,11 @@ func (x Severity) String() string {
 }
 
 func (Severity) Descriptor() protoreflect.EnumDescriptor {
-	return file_anst_v1_plugin_proto_enumTypes[1].Descriptor()
+	return file_anst_v1_plugin_proto_enumTypes[2].Descriptor()
 }
 
 func (Severity) Type() protoreflect.EnumType {
-	return &file_anst_v1_plugin_proto_enumTypes[1]
+	return &file_anst_v1_plugin_proto_enumTypes[2]
 }
 
 func (x Severity) Number() protoreflect.EnumNumber {
@@ -184,7 +253,7 @@ func (x Severity) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Severity.Descriptor instead.
 func (Severity) EnumDescriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{1}
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{2}
 }
 
 // Location identifies a source position.
@@ -455,7 +524,18 @@ type Finding struct {
 	// Populated by the host when aggregating findings from multiple plugin types.
 	Pillar string `protobuf:"bytes,7,opt,name=pillar,proto3" json:"pillar,omitempty"`
 	// language is a reserved tag for multi-language support (e.g. "go", "js", "python").
-	Language      string `protobuf:"bytes,8,opt,name=language,proto3" json:"language,omitempty"`
+	Language string `protobuf:"bytes,8,opt,name=language,proto3" json:"language,omitempty"`
+	// ecosystem identifies the package ecosystem this finding came from.
+	// Optional; Go/JS plugins that predate this field may leave it at the
+	// zero value (ECOSYSTEM_UNKNOWN). New plugins SHOULD set this so findings
+	// can be grouped and filtered per ecosystem without parsing the language string.
+	Ecosystem Ecosystem `protobuf:"varint,9,opt,name=ecosystem,proto3,enum=anst.v1.Ecosystem" json:"ecosystem,omitempty"`
+	// incomplete signals that the analysis producing this finding was partial:
+	// the plugin could not fully resolve the dependency graph or call graph, so
+	// additional vulnerable paths may exist that were not checked. When true,
+	// the host MUST set the scan-level incomplete flag. The zero value (false)
+	// means analysis was complete for this finding's dependency.
+	Incomplete    bool `protobuf:"varint,10,opt,name=incomplete,proto3" json:"incomplete,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -546,6 +626,20 @@ func (x *Finding) GetLanguage() string {
 	return ""
 }
 
+func (x *Finding) GetEcosystem() Ecosystem {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return Ecosystem_ECOSYSTEM_UNKNOWN
+}
+
+func (x *Finding) GetIncomplete() bool {
+	if x != nil {
+		return x.Incomplete
+	}
+	return false
+}
+
 // Symbol identifies a specific function or method within a package.
 type Symbol struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -619,7 +713,12 @@ type Advisory struct {
 	// When false, the analyzer MUST degrade to CONFIDENCE_PACKAGE_REACHABLE at best.
 	SymbolLevel bool `protobuf:"varint,5,opt,name=symbol_level,json=symbolLevel,proto3" json:"symbol_level,omitempty"`
 	// sources lists the advisory data sources (e.g. ["go-vuln-db"]).
-	Sources       []string `protobuf:"bytes,6,rep,name=sources,proto3" json:"sources,omitempty"`
+	Sources []string `protobuf:"bytes,6,rep,name=sources,proto3" json:"sources,omitempty"`
+	// ecosystem identifies the package ecosystem this advisory applies to.
+	// Optional; Go/JS advisories may omit this field (pre-dates the multi-language
+	// extension). New plugins SHOULD set this so the host can route version
+	// comparison to the correct per-ecosystem comparator.
+	Ecosystem     Ecosystem `protobuf:"varint,7,opt,name=ecosystem,proto3,enum=anst.v1.Ecosystem" json:"ecosystem,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -696,6 +795,13 @@ func (x *Advisory) GetSources() []string {
 	return nil
 }
 
+func (x *Advisory) GetEcosystem() Ecosystem {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return Ecosystem_ECOSYSTEM_UNKNOWN
+}
+
 // BuildConfig specifies the build environment for analysis.
 // When the analysis target cannot be built for the specified config, the analyzer
 // MUST degrade to CONFIDENCE_UNKNOWN (never NOT_REACHABLE) for affected findings.
@@ -762,6 +868,99 @@ func (x *BuildConfig) GetTags() []string {
 	return nil
 }
 
+// EcosystemBuildConfig carries per-ecosystem build context for non-Go plugins.
+// It gives Rust, Python, and future language plugins a dedicated place for their
+// build environment rather than overloading the Go-specific goos/goarch fields.
+// This message is optional and non-breaking: Go/JS plugins ignore it.
+type EcosystemBuildConfig struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ecosystem identifies which ecosystem this build config applies to.
+	Ecosystem Ecosystem `protobuf:"varint,1,opt,name=ecosystem,proto3,enum=anst.v1.Ecosystem" json:"ecosystem,omitempty"`
+	// target_triple is the ecosystem-specific build target descriptor.
+	// Rust: Cargo target triple (e.g. "x86_64-unknown-linux-gnu").
+	// Python: platform tag (e.g. "linux_x86_64").
+	// Absent for Go (use BuildConfig.goos/goarch instead).
+	TargetTriple string `protobuf:"bytes,2,opt,name=target_triple,json=targetTriple,proto3" json:"target_triple,omitempty"`
+	// features are ecosystem-specific feature flags to enable during analysis.
+	// Rust: Cargo feature names (e.g. ["serde", "tokio/full"]).
+	// Python: extras (e.g. ["dev", "test"]).
+	Features []string `protobuf:"bytes,3,rep,name=features,proto3" json:"features,omitempty"`
+	// python_version is the Python interpreter version string (e.g. "3.11.4").
+	// Only meaningful for ECOSYSTEM_PYPI; ignored by other ecosystems.
+	PythonVersion string `protobuf:"bytes,4,opt,name=python_version,json=pythonVersion,proto3" json:"python_version,omitempty"`
+	// extra_env carries additional key=value environment variables the plugin
+	// needs to replicate the project's build environment. Only values that are
+	// SAFE TO EXPOSE should be set here (no secrets, no credentials).
+	ExtraEnv      map[string]string `protobuf:"bytes,5,rep,name=extra_env,json=extraEnv,proto3" json:"extra_env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EcosystemBuildConfig) Reset() {
+	*x = EcosystemBuildConfig{}
+	mi := &file_anst_v1_plugin_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EcosystemBuildConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EcosystemBuildConfig) ProtoMessage() {}
+
+func (x *EcosystemBuildConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_anst_v1_plugin_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EcosystemBuildConfig.ProtoReflect.Descriptor instead.
+func (*EcosystemBuildConfig) Descriptor() ([]byte, []int) {
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *EcosystemBuildConfig) GetEcosystem() Ecosystem {
+	if x != nil {
+		return x.Ecosystem
+	}
+	return Ecosystem_ECOSYSTEM_UNKNOWN
+}
+
+func (x *EcosystemBuildConfig) GetTargetTriple() string {
+	if x != nil {
+		return x.TargetTriple
+	}
+	return ""
+}
+
+func (x *EcosystemBuildConfig) GetFeatures() []string {
+	if x != nil {
+		return x.Features
+	}
+	return nil
+}
+
+func (x *EcosystemBuildConfig) GetPythonVersion() string {
+	if x != nil {
+		return x.PythonVersion
+	}
+	return ""
+}
+
+func (x *EcosystemBuildConfig) GetExtraEnv() map[string]string {
+	if x != nil {
+		return x.ExtraEnv
+	}
+	return nil
+}
+
 // AnalyzeRequest is the single input type for the Analyze RPC.
 // Used by both the plugin host (Phase 2) and the standalone runner (Phase 4);
 // there is exactly one request type — no divergent advisory plumbing.
@@ -776,14 +975,18 @@ type AnalyzeRequest struct {
 	// build_config specifies the build environment for analysis.
 	BuildConfig *BuildConfig `protobuf:"bytes,3,opt,name=build_config,json=buildConfig,proto3" json:"build_config,omitempty"`
 	// advisories are the resolved vulnerabilities to check reachability for.
-	Advisories    []*Advisory `protobuf:"bytes,4,rep,name=advisories,proto3" json:"advisories,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Advisories []*Advisory `protobuf:"bytes,4,rep,name=advisories,proto3" json:"advisories,omitempty"`
+	// ecosystem_build_config carries per-ecosystem build context for non-Go plugins.
+	// Optional and additive: Go/JS plugins ignore this field. New language plugins
+	// (Rust, Python) use this instead of overloading the Go-specific build_config.
+	EcosystemBuildConfig *EcosystemBuildConfig `protobuf:"bytes,5,opt,name=ecosystem_build_config,json=ecosystemBuildConfig,proto3" json:"ecosystem_build_config,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *AnalyzeRequest) Reset() {
 	*x = AnalyzeRequest{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[8]
+	mi := &file_anst_v1_plugin_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -795,7 +998,7 @@ func (x *AnalyzeRequest) String() string {
 func (*AnalyzeRequest) ProtoMessage() {}
 
 func (x *AnalyzeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[8]
+	mi := &file_anst_v1_plugin_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -808,7 +1011,7 @@ func (x *AnalyzeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalyzeRequest.ProtoReflect.Descriptor instead.
 func (*AnalyzeRequest) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{8}
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AnalyzeRequest) GetModuleRoot() string {
@@ -839,6 +1042,13 @@ func (x *AnalyzeRequest) GetAdvisories() []*Advisory {
 	return nil
 }
 
+func (x *AnalyzeRequest) GetEcosystemBuildConfig() *EcosystemBuildConfig {
+	if x != nil {
+		return x.EcosystemBuildConfig
+	}
+	return nil
+}
+
 // MetadataRequest is sent by the host to identify itself during the handshake.
 type MetadataRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -850,7 +1060,7 @@ type MetadataRequest struct {
 
 func (x *MetadataRequest) Reset() {
 	*x = MetadataRequest{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[9]
+	mi := &file_anst_v1_plugin_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -862,7 +1072,7 @@ func (x *MetadataRequest) String() string {
 func (*MetadataRequest) ProtoMessage() {}
 
 func (x *MetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[9]
+	mi := &file_anst_v1_plugin_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -875,7 +1085,7 @@ func (x *MetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetadataRequest.ProtoReflect.Descriptor instead.
 func (*MetadataRequest) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{9}
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *MetadataRequest) GetHostVersion() string {
@@ -905,7 +1115,7 @@ type MetadataResponse struct {
 
 func (x *MetadataResponse) Reset() {
 	*x = MetadataResponse{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[10]
+	mi := &file_anst_v1_plugin_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -917,7 +1127,7 @@ func (x *MetadataResponse) String() string {
 func (*MetadataResponse) ProtoMessage() {}
 
 func (x *MetadataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[10]
+	mi := &file_anst_v1_plugin_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -930,7 +1140,7 @@ func (x *MetadataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetadataResponse.ProtoReflect.Descriptor instead.
 func (*MetadataResponse) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{10}
+	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MetadataResponse) GetName() string {
@@ -985,7 +1195,7 @@ const file_anst_v1_plugin_proto_rawDesc = "" +
 	"\vAdvisoryRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x18\n" +
-	"\aaliases\x18\x03 \x03(\tR\aaliases\"\x9b\x03\n" +
+	"\aaliases\x18\x03 \x03(\tR\aaliases\"\xed\x03\n" +
 	"\aFinding\x120\n" +
 	"\badvisory\x18\x01 \x01(\v2\x14.anst.v1.AdvisoryRefR\badvisory\x12\x16\n" +
 	"\x06module\x18\x02 \x01(\tR\x06module\x123\n" +
@@ -998,24 +1208,39 @@ const file_anst_v1_plugin_proto_rawDesc = "" +
 	"properties\x18\x06 \x03(\v2 .anst.v1.Finding.PropertiesEntryR\n" +
 	"properties\x12\x16\n" +
 	"\x06pillar\x18\a \x01(\tR\x06pillar\x12\x1a\n" +
-	"\blanguage\x18\b \x01(\tR\blanguage\x1a=\n" +
+	"\blanguage\x18\b \x01(\tR\blanguage\x120\n" +
+	"\tecosystem\x18\t \x01(\x0e2\x12.anst.v1.EcosystemR\tecosystem\x12\x1e\n" +
+	"\n" +
+	"incomplete\x18\n" +
+	" \x01(\bR\n" +
+	"incomplete\x1a=\n" +
 	"\x0fPropertiesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"6\n" +
 	"\x06Symbol\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xbf\x01\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xf1\x01\n" +
 	"\bAdvisory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06module\x18\x02 \x01(\tR\x06module\x12#\n" +
 	"\rversion_range\x18\x03 \x01(\tR\fversionRange\x12)\n" +
 	"\asymbols\x18\x04 \x03(\v2\x0f.anst.v1.SymbolR\asymbols\x12!\n" +
 	"\fsymbol_level\x18\x05 \x01(\bR\vsymbolLevel\x12\x18\n" +
-	"\asources\x18\x06 \x03(\tR\asources\"M\n" +
+	"\asources\x18\x06 \x03(\tR\asources\x120\n" +
+	"\tecosystem\x18\a \x01(\x0e2\x12.anst.v1.EcosystemR\tecosystem\"M\n" +
 	"\vBuildConfig\x12\x12\n" +
 	"\x04goos\x18\x01 \x01(\tR\x04goos\x12\x16\n" +
 	"\x06goarch\x18\x02 \x01(\tR\x06goarch\x12\x12\n" +
-	"\x04tags\x18\x03 \x03(\tR\x04tags\"\xbf\x01\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\"\xb7\x02\n" +
+	"\x14EcosystemBuildConfig\x120\n" +
+	"\tecosystem\x18\x01 \x01(\x0e2\x12.anst.v1.EcosystemR\tecosystem\x12#\n" +
+	"\rtarget_triple\x18\x02 \x01(\tR\ftargetTriple\x12\x1a\n" +
+	"\bfeatures\x18\x03 \x03(\tR\bfeatures\x12%\n" +
+	"\x0epython_version\x18\x04 \x01(\tR\rpythonVersion\x12H\n" +
+	"\textra_env\x18\x05 \x03(\v2+.anst.v1.EcosystemBuildConfig.ExtraEnvEntryR\bextraEnv\x1a;\n" +
+	"\rExtraEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x94\x02\n" +
 	"\x0eAnalyzeRequest\x12\x1f\n" +
 	"\vmodule_root\x18\x01 \x01(\tR\n" +
 	"moduleRoot\x12 \n" +
@@ -1023,7 +1248,8 @@ const file_anst_v1_plugin_proto_rawDesc = "" +
 	"\fbuild_config\x18\x03 \x01(\v2\x14.anst.v1.BuildConfigR\vbuildConfig\x121\n" +
 	"\n" +
 	"advisories\x18\x04 \x03(\v2\x11.anst.v1.AdvisoryR\n" +
-	"advisories\"4\n" +
+	"advisories\x12S\n" +
+	"\x16ecosystem_build_config\x18\x05 \x01(\v2\x1d.anst.v1.EcosystemBuildConfigR\x14ecosystemBuildConfig\"4\n" +
 	"\x0fMetadataRequest\x12!\n" +
 	"\fhost_version\x18\x01 \x01(\tR\vhostVersion\"\xbe\x01\n" +
 	"\x10MetadataResponse\x12\x12\n" +
@@ -1031,7 +1257,14 @@ const file_anst_v1_plugin_proto_rawDesc = "" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12)\n" +
 	"\x10protocol_version\x18\x03 \x01(\tR\x0fprotocolVersion\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12/\n" +
-	"\x13supported_languages\x18\x05 \x03(\tR\x12supportedLanguages*\x85\x01\n" +
+	"\x13supported_languages\x18\x05 \x03(\tR\x12supportedLanguages*\x89\x01\n" +
+	"\tEcosystem\x12\x15\n" +
+	"\x11ECOSYSTEM_UNKNOWN\x10\x00\x12\x10\n" +
+	"\fECOSYSTEM_GO\x10\x01\x12\x11\n" +
+	"\rECOSYSTEM_NPM\x10\x02\x12\x17\n" +
+	"\x13ECOSYSTEM_CRATES_IO\x10\x03\x12\x12\n" +
+	"\x0eECOSYSTEM_PYPI\x10\x04\x12\x13\n" +
+	"\x0fECOSYSTEM_MAVEN\x10\x05*\x85\x01\n" +
 	"\n" +
 	"Confidence\x12\x16\n" +
 	"\x12CONFIDENCE_UNKNOWN\x10\x00\x12\x1c\n" +
@@ -1060,44 +1293,52 @@ func file_anst_v1_plugin_proto_rawDescGZIP() []byte {
 	return file_anst_v1_plugin_proto_rawDescData
 }
 
-var file_anst_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_anst_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_anst_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_anst_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_anst_v1_plugin_proto_goTypes = []any{
-	(Confidence)(0),          // 0: anst.v1.Confidence
-	(Severity)(0),            // 1: anst.v1.Severity
-	(*Location)(nil),         // 2: anst.v1.Location
-	(*CallStep)(nil),         // 3: anst.v1.CallStep
-	(*ReachabilityPath)(nil), // 4: anst.v1.ReachabilityPath
-	(*AdvisoryRef)(nil),      // 5: anst.v1.AdvisoryRef
-	(*Finding)(nil),          // 6: anst.v1.Finding
-	(*Symbol)(nil),           // 7: anst.v1.Symbol
-	(*Advisory)(nil),         // 8: anst.v1.Advisory
-	(*BuildConfig)(nil),      // 9: anst.v1.BuildConfig
-	(*AnalyzeRequest)(nil),   // 10: anst.v1.AnalyzeRequest
-	(*MetadataRequest)(nil),  // 11: anst.v1.MetadataRequest
-	(*MetadataResponse)(nil), // 12: anst.v1.MetadataResponse
-	nil,                      // 13: anst.v1.Finding.PropertiesEntry
+	(Ecosystem)(0),               // 0: anst.v1.Ecosystem
+	(Confidence)(0),              // 1: anst.v1.Confidence
+	(Severity)(0),                // 2: anst.v1.Severity
+	(*Location)(nil),             // 3: anst.v1.Location
+	(*CallStep)(nil),             // 4: anst.v1.CallStep
+	(*ReachabilityPath)(nil),     // 5: anst.v1.ReachabilityPath
+	(*AdvisoryRef)(nil),          // 6: anst.v1.AdvisoryRef
+	(*Finding)(nil),              // 7: anst.v1.Finding
+	(*Symbol)(nil),               // 8: anst.v1.Symbol
+	(*Advisory)(nil),             // 9: anst.v1.Advisory
+	(*BuildConfig)(nil),          // 10: anst.v1.BuildConfig
+	(*EcosystemBuildConfig)(nil), // 11: anst.v1.EcosystemBuildConfig
+	(*AnalyzeRequest)(nil),       // 12: anst.v1.AnalyzeRequest
+	(*MetadataRequest)(nil),      // 13: anst.v1.MetadataRequest
+	(*MetadataResponse)(nil),     // 14: anst.v1.MetadataResponse
+	nil,                          // 15: anst.v1.Finding.PropertiesEntry
+	nil,                          // 16: anst.v1.EcosystemBuildConfig.ExtraEnvEntry
 }
 var file_anst_v1_plugin_proto_depIdxs = []int32{
-	2,  // 0: anst.v1.CallStep.location:type_name -> anst.v1.Location
-	3,  // 1: anst.v1.ReachabilityPath.steps:type_name -> anst.v1.CallStep
-	5,  // 2: anst.v1.Finding.advisory:type_name -> anst.v1.AdvisoryRef
-	0,  // 3: anst.v1.Finding.confidence:type_name -> anst.v1.Confidence
-	1,  // 4: anst.v1.Finding.severity:type_name -> anst.v1.Severity
-	4,  // 5: anst.v1.Finding.path:type_name -> anst.v1.ReachabilityPath
-	13, // 6: anst.v1.Finding.properties:type_name -> anst.v1.Finding.PropertiesEntry
-	7,  // 7: anst.v1.Advisory.symbols:type_name -> anst.v1.Symbol
-	9,  // 8: anst.v1.AnalyzeRequest.build_config:type_name -> anst.v1.BuildConfig
-	8,  // 9: anst.v1.AnalyzeRequest.advisories:type_name -> anst.v1.Advisory
-	11, // 10: anst.v1.Analyzer.Metadata:input_type -> anst.v1.MetadataRequest
-	10, // 11: anst.v1.Analyzer.Analyze:input_type -> anst.v1.AnalyzeRequest
-	12, // 12: anst.v1.Analyzer.Metadata:output_type -> anst.v1.MetadataResponse
-	6,  // 13: anst.v1.Analyzer.Analyze:output_type -> anst.v1.Finding
-	12, // [12:14] is the sub-list for method output_type
-	10, // [10:12] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	3,  // 0: anst.v1.CallStep.location:type_name -> anst.v1.Location
+	4,  // 1: anst.v1.ReachabilityPath.steps:type_name -> anst.v1.CallStep
+	6,  // 2: anst.v1.Finding.advisory:type_name -> anst.v1.AdvisoryRef
+	1,  // 3: anst.v1.Finding.confidence:type_name -> anst.v1.Confidence
+	2,  // 4: anst.v1.Finding.severity:type_name -> anst.v1.Severity
+	5,  // 5: anst.v1.Finding.path:type_name -> anst.v1.ReachabilityPath
+	15, // 6: anst.v1.Finding.properties:type_name -> anst.v1.Finding.PropertiesEntry
+	0,  // 7: anst.v1.Finding.ecosystem:type_name -> anst.v1.Ecosystem
+	8,  // 8: anst.v1.Advisory.symbols:type_name -> anst.v1.Symbol
+	0,  // 9: anst.v1.Advisory.ecosystem:type_name -> anst.v1.Ecosystem
+	0,  // 10: anst.v1.EcosystemBuildConfig.ecosystem:type_name -> anst.v1.Ecosystem
+	16, // 11: anst.v1.EcosystemBuildConfig.extra_env:type_name -> anst.v1.EcosystemBuildConfig.ExtraEnvEntry
+	10, // 12: anst.v1.AnalyzeRequest.build_config:type_name -> anst.v1.BuildConfig
+	9,  // 13: anst.v1.AnalyzeRequest.advisories:type_name -> anst.v1.Advisory
+	11, // 14: anst.v1.AnalyzeRequest.ecosystem_build_config:type_name -> anst.v1.EcosystemBuildConfig
+	13, // 15: anst.v1.Analyzer.Metadata:input_type -> anst.v1.MetadataRequest
+	12, // 16: anst.v1.Analyzer.Analyze:input_type -> anst.v1.AnalyzeRequest
+	14, // 17: anst.v1.Analyzer.Metadata:output_type -> anst.v1.MetadataResponse
+	7,  // 18: anst.v1.Analyzer.Analyze:output_type -> anst.v1.Finding
+	17, // [17:19] is the sub-list for method output_type
+	15, // [15:17] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_anst_v1_plugin_proto_init() }
@@ -1110,8 +1351,8 @@ func file_anst_v1_plugin_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_anst_v1_plugin_proto_rawDesc), len(file_anst_v1_plugin_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   12,
+			NumEnums:      3,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

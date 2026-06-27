@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.7.3",
+  "id": "OSV-TEST-GIT-NO-VERSIONS",
+  "modified": "2022-11-09T00:00:27Z",
+  "published": "2022-10-22T00:00:27Z",
+  "summary": "GIT-range-only advisory with NO versions[] enumeration — Undecidable (forwarded as UNKNOWN, never dropped)",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "testgitonly"
+      },
+      "ranges": [
+        {
+          "type": "GIT",
+          "repo": "https://github.com/example/testgitonly",
+          "events": [
+            {"introduced": "bb2016794f1f9bf9e4726727080e1beb789823fb"},
+            {"fixed": "f7363c1091c70356d92e56abfca6b65bef9e7b26"}
+          ]
+        }
+      ]
+    }
+  ]
+}

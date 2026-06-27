@@ -1,11 +1,54 @@
 package advisory
 
 import (
+	"strings"
+
 	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
 )
 
 // SourceGoVulnDB is the source attribution tag for the Go vulnerability database.
 const SourceGoVulnDB = "go-vuln-db"
+
+// Severity is the risk level of a vulnerability, derived from the CVSS base
+// score or the textual severity in an OSV record's severity[] array.
+// The integer values are ordered: Unspecified < Low < Medium < High < Critical.
+type Severity int
+
+const (
+	// SeverityUnspecified is the zero value when no severity data is present.
+	SeverityUnspecified Severity = iota
+	// SeverityLow corresponds to CVSS base score 0.1–3.9.
+	SeverityLow
+	// SeverityMedium corresponds to CVSS base score 4.0–6.9.
+	SeverityMedium
+	// SeverityHigh corresponds to CVSS base score 7.0–8.9.
+	SeverityHigh
+	// SeverityCritical corresponds to CVSS base score 9.0–10.0.
+	SeverityCritical
+)
+
+// cvssScoreToSeverity maps a CVSS v3/v4 numeric base score to the Severity
+// enum following the standard CVSS severity bands:
+//
+//	0.0        → None     → SeverityUnspecified
+//	0.1 – 3.9  → Low      → SeverityLow
+//	4.0 – 6.9  → Medium   → SeverityMedium
+//	7.0 – 8.9  → High     → SeverityHigh
+//	9.0 – 10.0 → Critical → SeverityCritical
+func cvssScoreToSeverity(score float64) Severity {
+	switch {
+	case score <= 0.0:
+		return SeverityUnspecified
+	case score < 4.0:
+		return SeverityLow
+	case score < 7.0:
+		return SeverityMedium
+	case score < 9.0:
+		return SeverityHigh
+	default:
+		return SeverityCritical
+	}
+}
 
 // Symbol is a vulnerable function or method within a package.
 type Symbol struct {
@@ -65,10 +108,127 @@ type Advisory struct {
 	// Not included in ToProto — consumed Go-side before the proto is built.
 	FixRefs []string
 
+	// Incomplete is set to true when the version comparison for this advisory was
+	// undecidable (e.g. unparseable version string, unrecognised ecosystem). The
+	// advisory is still included in query results so the host can emit a synthetic
+	// UNKNOWN finding; dropping it would be a silent false negative.
+	// Not part of the wire proto.
+	Incomplete bool
+
+	// Versions is the explicit version list from the OSV affected[].versions field.
+	// It is populated when an affected entry has no SEMVER/ECOSYSTEM ranges — only
+	// the versions enumeration. AffectsVersionV uses it for exact-membership matching
+	// when VersionRanges is empty. When VersionRanges is non-empty, Versions is
+	// ignored (the range comparison is authoritative).
+	// Not part of the wire proto.
+	Versions []string
+
+	// UndecidableRanges is true when the OSV affected entry carried a non-version
+	// (GIT-commit) range anst cannot compare AND no versions[] enumeration to fall
+	// back on. AffectsVersionV returns VersionUndecidable in that case so the
+	// advisory is forwarded as an UNKNOWN finding rather than silently dropped
+	// (unknown != safe). It distinguishes a GIT-range-only entry (undecidable) from
+	// a truly empty entry with no version constraint at all (not affected).
+	// Not part of the wire proto.
+	UndecidableRanges bool
+
+	// Severity is the vulnerability risk level parsed from the OSV severity[]
+	// array (CVSS v3/v4 base score) or database_specific.severity string.
+	// SeverityUnspecified (zero value) means no severity data was present.
+	// The host may use this to surface risk tiers in findings without touching
+	// the wire proto (which is out of scope for this advisory layer).
+	// Not part of the wire proto.
+	Severity Severity
+
 	// Provenance — not part of the wire proto; stamped into finding properties.
 	SnapshotDigest  string // content digest of the snapshot this advisory came from
 	SnapshotAge     string // human-readable age string (e.g. "72h")
 	DBSourceVersion string // version string reported by the DB (e.g. "2024-06-01T00:00:00Z")
+}
+
+// VersionVerdict is the tri-state result of a version range comparison.
+//
+// A parse error or unrecognised ecosystem always returns VersionUndecidable,
+// never VersionNotAffected. This ensures that an unparseable or unrouted version
+// does not silently drop an advisory host-side (which would be a false negative).
+type VersionVerdict int
+
+const (
+	// VersionNotAffected means the version is provably outside every affected range.
+	// This is the ONLY safe reason to drop an advisory.
+	VersionNotAffected VersionVerdict = iota
+
+	// VersionAffected means the version falls within at least one affected range.
+	VersionAffected
+
+	// VersionUndecidable means the comparison could not be completed — typically
+	// due to an unparseable version string or an unrecognised ecosystem. The
+	// advisory MUST still be forwarded and the dep MUST be marked incomplete=true.
+	VersionUndecidable
+)
+
+// AffectsVersionV is the tri-state version of AffectsVersion.
+//
+// Routing is ecosystem-aware, delegating to the comparator registered for
+// a.Ecosystem via [RegisterComparator]. The built-in registrations cover Go,
+// npm, crates.io, and PyPI. New ecosystems register their comparator in their
+// own file's init() without editing this function.
+//
+// When no comparator is registered for a.Ecosystem, or when a comparator
+// returns VersionUndecidable, the caller must treat the advisory as "still
+// possibly affected" and emit a synthetic UNKNOWN finding + set incomplete=true.
+//
+// A parse error in any comparator returns VersionUndecidable, never
+// VersionNotAffected. This ensures that an unparseable or unrouted version
+// does not silently drop an advisory host-side (which would be a false negative).
+func (a *Advisory) AffectsVersionV(version string) VersionVerdict {
+	if len(a.VersionRanges) == 0 {
+		// No ranges to check. Fall through to versions-list matching if available.
+		if len(a.Versions) == 0 {
+			if a.UndecidableRanges {
+				// A non-version (GIT-commit) range was present but there is no
+				// versions[] enumeration to evaluate it against — genuinely
+				// undecidable. Forward as UNKNOWN rather than dropping (unknown != safe).
+				return VersionUndecidable
+			}
+			// No version constraint at all (no ranges and no versions): the advisory
+			// cannot identify any affected version, so matching it name-only would
+			// fire on every version. Treat it as not affected, matching osv-scanner's
+			// handling of such degenerate records.
+			return VersionNotAffected
+		}
+		// Versions-only entry: match against the explicit enumeration.
+		// The queried version may carry a "v" prefix from canonical(); strip it for
+		// comparison because OSV versions[] entries never carry a "v" prefix.
+		bare := strings.TrimPrefix(version, "v")
+		for _, v := range a.Versions {
+			if v == bare {
+				return VersionAffected
+			}
+		}
+		return VersionNotAffected
+	}
+
+	// Look up the ecosystem-specific comparator. An unregistered ecosystem is
+	// undecidable for every range — never silently not-affected.
+	cmp := lookupComparator(a.Ecosystem)
+	if cmp == nil {
+		return VersionUndecidable
+	}
+
+	hasUndecidable := false
+	for _, r := range a.VersionRanges {
+		switch v := cmp(version, r); v {
+		case VersionAffected:
+			return VersionAffected
+		case VersionUndecidable:
+			hasUndecidable = true
+		}
+	}
+	if hasUndecidable {
+		return VersionUndecidable
+	}
+	return VersionNotAffected
 }
 
 // AffectsVersion reports whether the advisory affects the given version.
@@ -80,6 +240,9 @@ type Advisory struct {
 //     versionInRange, which requires a canonical "vX.Y.Z" string.
 //
 // Returns false on any parse error (conservative: unknown → not matched).
+//
+// Deprecated: prefer AffectsVersionV, which returns a tri-state verdict so that
+// parse errors and unknown ecosystems are never silently treated as not-affected.
 func (a *Advisory) AffectsVersion(version string) bool {
 	for _, r := range a.VersionRanges {
 		var matched bool

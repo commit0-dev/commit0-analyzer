@@ -25,6 +25,31 @@ const SourceOSV = "osv.dev"
 // Reference: https://google.github.io/osv-scanner/usage/offline-mode/
 const osvDefaultBaseURL = "https://osv-vulnerabilities.storage.googleapis.com"
 
+// OSVBundleEcosystems lists every ecosystem whose advisory bundle is available
+// at the OSV GCS bucket (<osvDefaultBaseURL>/<ecosystem>/all.zip).
+//
+// These are the ecosystem names accepted by OSVBundleSource.Refresh — passing
+// any of these values to Refresh will download and extract the corresponding
+// bundle from osv.dev. The names match the "ecosystem" field in OSV JSON records
+// and are therefore also correct for Package.Ecosystem when calling Query.
+//
+// Each entry corresponds to an EcosystemXxx constant declared in source.go so
+// callers do not use raw strings. When a new ecosystem is added to osv.dev,
+// add its constant to source.go and append it here.
+var OSVBundleEcosystems = []string{
+	EcosystemGo,
+	EcosystemNPM,
+	EcosystemCratesIO,
+	EcosystemPyPI,
+	EcosystemMaven,
+	EcosystemNuGet,
+	EcosystemPackagist,
+	EcosystemRubyGems,
+	EcosystemHex,
+	EcosystemPub,
+	EcosystemSwiftURL,
+}
+
 // Zip-bomb guards. These apply per-file, per-entry-count, and in aggregate
 // across the entire extracted bundle. Bundle sizes vary widely by ecosystem:
 // the Go bundle is ~20 MiB, but the npm bundle is ~333 MiB uncompressed across
@@ -435,9 +460,17 @@ type advisoryIndex struct {
 }
 
 // buildAdvisoryIndex parses every *.json advisory in dir once and groups them by
-// normalized module name. It mirrors dirSource.query exactly for parsing,
-// corrupt-file skipping, withdrawn exclusion, and npm name normalization — only
-// the access pattern differs (index once vs. scan per query).
+// normalized module name. Unlike dirSource.query, it creates one Advisory per
+// affected package entry rather than merging all entries in a record into one.
+// This prevents cross-package range pollution in multi-package OSV records (e.g.
+// a single GHSA affecting langsmith, langchain-classic, and langchain with
+// different fixed bounds must not add the langchain-classic range to langsmith).
+//
+// For entries with no SEMVER/ECOSYSTEM ranges but an explicit versions[] list,
+// the versions list is stored on Advisory.Versions for exact-membership matching.
+// For entries with only GIT ranges, the advisory is stored with empty VersionRanges
+// and empty Versions so AffectsVersionV returns VersionUndecidable (forwarded with
+// Incomplete=true — unknown ≠ safe).
 func buildAdvisoryIndex(ctx context.Context, dir, ecosystem string) (*advisoryIndex, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -455,21 +488,154 @@ func buildAdvisoryIndex(ctx context.Context, dir, ecosystem string) (*advisoryIn
 		if err != nil {
 			return nil, fmt.Errorf("advisory: read %q: %w", entry.Name(), err)
 		}
-		adv, err := parseOSVRecord(data, ecosystem)
+		advs, err := parseOSVRecordPerPackage(data, ecosystem)
 		if err != nil {
 			// Corrupt advisory: skip with no hard error (matches dirSource.query).
 			continue
 		}
-		if adv.Withdrawn != "" {
-			continue
+		for i := range advs {
+			if advs[i].Withdrawn != "" {
+				continue
+			}
+			key := advs[i].Module
+			if ecosystem == EcosystemNPM {
+				key = normalizeNPMPackageName(key)
+			}
+			idx.byName[key] = append(idx.byName[key], advs[i])
 		}
-		key := adv.Module
-		if ecosystem == EcosystemNPM {
-			key = normalizeNPMPackageName(key)
-		}
-		idx.byName[key] = append(idx.byName[key], *adv)
 	}
 	return idx, nil
+}
+
+// osvAffectWithVersions extends the package-internal osvAffect type with the
+// OSV affected[].versions field, which lists specific enumerated versions.
+// The govulndb.go osvAffect type does not include this field because the Go
+// vuln DB does not use it; it is present in PyPI/npm/malware OSV records.
+type osvAffectWithVersions struct {
+	Package           osvPackage           `json:"package"`
+	Ranges            []osvRange           `json:"ranges"`
+	Versions          []string             `json:"versions"`
+	EcosystemSpecific osvEcosystemSpecific `json:"ecosystem_specific"`
+}
+
+// osvRecordWithVersions mirrors osvRecord but uses osvAffectWithVersions so
+// the per-entry versions[] list is captured during JSON decoding.
+type osvRecordWithVersions struct {
+	ID               string                  `json:"id"`
+	Aliases          []string                `json:"aliases"`
+	Affected         []osvAffectWithVersions `json:"affected"`
+	Withdrawn        string                  `json:"withdrawn"`
+	References       []osvReference          `json:"references"`
+	Severity         []osvSeverityEntry      `json:"severity"`
+	DatabaseSpecific osvDatabaseSpecific     `json:"database_specific"`
+}
+
+// parseOSVRecordPerPackage parses a single OSV JSON record and returns one
+// Advisory per affected package entry that matches the supplied ecosystem.
+// This is the index-builder's replacement for parseOSVRecord: it avoids
+// merging ranges from multiple packages in the same record into a single
+// advisory, which would cause false positives when packages have different
+// fixed bounds.
+//
+// Per-entry semantics:
+//   - SEMVER/ECOSYSTEM range events → VersionRanges (same as parseOSVRecord).
+//   - versions[] with no SEMVER/ECOSYSTEM ranges → Advisory.Versions (for exact
+//     membership matching in AffectsVersionV).
+//   - GIT-only ranges → both VersionRanges and Versions are empty, so
+//     AffectsVersionV returns VersionUndecidable (forwarded as Incomplete=true).
+//   - Severity, FixRefs, Withdrawn, Aliases, Sources are inherited from the
+//     top-level record and shared across all per-package advisories.
+func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error) {
+	var rec osvRecordWithVersions
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return nil, fmt.Errorf("advisory: parse OSV record: %w", err)
+	}
+
+	// Top-level fields shared by all per-package advisories in this record.
+	severity := parseOSVSeverity(rec.Severity, rec.DatabaseSpecific.Severity)
+	fixRefs := extractFixRefs(rec.References)
+
+	var result []Advisory
+	for _, aff := range rec.Affected {
+		if !strings.EqualFold(aff.Package.Ecosystem, ecosystem) {
+			continue
+		}
+
+		adv := Advisory{
+			ID:        rec.ID,
+			Aliases:   rec.Aliases,
+			Sources:   []string{SourceGoVulnDB},
+			Withdrawn: rec.Withdrawn,
+			Severity:  severity,
+			FixRefs:   fixRefs,
+			Module:    aff.Package.Name,
+		}
+
+		// Collect SEMVER/ECOSYSTEM ranges only. GIT and other non-version range
+		// types are skipped — their bounds are commit hashes, not release versions,
+		// so they cannot be compared with PEP 440 or semver. Track whether any such
+		// non-version range was present: when there is also no versions[] list to
+		// fall back on, the entry stays Undecidable (UNKNOWN), not NotAffected.
+		hasNonVersionRanges := false
+		for _, r := range aff.Ranges {
+			t := strings.ToUpper(r.Type)
+			switch t {
+			case "SEMVER", "ECOSYSTEM":
+				vrs := extractVersionRanges(r.Events)
+				if len(vrs) > 0 {
+					adv.VersionRanges = append(adv.VersionRanges, vrs...)
+				} else {
+					// Range block present but produced no events — open-ended range
+					// (all versions in range).
+					adv.VersionRanges = append(adv.VersionRanges, VersionRange{})
+				}
+			default:
+				// GIT or other non-version range type — bounds are commit hashes,
+				// not parseable as release versions. Skip the range; if a versions[]
+				// enumeration is present it is used as the authoritative affected set,
+				// otherwise the entry remains Undecidable (see UndecidableRanges below).
+				hasNonVersionRanges = true
+			}
+		}
+
+		// Extract symbols from ecosystem_specific.imports.
+		for _, imp := range aff.EcosystemSpecific.Imports {
+			for _, sym := range imp.Symbols {
+				adv.Symbols = append(adv.Symbols, Symbol{
+					Package: imp.Path,
+					Name:    sym,
+				})
+				adv.SymbolLevel = true
+			}
+		}
+
+		// When there are no SEMVER/ECOSYSTEM ranges anst can compare, fall back to
+		// the OSV affected[].versions enumeration as the authoritative affected set:
+		//   (a) No ranges of any kind → versions-only entry (e.g. MAL-2026-2144).
+		//   (b) GIT-only ranges → the commit-hash bounds cannot be compared with
+		//       release versions, but OSV enriches such records with the affected
+		//       released versions in versions[]. Trust that enumeration (as
+		//       osv-scanner does) so a release absent from it is NotAffected rather
+		//       than a noise UNKNOWN — e.g. Pillow 9.4.0 vs OSV-2022-715, which lists
+		//       only [9.1.0, 9.1.1, 9.2.0].
+		if len(adv.VersionRanges) == 0 && len(aff.Versions) > 0 {
+			adv.Versions = append([]string(nil), aff.Versions...)
+		}
+		// UndecidableRanges records that the entry had a non-version (GIT) range anst
+		// cannot evaluate AND no versions[] enumeration to fall back on. Such an entry
+		// stays Undecidable (UNKNOWN) — unknown != safe, we must not drop it. A truly
+		// empty entry (no ranges and no versions at all) does NOT set this and is
+		// treated as NotAffected (it cannot identify any affected version).
+		adv.UndecidableRanges = hasNonVersionRanges && len(adv.Versions) == 0
+
+		result = append(result, adv)
+	}
+
+	if len(result) == 0 {
+		// No matching ecosystem entries in this record.
+		return nil, fmt.Errorf("advisory: no %s entries in record %s", ecosystem, rec.ID)
+	}
+	return result, nil
 }
 
 // lookup returns advisories for pkg whose version ranges include version,
@@ -485,19 +651,29 @@ func (idx *advisoryIndex) lookup(pkg Package, version string, sources []string) 
 	if len(candidates) == 0 {
 		return nil
 	}
-	// canonical adds the "v" prefix required by the Go semver path; npmVersionInRange
+	// canonical adds the "v" prefix required by the Go semver path; npmVersionInRangeV
 	// strips it again, so this is harmless for npm but required for Go.
 	queryVersion := canonical(version)
 	var results []Advisory
 	for i := range candidates {
 		// Copy so the cached index is never mutated by per-query stamping.
 		adv := candidates[i]
-		// Set Ecosystem before version matching so AffectsVersion routes to the
-		// correct semver implementation (npm vs. Go).
+		// Set Ecosystem before version matching so AffectsVersionV routes to the
+		// correct semver implementation (npm vs. Go vs. crates.io vs. unknown).
 		adv.Ecosystem = pkg.Ecosystem
-		if adv.AffectsVersion(queryVersion) {
+		switch adv.AffectsVersionV(queryVersion) {
+		case VersionAffected:
 			adv.Sources = append([]string(nil), sources...)
 			results = append(results, adv)
+		case VersionUndecidable:
+			// Cannot determine whether this version is affected — include the advisory
+			// with Incomplete=true so the host can emit a synthetic UNKNOWN finding
+			// and set incomplete=true at the policy gate. Dropping it would be a
+			// silent false negative ("unknown ≠ safe").
+			adv.Sources = append([]string(nil), sources...)
+			adv.Incomplete = true
+			results = append(results, adv)
+		// VersionNotAffected: drop — the only safe drop.
 		}
 	}
 	return results

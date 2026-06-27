@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.4.0",
+  "id": "GHSA-3644-q5cj-c5c7",
+  "modified": "2025-01-01T00:00:00Z",
+  "published": "2025-01-01T00:00:00Z",
+  "summary": "Multi-package OSV record (langsmith, langchain-classic, langchain)",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "langsmith"
+      },
+      "ranges": [
+        {
+          "type": "ECOSYSTEM",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "0.8.0"}
+          ]
+        }
+      ],
+      "versions": ["0.0.1", "0.1.0", "0.7.9"]
+    },
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "langsmith"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "0.1.10"}
+          ]
+        }
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "langchain-classic"
+      },
+      "ranges": [
+        {
+          "type": "ECOSYSTEM",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "1.0.7"}
+          ]
+        }
+      ]
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "langchain"
+      },
+      "ranges": [
+        {
+          "type": "ECOSYSTEM",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "0.3.30"}
+          ]
+        }
+      ]
+    }
+  ]
+}

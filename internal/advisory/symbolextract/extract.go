@@ -1,10 +1,17 @@
-// Package symbolextract invokes the js-reachability plugin's --extract-symbols
-// subcommand to identify which exported JS/TS symbols were touched by a
-// security-fix patch.
+// Package symbolextract invokes a plugin's --extract-symbols subcommand to
+// identify which exported symbols were touched by a security-fix patch.
 //
 // The plugin binary reads a JSON request from stdin and writes a JSON array of
 // symbol objects to stdout.  This package handles subprocess lifecycle, JSON
 // marshalling, and maps the plugin output to the advisory.Symbol type.
+//
+// Protocol — the JSON array emitted by the plugin may carry an optional
+// "module" field per symbol.  When present, its value is used to populate
+// Symbol.Package (the fully-qualified module/package path, e.g.
+// "celery.kombu.utils.encoding" for Python or "crypto/tls" for Go).  When
+// the field is absent or empty the package is left as the empty string, which
+// is the correct behaviour for JS/TS where there is no import-path concept
+// equivalent to Go or Python.
 //
 // A subprocess that exits non-zero or emits unparseable output returns an
 // error; the caller decides how to degrade (e.g. fall back to package-level
@@ -46,8 +53,14 @@ type pluginFileContent struct {
 }
 
 // pluginSymbol is one element of the JSON array the plugin writes to stdout.
+//
+// The "module" field is optional.  When present it carries the fully-qualified
+// module/package path (e.g. "celery.kombu.utils.encoding" for Python,
+// "crypto/tls" for Go).  JS/TS plugins omit it; Python and Go plugins set it.
+// Extract maps it to Symbol.Package.
 type pluginSymbol struct {
 	File       string `json:"file"`
+	Module     string `json:"module"`      // optional; empty for JS/TS
 	ExportName string `json:"exportName"`
 	Kind       string `json:"kind"`
 }
@@ -102,9 +115,11 @@ func Extract(ctx context.Context, pluginBin, patch string, files []FileContent) 
 	syms := make([]advisory.Symbol, 0, len(raw))
 	for _, s := range raw {
 		syms = append(syms, advisory.Symbol{
-			// Package is not known at this layer (JS has no import-path concept
-			// equivalent to Go); leave it empty so callers can fill it from context.
-			Package: "",
+			// Package is populated from the optional "module" field emitted by the
+			// plugin.  Python plugins set this to the dotted module path
+			// (e.g. "celery.kombu.utils.encoding"); JS/TS plugins omit it, leaving
+			// the field empty, which is the correct behaviour for that ecosystem.
+			Package: s.Module,
 			Name:    s.ExportName,
 		})
 	}

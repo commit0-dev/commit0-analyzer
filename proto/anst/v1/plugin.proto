@@ -40,6 +40,31 @@ option go_package = "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
+// Ecosystem identifies the package ecosystem / language a plugin operates on.
+// This is an additive discriminator: Go/JS plugins that predate this field
+// may omit it (zero value = ECOSYSTEM_UNKNOWN); the host infers the
+// ecosystem from the plugin's MetadataResponse.supported_languages when the
+// field is absent.
+enum Ecosystem {
+  // ECOSYSTEM_UNKNOWN is the zero/default. Treated as unknown ecosystem.
+  ECOSYSTEM_UNKNOWN = 0;
+
+  // ECOSYSTEM_GO covers the Go module ecosystem (go.mod / go.sum).
+  ECOSYSTEM_GO = 1;
+
+  // ECOSYSTEM_NPM covers the npm / Node.js ecosystem (package.json / package-lock.json).
+  ECOSYSTEM_NPM = 2;
+
+  // ECOSYSTEM_CRATES_IO covers the Rust / Cargo ecosystem (Cargo.toml / Cargo.lock).
+  ECOSYSTEM_CRATES_IO = 3;
+
+  // ECOSYSTEM_PYPI covers the Python / PyPI ecosystem (pyproject.toml / requirements.txt).
+  ECOSYSTEM_PYPI = 4;
+
+  // ECOSYSTEM_MAVEN covers the Java / Maven and Gradle ecosystems (pom.xml / build.gradle).
+  ECOSYSTEM_MAVEN = 5;
+}
+
 // Confidence describes how certain the analyzer is that a vulnerable symbol or
 // package is actually reachable from an entry point.
 //
@@ -167,6 +192,19 @@ message Finding {
 
   // language is a reserved tag for multi-language support (e.g. "go", "js", "python").
   string language = 8;
+
+  // ecosystem identifies the package ecosystem this finding came from.
+  // Optional; Go/JS plugins that predate this field may leave it at the
+  // zero value (ECOSYSTEM_UNKNOWN). New plugins SHOULD set this so findings
+  // can be grouped and filtered per ecosystem without parsing the language string.
+  Ecosystem ecosystem = 9;
+
+  // incomplete signals that the analysis producing this finding was partial:
+  // the plugin could not fully resolve the dependency graph or call graph, so
+  // additional vulnerable paths may exist that were not checked. When true,
+  // the host MUST set the scan-level incomplete flag. The zero value (false)
+  // means analysis was complete for this finding's dependency.
+  bool incomplete = 10;
 }
 
 // ─── Input Messages ──────────────────────────────────────────────────────────
@@ -197,6 +235,12 @@ message Advisory {
   bool symbol_level = 5;
   // sources lists the advisory data sources (e.g. ["go-vuln-db"]).
   repeated string sources = 6;
+
+  // ecosystem identifies the package ecosystem this advisory applies to.
+  // Optional; Go/JS advisories may omit this field (pre-dates the multi-language
+  // extension). New plugins SHOULD set this so the host can route version
+  // comparison to the correct per-ecosystem comparator.
+  Ecosystem ecosystem = 7;
 }
 
 // BuildConfig specifies the build environment for analysis.
@@ -209,6 +253,35 @@ message BuildConfig {
   string goarch = 2;
   // tags are additional build tags to apply during analysis.
   repeated string tags = 3;
+}
+
+// EcosystemBuildConfig carries per-ecosystem build context for non-Go plugins.
+// It gives Rust, Python, and future language plugins a dedicated place for their
+// build environment rather than overloading the Go-specific goos/goarch fields.
+// This message is optional and non-breaking: Go/JS plugins ignore it.
+message EcosystemBuildConfig {
+  // ecosystem identifies which ecosystem this build config applies to.
+  Ecosystem ecosystem = 1;
+
+  // target_triple is the ecosystem-specific build target descriptor.
+  // Rust: Cargo target triple (e.g. "x86_64-unknown-linux-gnu").
+  // Python: platform tag (e.g. "linux_x86_64").
+  // Absent for Go (use BuildConfig.goos/goarch instead).
+  string target_triple = 2;
+
+  // features are ecosystem-specific feature flags to enable during analysis.
+  // Rust: Cargo feature names (e.g. ["serde", "tokio/full"]).
+  // Python: extras (e.g. ["dev", "test"]).
+  repeated string features = 3;
+
+  // python_version is the Python interpreter version string (e.g. "3.11.4").
+  // Only meaningful for ECOSYSTEM_PYPI; ignored by other ecosystems.
+  string python_version = 4;
+
+  // extra_env carries additional key=value environment variables the plugin
+  // needs to replicate the project's build environment. Only values that are
+  // SAFE TO EXPOSE should be set here (no secrets, no credentials).
+  map<string, string> extra_env = 5;
 }
 
 // AnalyzeRequest is the single input type for the Analyze RPC.
@@ -225,6 +298,11 @@ message AnalyzeRequest {
   BuildConfig build_config = 3;
   // advisories are the resolved vulnerabilities to check reachability for.
   repeated Advisory advisories = 4;
+
+  // ecosystem_build_config carries per-ecosystem build context for non-Go plugins.
+  // Optional and additive: Go/JS plugins ignore this field. New language plugins
+  // (Rust, Python) use this instead of overloading the Go-specific build_config.
+  EcosystemBuildConfig ecosystem_build_config = 5;
 }
 
 // ─── Metadata Messages ───────────────────────────────────────────────────────

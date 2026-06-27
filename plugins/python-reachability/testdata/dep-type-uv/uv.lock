@@ -1,0 +1,72 @@
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[[package]]
+name = "aiohttp"
+version = "3.9.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "black"
+version = "22.3.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "myapp"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "requests" },
+]
+
+[package.optional-dependencies]
+cache = [
+    { name = "redis" },
+]
+docs = [
+    { name = "sphinx" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
+    { name = "pytest" },
+]
+test = [
+    { name = "pytest-cov" },
+]
+docs = [
+    { name = "sphinx-rtd-theme" },
+]
+
+[[package]]
+name = "pytest"
+version = "7.4.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pytest-cov"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "redis"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "requests"
+version = "2.31.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "sphinx"
+version = "6.0.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "sphinx-rtd-theme"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }

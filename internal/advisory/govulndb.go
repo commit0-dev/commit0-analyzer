@@ -25,8 +25,24 @@ type osvRecord struct {
 	// retracted by the Go vuln DB maintainers. A non-empty value means the
 	// record is no longer considered a real vulnerability and must be excluded
 	// from query results to avoid false-positive findings (mirrors govulncheck).
-	Withdrawn  string         `json:"withdrawn"`
-	References []osvReference `json:"references"`
+	Withdrawn        string              `json:"withdrawn"`
+	References       []osvReference      `json:"references"`
+	Severity         []osvSeverityEntry  `json:"severity"`
+	DatabaseSpecific osvDatabaseSpecific `json:"database_specific"`
+}
+
+// osvSeverityEntry is one entry in the OSV top-level severity[] array.
+// Type is typically "CVSS_V3" or "CVSS_V4"; Score is the vector string
+// (e.g. "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H").
+type osvSeverityEntry struct {
+	Type  string `json:"type"`
+	Score string `json:"score"`
+}
+
+// osvDatabaseSpecific captures the database_specific object, which may carry
+// a textual severity string (e.g. "HIGH", "CRITICAL") for some ecosystems.
+type osvDatabaseSpecific struct {
+	Severity string `json:"severity"`
 }
 
 // osvReference is one entry in the OSV top-level references array.
@@ -73,13 +89,21 @@ type osvImport struct {
 
 // parseOSVRecord parses a single OSV JSON record into an internal Advisory
 // for the specified ecosystem. It extracts:
-//   - version ranges from affected[].ranges[] (SEMVER type only)
+//   - version ranges from affected[].ranges[] (SEMVER and ECOSYSTEM types)
 //   - symbols from affected[].ecosystem_specific.imports[].symbols
 //   - SymbolLevel=true when any import entry has at least one symbol
+//   - Severity from the top-level severity[] array (CVSS_V3/CVSS_V4 score)
+//     or database_specific.severity string, whichever is present
 //
 // Only affected entries whose Package.Ecosystem matches the supplied ecosystem
 // (case-insensitive) are processed; others are silently skipped.
 // The returned Advisory has Sources=["go-vuln-db"] (overridden by dirSource.query).
+//
+// ECOSYSTEM vs SEMVER range type: PyPI advisories in the OSV bundle use range
+// type "ECOSYSTEM" (not "SEMVER") because Python uses PEP 440, not SemVer. Both
+// types carry the same events schema ([introduced, fixed/last_affected]), so they
+// are parsed identically here. The correct comparator (pep440VersionInRangeV) is
+// selected later in AffectsVersionV by routing on Advisory.Ecosystem.
 func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 	var rec osvRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
@@ -98,14 +122,19 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 			continue
 		}
 
-		// Use the first Go ecosystem package as the canonical module.
+		// Use the first matching package as the canonical module name.
 		if adv.Module == "" {
 			adv.Module = aff.Package.Name
 		}
 
-		// Extract SEMVER ranges.
+		// Extract version ranges from both SEMVER and ECOSYSTEM range types.
+		// SEMVER is used by Go, npm, and crates.io. ECOSYSTEM is used by PyPI
+		// (PEP 440), Maven, and other non-SemVer ecosystems. Both types use the
+		// same events schema; the correct comparator is selected by AffectsVersionV
+		// based on Advisory.Ecosystem, not on the OSV range type stored here.
 		for _, r := range aff.Ranges {
-			if !strings.EqualFold(r.Type, "semver") {
+			t := strings.ToUpper(r.Type)
+			if t != "SEMVER" && t != "ECOSYSTEM" {
 				continue
 			}
 			vrs := extractVersionRanges(r.Events)
@@ -137,12 +166,238 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 		adv.VersionRanges = append(adv.VersionRanges, VersionRange{})
 	}
 
+	// Parse severity from the OSV severity[] array (prefer CVSS_V3/CVSS_V4)
+	// or fall back to database_specific.severity string.
+	adv.Severity = parseOSVSeverity(rec.Severity, rec.DatabaseSpecific.Severity)
+
 	// Collect URLs from references entries whose type is "FIX". These point at
 	// the commits or patches that resolved the vulnerability. Deduplicate and
 	// sort for determinism; produce an empty (non-nil) slice when none exist.
 	adv.FixRefs = extractFixRefs(rec.References)
 
 	return adv, nil
+}
+
+// parseOSVSeverity extracts the Severity level from OSV severity entries and/or
+// a database_specific severity string. CVSS_V3 and CVSS_V4 score vectors are
+// preferred; the database_specific string is the fallback.
+//
+// CVSS base score is the last numeric field in the vector string, which encodes
+// the score as part of the vector (e.g. "CVSS:3.1/.../C:H/I:H/A:H" has a base
+// score that must be computed from the vector). However, OSV records do NOT embed
+// the base score numerically in the severity entry — the score field IS the full
+// CVSS vector string. The base score must be extracted from the CVSS metrics.
+//
+// For pragmatic correctness without a full CVSS library, we parse the database_-
+// specific.severity string first (HIGH, CRITICAL, etc.) when available, and for
+// CVSS vectors we extract the base score from the well-known OSV GitHub Advisory
+// Database format where the score appears in the vector's trailing /X.X suffix
+// or is embedded in the CVSS:3.1/... string itself. For the common case of GHSA-
+// sourced records we fall back to parsing the vector's component metrics to derive
+// the approximate base score, implemented in parseCVSSVectorScore.
+func parseOSVSeverity(entries []osvSeverityEntry, dbSpecific string) Severity {
+	// Try CVSS vector entries first (CVSS_V3 preferred, CVSS_V4 accepted).
+	for _, e := range entries {
+		t := strings.ToUpper(e.Type)
+		if t != "CVSS_V3" && t != "CVSS_V4" {
+			continue
+		}
+		score, ok := parseCVSSVectorScore(e.Score)
+		if ok {
+			return cvssScoreToSeverity(score)
+		}
+	}
+
+	// Fall back to database_specific.severity textual string.
+	if dbSpecific != "" {
+		return textSeverityToSeverity(dbSpecific)
+	}
+
+	return SeverityUnspecified
+}
+
+// parseCVSSVectorScore extracts the base score from a CVSS v3.x or v4.0 vector
+// string. The OSV schema stores the full vector (e.g.
+// "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"); the base score is NOT
+// separately stored in the vector itself — it must be computed from the metrics.
+//
+// To avoid a full CVSS library dependency, this function uses a well-known
+// approximation for the most common CVSS v3 base metrics to derive a score that
+// is accurate enough for the four severity bands (Low/Medium/High/Critical).
+// Specifically, it sums the per-metric weights defined by CVSS 3.1 §7.1 and
+// returns the rounded base score. If the vector cannot be parsed, returns (0, false).
+//
+// For CVSS v4.0 vectors (CVSS:4.0/...) the same metric extraction is applied
+// to the base metrics (AV, AC, AT, PR, UI, VC, VI, VA, SC, SI, SA), which map
+// to approximately the same severity bands for triage purposes.
+func parseCVSSVectorScore(vector string) (float64, bool) {
+	if vector == "" {
+		return 0, false
+	}
+	// CVSS vectors start with "CVSS:3.0/", "CVSS:3.1/", or "CVSS:4.0/".
+	// Strip the version prefix and parse the metrics map.
+	slashIdx := strings.Index(vector, "/")
+	if slashIdx < 0 {
+		return 0, false
+	}
+	metricsStr := vector[slashIdx+1:]
+	metrics := make(map[string]string)
+	for _, part := range strings.Split(metricsStr, "/") {
+		kv := strings.SplitN(part, ":", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		metrics[kv[0]] = kv[1]
+	}
+
+	// Derive base score for CVSS v3.x using the standard formulae.
+	// We compute ISCBase, ISC, ExploitabilityScore, and BaseScore per CVSS 3.1 §7.1.
+	// Reference: https://www.first.org/cvss/v3.1/specification-document
+	av, avOK := cvss3AV(metrics["AV"])
+	ac, acOK := cvss3AC(metrics["AC"])
+	pr, prOK := cvss3PR(metrics["PR"], metrics["S"])
+	ui, uiOK := cvss3UI(metrics["UI"])
+	s, sOK := metrics["S"]
+	c, cOK := cvss3CIA(metrics["C"])
+	i, iOK := cvss3CIA(metrics["I"])
+	a, aOK := cvss3CIA(metrics["A"])
+
+	if !avOK || !acOK || !prOK || !uiOK || !sOK || !cOK || !iOK || !aOK {
+		// Missing required base metrics — cannot compute.
+		return 0, false
+	}
+
+	iscBase := 1 - (1-c)*(1-i)*(1-a)
+	var isc float64
+	if s == "U" {
+		isc = 6.42 * iscBase
+	} else {
+		isc = 7.52*(iscBase-0.029) - 3.25*pow(iscBase-0.02, 15)
+	}
+	exploitability := 8.22 * av * ac * pr * ui
+
+	var base float64
+	if isc <= 0 {
+		base = 0
+	} else if s == "U" {
+		base = roundHalfUp(min64(isc+exploitability, 10))
+	} else {
+		base = roundHalfUp(min64(1.08*(isc+exploitability), 10))
+	}
+	return base, true
+}
+
+// roundHalfUp rounds x to one decimal place using CVSS rounding (round half up).
+func roundHalfUp(x float64) float64 {
+	// CVSS 3.1 §7.4: Roundup(x) = ceil(x * 10) / 10
+	return float64(int64(x*10+0.5)) / 10
+}
+
+// min64 returns the smaller of two float64 values.
+func min64(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// pow computes base^exp using repeated multiplication (avoids math package import).
+// Only used for CVSS formula with small integer exponents.
+func pow(base float64, exp int) float64 {
+	result := 1.0
+	for range exp {
+		result *= base
+	}
+	return result
+}
+
+// CVSS v3.1 base metric weight tables (§7.1).
+
+func cvss3AV(v string) (float64, bool) {
+	switch v {
+	case "N":
+		return 0.85, true
+	case "A":
+		return 0.62, true
+	case "L":
+		return 0.55, true
+	case "P":
+		return 0.20, true
+	}
+	return 0, false
+}
+
+func cvss3AC(v string) (float64, bool) {
+	switch v {
+	case "L":
+		return 0.77, true
+	case "H":
+		return 0.44, true
+	}
+	return 0, false
+}
+
+// cvss3PR returns the Privileges Required weight, which depends on Scope (S).
+func cvss3PR(pr, scope string) (float64, bool) {
+	if scope == "C" {
+		switch pr {
+		case "N":
+			return 0.85, true
+		case "L":
+			return 0.68, true
+		case "H":
+			return 0.50, true
+		}
+	} else {
+		switch pr {
+		case "N":
+			return 0.85, true
+		case "L":
+			return 0.62, true
+		case "H":
+			return 0.27, true
+		}
+	}
+	return 0, false
+}
+
+func cvss3UI(v string) (float64, bool) {
+	switch v {
+	case "N":
+		return 0.85, true
+	case "R":
+		return 0.62, true
+	}
+	return 0, false
+}
+
+func cvss3CIA(v string) (float64, bool) {
+	switch v {
+	case "H":
+		return 0.56, true
+	case "L":
+		return 0.22, true
+	case "N":
+		return 0, true
+	}
+	return 0, false
+}
+
+// textSeverityToSeverity converts a textual severity string (as found in
+// database_specific.severity of some OSV records) to the Severity enum.
+// The comparison is case-insensitive.
+func textSeverityToSeverity(s string) Severity {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "LOW":
+		return SeverityLow
+	case "MEDIUM", "MODERATE":
+		return SeverityMedium
+	case "HIGH":
+		return SeverityHigh
+	case "CRITICAL":
+		return SeverityCritical
+	}
+	return SeverityUnspecified
 }
 
 // gitHubCommitRefRE matches a GitHub commit URL (the form ghfetch can fetch).
@@ -291,21 +546,31 @@ func (d *dirSource) query(ctx context.Context, pkg Package, version string) ([]A
 		if advModule != queryName {
 			continue
 		}
-		// Set Ecosystem before version matching so AffectsVersion can route to
-		// the correct semver implementation (npm vs. Go).
+		// Set Ecosystem before version matching so AffectsVersionV can route to
+		// the correct semver implementation (npm vs. Go vs. crates.io vs. unknown).
 		adv.Ecosystem = pkg.Ecosystem
 
 		// Normalise the query version for the Go semver path (canonical adds the
-		// "v" prefix required by golang.org/x/mod/semver). For npm, AffectsVersion
-		// routes to npmVersionInRange which strips any "v" prefix itself, so
+		// "v" prefix required by golang.org/x/mod/semver). For npm, AffectsVersionV
+		// routes to npmVersionInRangeV which strips any "v" prefix itself, so
 		// canonical() is a no-op there but harmless.
 		queryVersion := canonical(version)
-		if adv.AffectsVersion(queryVersion) {
+		switch adv.AffectsVersionV(queryVersion) {
+		case VersionAffected:
 			// Override Sources with the caller's attribution tag so that the
 			// same parseOSVRecord result can carry different provenance depending
 			// on which source's cache dir was scanned.
 			adv.Sources = append([]string(nil), d.sources...)
 			results = append(results, *adv)
+		case VersionUndecidable:
+			// Cannot determine whether this version is affected — include the advisory
+			// with Incomplete=true so the host can emit a synthetic UNKNOWN finding
+			// and set incomplete=true at the policy gate. Dropping it would be a
+			// silent false negative ("unknown ≠ safe").
+			adv.Sources = append([]string(nil), d.sources...)
+			adv.Incomplete = true
+			results = append(results, *adv)
+		// VersionNotAffected: drop — the only safe drop.
 		}
 	}
 

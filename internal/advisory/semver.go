@@ -2,6 +2,51 @@ package advisory
 
 import "golang.org/x/mod/semver"
 
+// versionInRangeV is the tri-state variant of versionInRange.
+//
+// Returns:
+//   - VersionAffected when version falls within the range.
+//   - VersionNotAffected when version is provably outside the range.
+//   - VersionUndecidable when the version or a bound cannot be parsed — the
+//     caller must treat this as "possibly affected" and flag incomplete=true.
+func versionInRangeV(version string, r VersionRange) VersionVerdict {
+	if !semver.IsValid(version) {
+		return VersionUndecidable
+	}
+
+	// Check lower bound (Introduced is inclusive).
+	if r.Introduced != "" {
+		introduced := canonical(r.Introduced)
+		if !semver.IsValid(introduced) {
+			return VersionUndecidable
+		}
+		if semver.Compare(version, introduced) < 0 {
+			return VersionNotAffected // version < introduced
+		}
+	}
+
+	// Check upper bound: Fixed is exclusive, LastAffected is inclusive.
+	if r.Fixed != "" {
+		fixed := canonical(r.Fixed)
+		if !semver.IsValid(fixed) {
+			return VersionUndecidable
+		}
+		if semver.Compare(version, fixed) >= 0 {
+			return VersionNotAffected // version >= fixed
+		}
+	} else if r.LastAffected != "" {
+		lastAffected := canonical(r.LastAffected)
+		if !semver.IsValid(lastAffected) {
+			return VersionUndecidable
+		}
+		if semver.Compare(version, lastAffected) > 0 {
+			return VersionNotAffected // version > last_affected
+		}
+	}
+
+	return VersionAffected
+}
+
 // versionInRange reports whether version falls within the SEMVER range r.
 //
 // The range is half-open: [Introduced, Fixed).
@@ -13,6 +58,9 @@ import "golang.org/x/mod/semver"
 // go.sum. Non-canonical strings (missing "v" prefix, pseudo-versions that do not
 // parse) cause versionInRange to return false conservatively — the caller should
 // surface this as unknown confidence, not as safe.
+//
+// Deprecated: prefer versionInRangeV, which returns a tri-state verdict so that
+// parse errors are never silently treated as not-affected.
 func versionInRange(version string, r VersionRange) bool {
 	if !semver.IsValid(version) {
 		return false

@@ -697,3 +697,203 @@ func TestOSVBundleSource_Refresh_EntryCountBomb_HardError(t *testing.T) {
 
 	assertNoManifest(t, filepath.Join(cacheDir, EcosystemGo))
 }
+
+// ─── PyPI precision: multi-package record isolation (Bug A) ──────────────────
+
+// TestBuildAdvisoryIndex_PyPI_MultiPackageRecord_Isolation verifies that a single
+// OSV record affecting multiple PyPI packages (e.g. langsmith, langchain-classic,
+// langchain with different fixed bounds) does NOT pollute the ranges of one package
+// with ranges belonging to another.
+//
+// Regression for: langsmith@0.8.18 false-positive from GHSA-3644-q5cj-c5c7 where
+// langchain-classic's range [0, 1.0.7) captured langsmith@0.8.18 (< 1.0.7).
+func TestBuildAdvisoryIndex_PyPI_MultiPackageRecord_Isolation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-MULTI-PKG-GHSA-3644.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-MULTI-PKG-GHSA-3644.json"), data, 0o644))
+
+	ctx := context.Background()
+	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
+	require.NoError(t, err)
+
+	// langsmith@0.8.18 is ABOVE fixed=0.8.0 → must be NOT affected (Bug A regression).
+	results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "langsmith"}, canonical("0.8.18"), []string{"test"})
+	assert.Empty(t, results,
+		"langsmith@0.8.18 must NOT match: above fixed=0.8.0 (was false-positive due to cross-package range pollution)")
+
+	// langsmith@0.7.9 is BELOW fixed=0.8.0 → must be affected (true positive).
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "langsmith"}, canonical("0.7.9"), []string{"test"})
+	assert.Len(t, results, 1,
+		"langsmith@0.7.9 must match: inside [0, 0.8.0)")
+
+	// langsmith@0.8.0 is AT fixed boundary (exclusive) → must NOT be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "langsmith"}, canonical("0.8.0"), []string{"test"})
+	assert.Empty(t, results,
+		"langsmith@0.8.0 must NOT match: equals fixed bound (exclusive)")
+
+	// langchain range is [0, 0.3.30) → langchain@1.3.9 must NOT be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "langchain"}, canonical("1.3.9"), []string{"test"})
+	assert.Empty(t, results,
+		"langchain@1.3.9 must NOT match: above fixed=0.3.30")
+
+	// langchain@0.0.308 is the fixed bound (exclusive) → must NOT be affected.
+	// Note: fixture uses 0.3.30; the real GHSA-f73w has 0.0.308. We test the fixture's value.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "langchain"}, canonical("0.3.30"), []string{"test"})
+	assert.Empty(t, results,
+		"langchain@0.3.30 must NOT match: equals fixed bound (exclusive)")
+
+	// langchain@0.3.0 is inside [0, 0.3.30) → must be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "langchain"}, canonical("0.3.0"), []string{"test"})
+	assert.Len(t, results, 1,
+		"langchain@0.3.0 must match: inside [0, 0.3.30)")
+}
+
+// ─── PyPI precision: fixed/last_affected boundary semantics (Bug A) ──────────
+
+// TestBuildAdvisoryIndex_PyPI_BoundarySemantics encodes boundary cases 3 and 4:
+// fixed is EXCLUSIVE (pinned == fixed → NotAffected) and last_affected is
+// INCLUSIVE (pinned == last_affected → Affected).
+func TestBuildAdvisoryIndex_PyPI_BoundarySemantics(t *testing.T) {
+	t.Parallel()
+
+	// Case: fixed boundary — version == fixed → NotAffected (EXCLUSIVE).
+	// pynacl 1.6.2 vs fixed 1.6.2 and langchain 1.3.9 vs fixed 1.3.9.
+	fixedBoundaryAdv := &Advisory{
+		Ecosystem:     EcosystemPyPI,
+		VersionRanges: []VersionRange{{Introduced: "", Fixed: "1.6.2"}},
+	}
+	if got := fixedBoundaryAdv.AffectsVersionV(canonical("1.6.2")); got != VersionNotAffected {
+		t.Errorf("pynacl@1.6.2 vs fixed=1.6.2 (exclusive): got %v, want VersionNotAffected", got)
+	}
+	if got := fixedBoundaryAdv.AffectsVersionV(canonical("1.6.1")); got != VersionAffected {
+		t.Errorf("pynacl@1.6.1 vs fixed=1.6.2: got %v, want VersionAffected", got)
+	}
+	if got := fixedBoundaryAdv.AffectsVersionV(canonical("1.7.0")); got != VersionNotAffected {
+		t.Errorf("pynacl@1.7.0 vs fixed=1.6.2: got %v, want VersionNotAffected", got)
+	}
+
+	// Case: last_affected boundary — version == last_affected → Affected (INCLUSIVE).
+	// diskcache 5.6.3 vs last_affected 5.6.3.
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-LAST-AFFECTED-BOUNDARY.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-LAST-AFFECTED-BOUNDARY.json"), data, 0o644))
+
+	ctx := context.Background()
+	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
+	require.NoError(t, err)
+
+	// diskcache@5.6.3 == last_affected=5.6.3 (inclusive) → must be Affected.
+	results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testdiskcache"}, canonical("5.6.3"), []string{"test"})
+	assert.Len(t, results, 1,
+		"testdiskcache@5.6.3 must match: equals last_affected=5.6.3 (inclusive bound)")
+	assert.False(t, results[0].Incomplete,
+		"true-positive last_affected match must not be incomplete")
+
+	// diskcache@5.6.4 > last_affected=5.6.3 → must NOT be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testdiskcache"}, canonical("5.6.4"), []string{"test"})
+	assert.Empty(t, results,
+		"testdiskcache@5.6.4 must NOT match: above last_affected=5.6.3")
+}
+
+// ─── PyPI precision: versions-only affected entries (Bug B) ──────────────────
+
+// TestBuildAdvisoryIndex_PyPI_VersionsOnly verifies that an OSV affected entry
+// with NO ranges but an explicit versions[] list matches only listed versions.
+//
+// Regression for: MAL-2026-2144 (litellm@1.91.0 false-positive — only
+// versions ["1.82.7", "1.82.8"] are listed as malicious).
+func TestBuildAdvisoryIndex_PyPI_VersionsOnly(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-MAL-VERSIONS-ONLY.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-MAL-VERSIONS-ONLY.json"), data, 0o644))
+
+	ctx := context.Background()
+	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
+	require.NoError(t, err)
+
+	// testpkg@1.91.0 is NOT in versions list → must NOT be affected (Bug B regression).
+	results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpkg"}, canonical("1.91.0"), []string{"test"})
+	assert.Empty(t, results,
+		"testpkg@1.91.0 must NOT match: not in versions list [1.82.7, 1.82.8]")
+
+	// testpkg@1.82.7 IS in versions list → must be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpkg"}, canonical("1.82.7"), []string{"test"})
+	assert.Len(t, results, 1,
+		"testpkg@1.82.7 must match: explicitly in versions list")
+	assert.False(t, results[0].Incomplete,
+		"versions-list match must not be incomplete")
+
+	// testpkg@1.82.8 IS in versions list → must be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpkg"}, canonical("1.82.8"), []string{"test"})
+	assert.Len(t, results, 1,
+		"testpkg@1.82.8 must match: explicitly in versions list")
+
+	// testpkg@1.0.0 is NOT in versions list → must NOT be affected.
+	results = idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpkg"}, canonical("1.0.0"), []string{"test"})
+	assert.Empty(t, results,
+		"testpkg@1.0.0 must NOT match: not in versions list")
+}
+
+// ─── PyPI precision: GIT-range-only advisory (pillow case, Bug B invariant) ──
+
+// TestBuildAdvisoryIndex_PyPI_GitRangeOnly verifies that an OSV record whose only
+// ranges are of type GIT (git commit hashes) is forwarded as Undecidable+Incomplete,
+// not silently dropped as NotAffected and not falsely matched as Affected for all
+// versions. GIT hashes are not parseable as PEP 440 versions.
+func TestBuildAdvisoryIndex_PyPI_GitRangeWithVersions(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-GIT-RANGES-ONLY.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-GIT-RANGES-ONLY.json"), data, 0o644))
+
+	ctx := context.Background()
+	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
+	require.NoError(t, err)
+
+	// The fixture's only range is GIT-typed but it carries an authoritative
+	// versions[] list ([9.1.0, 9.1.1, 9.2.0]). That list decides affectedness:
+	// a release in the list is Affected (decided, not incomplete)...
+	for _, v := range []string{"9.1.0", "9.1.1", "9.2.0"} {
+		results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpillow"}, canonical(v), []string{"test"})
+		if assert.Len(t, results, 1, "testpillow@%s is in the versions[] list: must match", v) {
+			assert.False(t, results[0].Incomplete,
+				"testpillow@%s: a versions[] match is decided, not incomplete", v)
+		}
+	}
+	// ...and a release absent from the list is NotAffected → not forwarded (no noise
+	// UNKNOWN), matching osv-scanner's handling of GIT-range advisories.
+	for _, v := range []string{"12.2.0", "1.0.0"} {
+		results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testpillow"}, canonical(v), []string{"test"})
+		assert.Empty(t, results,
+			"testpillow@%s is absent from the versions[] list: must be NotAffected (dropped)", v)
+	}
+}
+
+// TestBuildAdvisoryIndex_PyPI_GitRangeNoVersions verifies the safety case: a GIT-only
+// advisory with NO versions[] enumeration cannot be evaluated, so it stays
+// Undecidable and is forwarded as Incomplete=true (UNKNOWN) — never silently dropped
+// (unknown != safe).
+func TestBuildAdvisoryIndex_PyPI_GitRangeNoVersions(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	data := loadFixture(t, "PYPI-GIT-RANGE-NO-VERSIONS.json")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PYPI-GIT-RANGE-NO-VERSIONS.json"), data, 0o644))
+
+	ctx := context.Background()
+	idx, err := buildAdvisoryIndex(ctx, dir, EcosystemPyPI)
+	require.NoError(t, err)
+
+	for _, v := range []string{"9.1.0", "12.2.0", "1.0.0"} {
+		results := idx.lookup(Package{Ecosystem: EcosystemPyPI, Name: "testgitonly"}, canonical(v), []string{"test"})
+		if assert.Len(t, results, 1, "testgitonly@%s: GIT-only advisory with no versions[] must be forwarded (Undecidable)", v) {
+			assert.True(t, results[0].Incomplete,
+				"testgitonly@%s: GIT-only advisory with no versions[] must have Incomplete=true", v)
+		}
+	}
+}

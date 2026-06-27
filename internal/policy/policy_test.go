@@ -216,6 +216,30 @@ func TestPolicy_IncompleteScan_NeverExitsZero(t *testing.T) {
 		"incomplete scan must exit 3 (operational error)")
 }
 
+// TestPolicy_IncompleteScan_GatingFinding_ExitsGateFailure verifies the exit-code
+// precedence: a confirmed gate-failing finding exits 1 even when the scan is
+// incomplete — a reachable gating vulnerability is the strongest signal and must
+// not be masked by incompleteness. An incomplete scan with no gate-failing finding
+// still exits 3.
+func TestPolicy_IncompleteScan_GatingFinding_ExitsGateFailure(t *testing.T) {
+	p := &policy.Policy{
+		FailOn:        "high",
+		ReachableOnly: false,
+	}
+	// A PACKAGE_REACHABLE HIGH finding fails the gate; incomplete must not mask it.
+	code := p.EvaluateWithFlags(
+		[]*anstv1.Finding{makePackageReachableFinding()},
+		policy.EvalFlags{Incomplete: true},
+	)
+	assert.Equal(t, policy.ExitGateFailure, code,
+		"a gate-failing finding must exit 1 even when the scan is incomplete")
+
+	// With no gate-failing finding, incomplete still exits 3.
+	code = p.EvaluateWithFlags(nil, policy.EvalFlags{Incomplete: true})
+	assert.Equal(t, policy.ExitOperationalError, code,
+		"incomplete scan with no gate-failing finding must exit 3")
+}
+
 // TestPolicy_EvaluateWithIgnores verifies that ignored findings (by exact tuple)
 // are excluded from the gate count, but rendered as suppressed (not absent).
 // The SARIF rendering of suppressed findings is tested in sarif_test.go.

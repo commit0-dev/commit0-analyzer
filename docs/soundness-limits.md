@@ -67,17 +67,37 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 | Source | Coverage | Symbol-level data |
 |---|---|---|
 | `go-vuln-db` (`vuln.go.dev`) | Go modules | Yes — the primary source for symbol-level precision. |
-| `osv` (`osv.dev` offline bundle) | Go + npm/JS (+ future: PyPI, Cargo, …) | No — package-level only. |
+| `osv` (`osv.dev` offline bundle) | Go, npm/JS, Rust (crates.io), Python (PyPI), Maven (JVM), NuGet (.NET), Packagist (PHP), RubyGems (Ruby), Hex (Elixir), Pub (Dart), SwiftURL (Swift) | No — package-level only (all ecosystems). |
 
-**Honest Go-coverage note:** OSV.dev's "Go" ecosystem dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go modules, OSV adds **near-zero additional advisory coverage** — the merge layer collapses OSV entries back onto existing Go-DB symbol-level advisories. This is by design and expected. OSV is enabled by default because it exercises the multi-source dedup/merge path and makes adding non-Go ecosystems cheap later. The value is **architectural**, not coverage-based.
+**Honest Go-coverage note:** OSV.dev's "Go" ecosystem dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go modules, OSV adds **near-zero additional advisory coverage** — the merge layer collapses OSV entries back onto existing Go-DB symbol-level advisories. This is by design and expected. OSV is enabled by default because it exercises the multi-source dedup/merge path and makes adding non-Go ecosystems cheap. The value is **architectural**, not coverage-based.
 
 **Only the Go vuln DB carries symbol-level data.** OSV Go entries are package-level (`SymbolLevel=false`). When the same advisory appears in both sources, the Go-DB (symbol-level) representative is kept and OSV is attributed in `Sources`. No precision is ever invented: merging never fabricates symbol data from a package-level entry.
 
 **Multi-source dedup:** The same CVE appearing from Go-DB + OSV collapses to one merged advisory via alias matching (`{ID} ∪ Aliases` set intersection). The merged advisory carries `Sources: ["go-vuln-db", "osv.dev"]` for auditability. Output is deterministic (stable-sorted by advisory ID).
 
-**Implication for Go:** `anst-analyzer` and `govulncheck` use the same advisory symbol data. The differentiation is SARIF `codeFlows`, policy-as-code gating, and the plugin architecture — not symbol resolution precision.
+**Implication for Go:** `anst-analyzer` and `govulncheck` use the same advisory symbol data. The differentiation is SARIF `codeFlows`, policy-as-code gating, and multi-ecosystem support — not symbol resolution precision.
 
 **For JS/TS:** the OSV npm bundle is the only advisory source. No symbol-level data is available for npm (OSV npm entries are package-level only). The JS plugin narrows findings by building an import-reachability graph, so findings are NOT_REACHABLE for packages that are installed but never imported from a reachable entry point.
+
+**For Rust:** OSV.dev includes crates.io advisories and RustSec data. Rust reachability is package-level (no static call graph available in the current implementation). Symbol hints may come from RustSec advisory metadata but are not propagated as SYMBOL_REACHABLE findings.
+
+**For Python:** OSV.dev includes PyPI advisories. Python reachability uses a call-graph-driven analysis on the installed environment (lockfile-static; no code execution). For dynamic apps, UNKNOWN is correct and expected — the tool cannot prove reachability under `importlib.import_module()` and similar dynamic patterns. NOT_REACHABLE is never surfaced for gate purposes on Python (negative reachability is unsound on dynamic languages).
+
+**For JVM (Java/Kotlin/Scala):** OSV.dev includes Maven Central advisories. Reachability is package-level only (lockfile-static, no bytecode analysis available). Version matching uses Apache Maven ComparableVersion ordering. Dependency types (dev vs runtime) come from Maven `<scope>` (test, provided → dev) and Gradle configurations.
+
+**For .NET:** OSV.dev includes NuGet package advisories. Reachability is package-level only (lockfile-static, no static call graph available). Version matching uses NuGet SemVer-2 with 4-part versions and floating ranges. Dependency types come from `.csproj` `<PrivateAssets>All</PrivateAssets>` markup (if present); lockfile-only scans default all packages to runtime (documented trade-off, incomplete without `dotnet restore`).
+
+**For PHP:** OSV.dev includes Packagist advisories. Reachability is package-level only (lockfile-static, no static call graph available). Version matching respects Composer stability flags (stable, RC, beta, alpha, dev). Dependency types come from `composer.lock` sections: `packages` (runtime) vs `packages-dev` (dev).
+
+**For Ruby:** OSV.dev includes RubyGems advisories. Reachability is package-level only (lockfile-static, no static call graph available; `Gemfile` is executable Ruby and is **never** evaluated). Version matching uses `Gem::Version` canonical segments (supports pessimistic `~>` at the range level). Dependency types (dev vs runtime) come from `Gemfile.lock` groups (development, test → dev).
+
+**For Elixir:** OSV.dev includes Hex advisories. Reachability is package-level only (lockfile-static, no static call graph available; `mix.exs` is executable Elixir and is **never** evaluated). Version matching uses SemVer 2.0. Dependency types (dev vs runtime) come from `mix.lock` grouping. An unparseable `mix.lock` (e.g., incomplete lockfile) is treated as an incomplete scan (exit 3), never a false clean pass.
+
+**For Dart:** OSV.dev includes Pub advisories. Reachability is package-level only (lockfile-static, no static call graph available). Advisory volume is currently **thin** — Pub has fewer published vulnerabilities than more mature ecosystems. Version matching uses `pub_semver` (build metadata is significant, unlike SemVer 2.0). Dependency types (dev vs runtime) come from `pubspec.lock`.
+
+**For Swift:** OSV.dev includes SwiftURL ecosystem advisories. Reachability is package-level only (lockfile-static; `Package.swift` is executable Swift and is **never** evaluated). Packages are identified by their git repository URL; anst normalizes resolved URLs to match advisory identifiers. Version matching uses SemVer 2.0. All dependencies in `Package.resolved` are tagged as runtime (dependency types are not distinguished in the lockfile).
+
+**Partial closures (Maven pom.xml, .NET .csproj):** A plain `pom.xml` project without a lockfile can be scanned for declared direct dependencies only (incomplete closure); transitive dependencies require Maven to build. Such scans are marked incomplete (exit 3). Similarly, `.csproj` without a generated lockfile scans declared references (incomplete); `dotnet restore` generates the full closure.
 
 ### Live fetch and caching
 
@@ -108,6 +128,105 @@ A dependency is `PACKAGE_REACHABLE` if there is a static import path from any en
 **Workspace (monorepo) attribution:** In an npm/Yarn/pnpm workspace, each workspace package is analyzed independently using only that workspace's entrypoints and declared deps. A dep that is declared in a workspace's `package.json` (including hoisted deps) but not imported from that workspace's entrypoints emits `NOT_REACHABLE` for that workspace. `NOT_REACHABLE` findings are included in JSON output (`--format json`) and in the audit trail; they are **suppressed** (but auditable) in SARIF output per the SARIF suppression spec — they do not appear as active results in SARIF. If a dep appears in the root `node_modules/` but is not declared in the workspace's own `package.json`, it is a **phantom dependency** and is tagged `phantom (undeclared)` in the finding.
 
 **Ceiling:** The JS plugin currently operates at package-level reachability. Symbol-level (`SYMBOL_REACHABLE`) findings require Jelly enrichment, which is a fast-follow. Until Jelly enrichment is enabled, the maximum confidence for JS findings is `PACKAGE_REACHABLE`.
+
+### Rust
+
+The Rust plugin uses `cargo metadata` to enumerate declared dependencies (online by default; `--offline` honored). Entry points are all crates in the workspace. Reachability is determined via a static dependency graph — a vulnerable crate is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** Rust reachability is package-level only. There is no static call-graph analysis. A vulnerable crate's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Symbol hints may come from RustSec advisory metadata but are not propagated as reachable/not-reachable confidence levels.
+
+**Toolchain:** The Rust plugin pins the resolver to stable toolchain for safety; `cargo metadata` never runs build scripts. Scanning is deterministic and sandbox-safe.
+
+### Python
+
+The Python plugin performs AST-driven call-graph analysis on a lockfile-static resolved dependency set (uv.lock, poetry.lock, requirements.txt, or pyproject.toml). No code execution is required; the resolver works offline and sandboxed.
+
+**Entry points:** The plugin analyzes all top-level modules in the project and installed dependencies, building an import-and-call graph. A vulnerable function is `SYMBOL_REACHABLE` when directly referenced from reachable first-party code (sound direct-reference lower bound). A vulnerable package is `PACKAGE_REACHABLE` if imported from reachable code.
+
+**Dynamic languages and UNKNOWN:** Python allows dynamic imports via `importlib.import_module()`, `__import__()`, `exec`, and string-based configuration. When a package's import path cannot be statically determined, the finding confidence is `UNKNOWN`. **UNKNOWN on Python is correct, not a limitation** — it means the analysis completed but cannot prove the package is used under runtime dynamism.
+
+**Dependency types:** Each finding includes `dep_type` (runtime, optional-extra, dev, test, docs) from the manifest. Non-runtime findings do not fail the gate by default; use `--gate-on` to customize. This segmentation helps prioritize findings: a dev-only vulnerable dependency is surfaced but typically lower risk than a runtime vulnerability.
+
+**Negative reachability (NOT_REACHABLE):** On a dynamic app, `NOT_REACHABLE` is unsound — a package's absence from the static call graph does not prove it is unused (config-driven imports could load it at runtime). Accordingly, `NOT_REACHABLE` findings never gate, and `--gate-on reachable` suppresses `UNKNOWN` on non-runtime deps to focus on provable vulnerabilities.
+
+**Ceiling:** Python reachability is call-graph-driven (positive model). The maximum confidence is `SYMBOL_REACHABLE` (with `--symbols`); `PACKAGE_REACHABLE` when symbol-level data is unavailable.
+
+### JVM (Java / Kotlin / Scala)
+
+The JVM analyzer resolves dependencies from Maven `pom.xml` or Gradle `gradle.lockfile` (and `build.gradle[.kts]` for detection). Entry points are all declared library and application dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** JVM reachability is package-level only. There is no bytecode or call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Manifest-only scans (`.pom` without lockfile) are incomplete. Gradle projects require `gradle.lockfile` or `--offline false` to auto-detect and resolve. Multi-module projects are detected and scanned from the root; subdirectory-only manifests may not be fully detected (shared root-detection limitation).
+
+### .NET
+
+The .NET analyzer resolves dependencies from NuGet lockfiles (`packages.lock.json`, `project.assets.json`) or declared dependencies in `.csproj` files. Entry points are all declared package references. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** .NET reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** `.csproj`-only scans (without a generated lockfile) report only declared dependencies and are marked **incomplete** (exit 3) — transitive dependencies cannot be resolved without running `dotnet restore`. Lockfile-only scans default all packages to runtime dep_type (a documented trade-off when `.csproj` with `<PrivateAssets>` tags is absent). Multi-project solutions are detected and scanned from the root; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+### PHP
+
+The PHP analyzer resolves dependencies from the `composer.lock` lockfile. Entry points are all declared package dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** PHP reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Requires `composer.lock` (generated by `composer install`). The analyzer never runs `composer` — it is lockfile-static and sandbox-safe. Multi-project composer setups are detected from the root only; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+### Ruby
+
+The Ruby analyzer resolves dependencies from the `Gemfile.lock` lockfile. Entry points are all declared gem dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** Ruby reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Requires `Gemfile.lock` (generated by `bundle install`). The analyzer never evaluates the `Gemfile` — it is lockfile-static and sandbox-safe. Multi-project setups are detected from the root only; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+### Elixir / Erlang
+
+The Elixir analyzer resolves dependencies from `mix.lock` (for Elixir projects) or `rebar.lock` (for Erlang/rebar3 projects). Entry points are all declared application dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** Elixir reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Requires `mix.lock` or `rebar.lock` (generated by `mix deps.get` or `rebar3 get-deps`). The analyzer never evaluates `mix.exs` — it is lockfile-static and sandbox-safe. An unparseable or incomplete lockfile is marked as an incomplete scan (exit 3). Multi-project setups are detected from the root only; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+### Dart / Flutter
+
+The Dart analyzer resolves dependencies from the `pubspec.lock` lockfile. Entry points are all declared package dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** Dart reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Requires `pubspec.lock` (generated by `pub get` or `flutter pub get`). The analyzer never runs pub — it is lockfile-static and sandbox-safe. Advisory volume in Pub is currently thin — vulnerabilities in the Pub ecosystem are less comprehensively documented than in more mature ecosystems. Multi-project flutter setups are detected from the root only; subdirectory-only projects may not be fully detected (shared root-detection limitation).
+
+### Swift
+
+The Swift analyzer resolves dependencies from the `Package.resolved` lockfile. Entry points are all declared package dependencies. Reachability is determined via the lockfile's dependency graph — a vulnerable package is `PACKAGE_REACHABLE` if it is declared as a direct or transitive dependency.
+
+**Ceiling:** Swift reachability is package-level only. There is no static call-graph analysis. A vulnerable package's reachability always terminates at `PACKAGE_REACHABLE` (never `SYMBOL_REACHABLE`). Confidence tier options are `PACKAGE_REACHABLE`, `UNKNOWN`, or `NOT_REACHABLE`.
+
+**Limitations:** Requires `Package.resolved` (generated by `swift package resolve`). The analyzer never evaluates `Package.swift` — it is lockfile-static and sandbox-safe. Packages are identified by their git repository URL; anst normalizes resolved URLs to match advisory identifiers. All dependencies are tagged as runtime (dependency types are not distinguished in the lockfile).
+
+## Multi-Project Detection
+
+**Plugin ecosystems (Go, JS/TS, Rust, Python)** detect projects at the **project root** only:
+- Go: `go.mod` in subdirectories may not be detected.
+- JS/TS: `package.json` in subdirectories may not be detected.
+- Rust: `Cargo.toml` in subdirectories may not be detected.
+- Python: `pyproject.toml` or `requirements.txt` in subdirectories may not be detected.
+
+**Lane-A ecosystems (Maven, NuGet, Packagist, RubyGems, Hex, Pub, Swift)** now discover and scan manifests in subdirectories via bounded depth-limited walk:
+- JVM: Multiple `pom.xml` or `gradle.lockfile` files in subdirectories are now detected.
+- .NET: Multiple `.csproj` files in subdirectories of a shared solution are now detected.
+- PHP: Multiple `composer.lock` files in subdirectories are now detected.
+- Ruby: Multiple `Gemfile.lock` files in subdirectories are now detected.
+- Elixir: Multiple `mix.lock` or `rebar.lock` files in subdirectories are now detected.
+- Dart: Multiple `pubspec.lock` files in subdirectories are now detected.
+- Swift: Multiple `Package.resolved` files in subdirectories are now detected.
+
+The subdirectory walk is pruned by an ignore-list (`.git`, `node_modules`, `vendor`, `dist`, `build`, `target`, `obj`, dot-directories) so it never descends into dependency/build trees and stays fast. Hitting a project-directory cap marks the scan incomplete (exit 3).
+
+**Workaround for plugin ecosystems:** Run `anst scan` from the lowest common root containing all manifests, or explicitly pass `--language <lang>` to narrow scope when scanning from the desired project root.
 
 ## Performance Budget
 
