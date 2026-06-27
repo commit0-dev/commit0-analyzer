@@ -286,13 +286,15 @@ func (p *Policy) Evaluate(findings []*anstv1.Finding) int {
 }
 
 // EvaluateWithFlags runs the gate with explicit scan-state flags.
-// If flags.Incomplete is true, returns ExitOperationalError regardless of findings
-// (fail-closed: an incomplete scan must never read as a pass).
+//
+// Precedence: a confirmed gate-failing finding (gate-eligible, not ignored, and
+// meeting the severity threshold) returns ExitGateFailure even when the scan is
+// incomplete — a reachable gating vulnerability is the strongest, most actionable
+// signal and must not be masked by incompleteness. Only when nothing fails the
+// gate does flags.Incomplete take effect, returning ExitOperationalError
+// (fail-closed: an incomplete scan with no gate failure must never read as a pass).
+// A complete scan with no gate failure returns ExitPass.
 func (p *Policy) EvaluateWithFlags(findings []*anstv1.Finding, flags EvalFlags) int {
-	if flags.Incomplete {
-		return ExitOperationalError
-	}
-
 	for _, f := range findings {
 		if !p.isGateEligible(f) {
 			continue
@@ -303,6 +305,10 @@ func (p *Policy) EvaluateWithFlags(findings []*anstv1.Finding, flags EvalFlags) 
 		if p.meetsThreshold(f) {
 			return ExitGateFailure
 		}
+	}
+
+	if flags.Incomplete {
+		return ExitOperationalError
 	}
 	return ExitPass
 }

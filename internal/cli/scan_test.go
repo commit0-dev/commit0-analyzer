@@ -624,9 +624,12 @@ func TestScan_ProbeFailureWithValidCache_IncompleteNotZero(t *testing.T) {
 	assert.NotEqual(t, 0, code,
 		"probe failure + valid cache must not exit 0 (scan is incomplete)")
 
-	// Should exit 3 (incomplete via EvalFlags.Incomplete → ExitOperationalError).
-	assert.Equal(t, 3, code,
-		"probe failure + valid cache must exit 3 (incomplete)")
+	// The valid cache still surfaces the reachable CVE (a gating finding), which
+	// returns exit 1 even though the stale-cache probe failure marks the scan
+	// incomplete: a confirmed reachable vulnerability is not masked by
+	// incompleteness (the incomplete state is still surfaced on stderr).
+	assert.Equal(t, 1, code,
+		"probe failure + valid cache with a gating finding must exit 1 (gate failure wins over incomplete)")
 
 	// A warning must be printed to stderr.
 	assert.NotEmpty(t, stderr,
@@ -753,10 +756,12 @@ func TestScan_MultiSource_OSVFailure_WarnAndIncomplete(t *testing.T) {
 	// Must NOT be 0: an OSV failure marks the scan incomplete.
 	assert.NotEqual(t, 0, code,
 		"OSV source failure must not produce exit 0 (incomplete)")
-	// Must exit 3 (incomplete, not gate failure — gate failure would be 1 if
-	// Go-DB findings were gating, but incomplete overrides to 3).
-	assert.Equal(t, 3, code,
-		"OSV source failure + incomplete must exit 3")
+	// The go-vuln-db source still produces the gating Go finding, which returns
+	// exit 1 even though the OSV refresh failure marks the scan incomplete: a
+	// gate-failing finding wins over incompleteness (the incomplete state is still
+	// surfaced via the stderr warning checked above).
+	assert.Equal(t, 1, code,
+		"OSV failure with a gating go-vuln-db finding must exit 1 (gate failure wins over incomplete)")
 
 	// Warning must mention OSV failure.
 	assert.Contains(t, strings.ToLower(stderr), "osv",
@@ -842,9 +847,12 @@ func TestScan_MultiSource_OfflineMissingOSVCache(t *testing.T) {
 
 	t.Logf("exit=%d stderr=%q", code, stderr)
 
-	// Must exit 3 (incomplete) — OSV cache missing makes scan incomplete.
-	assert.Equal(t, 3, code,
-		"offline + missing OSV cache must exit 3 (incomplete), never 0")
+	// The go-vuln-db snapshot still produces the gating Go finding, which returns
+	// exit 1 even though the missing OSV cache marks the scan incomplete: a
+	// gate-failing finding wins over incompleteness, never exit 0 (the missing-cache
+	// warning is still surfaced on stderr, checked below).
+	assert.Equal(t, 1, code,
+		"offline + missing OSV cache with a gating finding must exit 1, never 0")
 
 	// Must print a warning about the missing OSV cache.
 	assert.NotEmpty(t, stderr, "must print a warning about the missing OSV cache")
