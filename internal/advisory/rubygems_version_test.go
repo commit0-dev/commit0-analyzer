@@ -205,7 +205,6 @@ func TestParseGemVersion_Invalid(t *testing.T) {
 		{name: "pipe", input: "1.0|2.0"},
 		{name: "hash_suffix", input: "1.0#beta"},
 		{name: "underscore", input: "1_0_0"},
-		{name: "dash_separator", input: "1-2-3"},
 	}
 
 	for _, tc := range cases {
@@ -215,6 +214,29 @@ func TestParseGemVersion_Invalid(t *testing.T) {
 			assert.Errorf(t, err, "parseGemVersion(%q) must return an error", tc.input)
 		})
 	}
+}
+
+// TestRubyGemsVersionInRangeV_HyphenPrereleaseBound covers a real false-positive
+// found by comparing against osv-scanner on OWASP RailsGoat: GHSA-mhpp-875w-9cpv
+// affects jquery-rails only in [3.0.0-rc.1, 3.0.0) — a hyphenated Gem::Version
+// pre-release bound. A released version above the fix (4.6.1) must be NotAffected,
+// not Undecidable (which would surface a false UNKNOWN finding).
+func TestRubyGemsVersionInRangeV_HyphenPrereleaseBound(t *testing.T) {
+	t.Parallel()
+	r := VersionRange{Introduced: "3.0.0-rc.1", Fixed: "3.0.0"}
+	assert.Equal(t, VersionNotAffected, rubyGemsVersionInRangeV("4.6.1", r),
+		"4.6.1 is far above the 3.0.0 fix — not affected, not UNKNOWN")
+	assert.Equal(t, VersionAffected, rubyGemsVersionInRangeV("3.0.0-rc.1", r),
+		"the pre-release itself is the only affected version")
+	assert.Equal(t, VersionNotAffected, rubyGemsVersionInRangeV("3.0.0", r),
+		"the fix version is excluded (Fixed is exclusive)")
+	// The hyphen and dot pre-release forms must compare identically.
+	hy, err := parseGemVersion("3.0.0-rc.1")
+	require.NoError(t, err)
+	dot, err := parseGemVersion("3.0.0.rc.1")
+	require.NoError(t, err)
+	assert.Equal(t, 0, compareGemVersions(hy, dot),
+		"\"3.0.0-rc.1\" and \"3.0.0.rc.1\" must be equal (hyphen is a separator)")
 }
 
 // ── compareGemVersions ────────────────────────────────────────────────────────

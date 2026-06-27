@@ -51,10 +51,24 @@ func parseGemVersion(v string) ([]gemSegment, error) {
 		return []gemSegment{{isStr: false, num: 0}}, nil
 	}
 
-	// Reject characters outside the allowed set (digits, ASCII letters, dots).
+	// A valid Gem::Version starts with a digit (VERSION_PATTERN begins with
+	// [0-9]+). Requiring a leading digit rejects all-letter garbage such as
+	// "not-a-version" — whose hyphens would otherwise scan into string segments —
+	// while still accepting hyphenated pre-releases like "3.0.0-rc.1".
+	if v[0] < '0' || v[0] > '9' {
+		return nil, fmt.Errorf("rubygems: version %q must start with a digit", v)
+	}
+
+	// Reject characters outside the allowed set (digits, ASCII letters, dots,
+	// and hyphens). A hyphen is just a separator in Gem::Version: its segment
+	// scan is /[0-9]+|[a-z]+/i, so "3.0.0-rc.1" and "3.0.0.rc.1" both segment to
+	// [3,0,0,"rc",1] — a pre-release of 3.0.0. OSV RubyGems range bounds use the
+	// hyphen form (e.g. introduced "3.0.0-rc.1"); rejecting "-" here turned a
+	// decidable bound into Undecidable and surfaced a false UNKNOWN finding
+	// (e.g. jquery-rails 4.6.1 flagged for an advisory affecting only 3.0.0-rc.1).
 	for i := 0; i < len(v); i++ {
 		c := v[i]
-		ok := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.'
+		ok := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '-'
 		if !ok {
 			return nil, fmt.Errorf("rubygems: invalid character %q in version %q", string(c), v)
 		}
