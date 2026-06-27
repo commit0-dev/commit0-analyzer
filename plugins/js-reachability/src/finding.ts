@@ -11,7 +11,7 @@
  *   - Findings sorted by stable key: advisory.id + module for determinism.
  */
 
-import { Confidence, Severity } from "./gen/anst/v1/plugin.js";
+import { Confidence, Ecosystem, Severity } from "./gen/anst/v1/plugin.js";
 import type {
   Finding,
   Advisory,
@@ -98,6 +98,8 @@ export function buildFinding(opts: BuildFindingOptions): Finding {
     properties,
     pillar: "sca",
     language,
+    ecosystem: Ecosystem.ECOSYSTEM_NPM,
+    incomplete: false,
   };
 }
 

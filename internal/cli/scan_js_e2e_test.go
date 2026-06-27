@@ -29,6 +29,9 @@ func buildSerializeJSAdvisoryZip(t *testing.T) []byte {
 		"modified":       "2024-06-01T00:00:00Z",
 		"published":      "2020-11-06T00:00:00Z",
 		"aliases":        []string{"CVE-2020-7793"},
+		"database_specific": map[string]interface{}{
+			"severity": "HIGH",
+		},
 		"affected": []map[string]interface{}{
 			{
 				"package": map[string]interface{}{
