@@ -41,10 +41,10 @@ func ParseCVSS(vector string) (CVSSMetric, error) {
 // specification §7.1 (base-score formula) and §7.4 (Roundup). A vector missing a
 // required base metric or carrying an invalid value yields an error.
 //
-// The weight tables (cvss3AV/AC/PR/UI/CIA) are shared with the existing OSV
-// severity path. The Roundup here is the spec-exact ceiling-based function — not
-// the round-half-up approximation used by the legacy parseCVSSVectorScore, which
-// undershoots boundary cases such as scope-changed XSS (6.1, not 6.0).
+// The weight tables (cvss3AV/AC/PR/UI/CIA) live in govulndb.go and are reused
+// here. The Roundup is the spec-exact ceiling-based function — not the
+// round-half-up approximation this engine replaced, which undershot boundary
+// cases such as scope-changed XSS (6.1, not 6.0).
 func parseCVSSv3(vector, version string) (CVSSMetric, error) {
 	metrics := cvssMetricMap(vector)
 
