@@ -1,0 +1,48 @@
+[
+  {
+    "advisory": {
+      "id": "GO-2024-0001",
+      "url": "https://pkg.go.dev/vuln/GO-2024-0001",
+      "aliases": ["CVE-2024-1111", "GHSA-aaaa-bbbb-cccc"]
+    },
+    "module": "github.com/foo/bar",
+    "confidence": "CONFIDENCE_SYMBOL_REACHABLE",
+    "severity": "SEVERITY_HIGH",
+    "risk": {
+      "score": 78.5,
+      "tier": "high",
+      "rationale": "symbol-reachable + CVSS 7.5",
+      "cvss": "7.5"
+    },
+    "properties": {
+      "cvss": "7.5",
+      "risk_rationale": "symbol-reachable + CVSS 7.5",
+      "risk_score": "78.5",
+      "risk_tier": "high"
+    },
+    "pillar": "reachability",
+    "language": "go"
+  },
+  {
+    "advisory": {
+      "id": "GO-2024-0002",
+      "aliases": ["CVE-2024-2222"]
+    },
+    "module": "github.com/foo/unreachable",
+    "confidence": "CONFIDENCE_NOT_REACHABLE",
+    "severity": "SEVERITY_CRITICAL",
+    "pillar": "reachability",
+    "language": "go"
+  },
+  {
+    "advisory": {
+      "id": "GO-2024-0003",
+      "aliases": ["CVE-2024-3333"]
+    },
+    "module": "github.com/foo/maybe",
+    "confidence": "CONFIDENCE_UNKNOWN",
+    "severity": "SEVERITY_MEDIUM",
+    "pillar": "reachability",
+    "language": "go"
+  }
+]

@@ -1,0 +1,98 @@
+{
+  "generated_from": "anst=anst corpus=4 baseline=\"go-vuln-db,osv\" full=\"go-vuln-db,osv,ghsa\"",
+  "skipped_comparators": [
+    {
+      "comparator": "govulncheck",
+      "reason": "could not run on anst-analyzer: run govulncheck: exit status 1"
+    },
+    {
+      "comparator": "grype",
+      "reason": "binary not on PATH (parity not claimed for this comparator)"
+    },
+    {
+      "comparator": "osv-scanner",
+      "reason": "could not run on npm-monorepo: run osv-scanner: exit status 1"
+    },
+    {
+      "comparator": "trivy",
+      "reason": "binary not on PATH (parity not claimed for this comparator)"
+    }
+  ],
+  "comparisons": null,
+  "coverage_gains": [
+    {
+      "corpus": "anst-analyzer",
+      "baseline_sources": "go-vuln-db,osv",
+      "full_sources": "go-vuln-db,osv,ghsa",
+      "baseline_count": 47,
+      "full_count": 47,
+      "new_findings": 0
+    },
+    {
+      "corpus": "litellm",
+      "baseline_sources": "go-vuln-db,osv",
+      "full_sources": "go-vuln-db,osv,ghsa",
+      "baseline_count": 93,
+      "full_count": 93,
+      "new_findings": 0
+    },
+    {
+      "corpus": "log4shell-maven",
+      "baseline_sources": "go-vuln-db,osv",
+      "full_sources": "go-vuln-db,osv,ghsa",
+      "baseline_count": 0,
+      "full_count": 0,
+      "new_findings": 0
+    },
+    {
+      "corpus": "npm-monorepo",
+      "baseline_sources": "go-vuln-db,osv",
+      "full_sources": "go-vuln-db,osv,ghsa",
+      "baseline_count": 234,
+      "full_count": 234,
+      "new_findings": 0
+    }
+  ],
+  "assertions": [
+    {
+      "name": "determinism/anst-analyzer",
+      "passed": true,
+      "detail": "two identical runs byte-compared"
+    },
+    {
+      "name": "determinism/litellm",
+      "passed": true,
+      "detail": "two identical runs byte-compared"
+    },
+    {
+      "name": "determinism/log4shell-maven",
+      "passed": true,
+      "detail": "two identical runs byte-compared"
+    },
+    {
+      "name": "determinism/npm-monorepo",
+      "passed": true,
+      "detail": "two identical runs byte-compared"
+    },
+    {
+      "name": "fail-closed/anst-analyzer",
+      "passed": true,
+      "detail": "injected source failure exit code = 3 (must be non-zero)"
+    },
+    {
+      "name": "fail-closed/litellm",
+      "passed": true,
+      "detail": "injected source failure exit code = 3 (must be non-zero)"
+    },
+    {
+      "name": "fail-closed/log4shell-maven",
+      "passed": true,
+      "detail": "injected source failure exit code = 3 (must be non-zero)"
+    },
+    {
+      "name": "fail-closed/npm-monorepo",
+      "passed": true,
+      "detail": "injected source failure exit code = 3 (must be non-zero)"
+    }
+  ]
+}

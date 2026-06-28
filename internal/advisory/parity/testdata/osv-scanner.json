@@ -1,0 +1,27 @@
+{
+  "results": [
+    {
+      "source": { "path": "go.mod", "type": "lockfile" },
+      "packages": [
+        {
+          "package": { "name": "github.com/foo/bar", "version": "1.2.0", "ecosystem": "Go" },
+          "vulnerabilities": [
+            { "id": "GHSA-aaaa-bbbb-cccc", "aliases": ["CVE-2024-1111", "GO-2024-0001"] }
+          ]
+        },
+        {
+          "package": { "name": "github.com/foo/unreachable", "version": "0.9.0", "ecosystem": "Go" },
+          "vulnerabilities": [
+            { "id": "CVE-2024-2222", "aliases": ["GO-2024-0002"] }
+          ]
+        },
+        {
+          "package": { "name": "github.com/foo/onlyosv", "version": "3.0.0", "ecosystem": "Go" },
+          "vulnerabilities": [
+            { "id": "CVE-2024-9999", "aliases": [] }
+          ]
+        }
+      ]
+    }
+  ]
+}
