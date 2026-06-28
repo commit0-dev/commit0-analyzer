@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/ducthinh993/anst-analyzer/internal/host"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/host"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // pluginBinPath is the path of the testplugin binary built by TestMain.
@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 	}
 
 	cmd := exec.Command("go", "build", "-o", bin,
-		"github.com/ducthinh993/anst-analyzer/internal/host/testplugin")
+		"github.com/commit0-dev/commit0-analyzer/internal/host/testplugin")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -87,7 +87,7 @@ func TestRun_NormalFindings(t *testing.T) {
 	reg := makeReg(t, "testplugin")
 	ctx := context.Background()
 
-	results, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 	require.NoError(t, err)
@@ -130,7 +130,7 @@ func TestRun_DeterministicAggregationOrder(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestRun_DeterministicAggregationOrder(t *testing.T) {
 	assert.Equal(t, "plugin-beta", results[1].Manifest.Name)
 
 	// Run a second time and assert the order is stable.
-	results2, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results2, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestRun_CrashMidStream(t *testing.T) {
 	reg := makeReg(t, "testplugin-crash")
 	ctx := context.Background()
 
-	results, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 	require.NoError(t, err, "Run must not fail when a plugin crashes (crash isolation)")
@@ -199,7 +199,7 @@ func TestRun_Timeout(t *testing.T) {
 	ctx := context.Background()
 
 	start := time.Now()
-	results, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		Timeout:    300 * time.Millisecond,
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
@@ -241,7 +241,7 @@ func TestRun_BackpressurePluginTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
-	results, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		Timeout:    500 * time.Millisecond,
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
@@ -265,10 +265,10 @@ func TestRun_BackpressurePluginTerminates(t *testing.T) {
 
 // assertHasSyntheticUnknown fails the test unless at least one Finding in
 // findings has CONFIDENCE_UNKNOWN and the "synthetic" property set to "true".
-func assertHasSyntheticUnknown(t *testing.T, findings []*anstv1.Finding) {
+func assertHasSyntheticUnknown(t *testing.T, findings []*commit0v1.Finding) {
 	t.Helper()
 	for _, f := range findings {
-		if f.GetConfidence() == anstv1.Confidence_CONFIDENCE_UNKNOWN &&
+		if f.GetConfidence() == commit0v1.Confidence_CONFIDENCE_UNKNOWN &&
 			f.GetProperties()["synthetic"] == "true" {
 			return
 		}
@@ -278,7 +278,7 @@ func assertHasSyntheticUnknown(t *testing.T, findings []*anstv1.Finding) {
 
 // assertPluginPIDGone reads the PID embedded in any Finding's "pid" property
 // and verifies the OS process no longer exists.
-func assertPluginPIDGone(t *testing.T, findings []*anstv1.Finding) {
+func assertPluginPIDGone(t *testing.T, findings []*commit0v1.Finding) {
 	t.Helper()
 	for _, f := range findings {
 		pidStr, ok := f.GetProperties()["pid"]

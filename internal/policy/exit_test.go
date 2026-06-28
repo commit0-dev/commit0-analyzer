@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/internal/policy"
+	"github.com/commit0-dev/commit0-analyzer/internal/policy"
 )
 
 // TestExitCodes_Values verifies the numeric values of each exit code constant

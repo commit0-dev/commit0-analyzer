@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strconv"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // sarifVersion is the SARIF specification version emitted by this renderer.
@@ -28,9 +28,9 @@ const sarifSchemaURI = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/m
 //
 // The caller may pass nil; the result is a valid SARIF document with an empty
 // results array.
-func ToSARIF(findings []*anstv1.Finding) ([]byte, error) {
+func ToSARIF(findings []*commit0v1.Finding) ([]byte, error) {
 	// Sort findings by advisory ID for deterministic output.
-	sorted := make([]*anstv1.Finding, len(findings))
+	sorted := make([]*commit0v1.Finding, len(findings))
 	copy(sorted, findings)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].GetAdvisory().GetId() < sorted[j].GetAdvisory().GetId()
@@ -52,8 +52,8 @@ func ToSARIF(findings []*anstv1.Finding) ([]byte, error) {
 			{
 				Tool: sarifTool{
 					Driver: sarifToolComponent{
-						Name:           "anst-analyzer",
-						InformationURI: "https://github.com/ducthinh993/anst-analyzer",
+						Name:           "commit0-analyzer",
+						InformationURI: "https://github.com/commit0-dev/commit0-analyzer",
 					},
 				},
 				Results: results,
@@ -65,7 +65,7 @@ func ToSARIF(findings []*anstv1.Finding) ([]byte, error) {
 }
 
 // findingToSARIFResult converts a single Finding to a sarifResult.
-func findingToSARIFResult(f *anstv1.Finding) (sarifResult, error) {
+func findingToSARIFResult(f *commit0v1.Finding) (sarifResult, error) {
 	r := sarifResult{
 		RuleID:  f.GetAdvisory().GetId(),
 		Level:   severityToSARIFLevel(f.GetSeverity()),
@@ -136,7 +136,7 @@ func findingToSARIFResult(f *anstv1.Finding) (sarifResult, error) {
 	// Path-less findings (PACKAGE_REACHABLE, UNKNOWN, NOT_REACHABLE) omit codeFlows.
 
 	// NOT_REACHABLE: render as suppressed so the finding is auditable (Red Team #15d).
-	if f.GetConfidence() == anstv1.Confidence_CONFIDENCE_NOT_REACHABLE {
+	if f.GetConfidence() == commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE {
 		r.Suppressions = []sarifSuppression{
 			{
 				Kind:          "external",
@@ -159,13 +159,13 @@ func findingToSARIFResult(f *anstv1.Finding) (sarifResult, error) {
 //   - MEDIUM         → "warning"
 //   - LOW            → "note"
 //   - UNSPECIFIED    → "none"
-func severityToSARIFLevel(s anstv1.Severity) string {
+func severityToSARIFLevel(s commit0v1.Severity) string {
 	switch s {
-	case anstv1.Severity_SEVERITY_CRITICAL, anstv1.Severity_SEVERITY_HIGH:
+	case commit0v1.Severity_SEVERITY_CRITICAL, commit0v1.Severity_SEVERITY_HIGH:
 		return "error"
-	case anstv1.Severity_SEVERITY_MEDIUM:
+	case commit0v1.Severity_SEVERITY_MEDIUM:
 		return "warning"
-	case anstv1.Severity_SEVERITY_LOW:
+	case commit0v1.Severity_SEVERITY_LOW:
 		return "note"
 	default:
 		return "none"
@@ -173,16 +173,16 @@ func severityToSARIFLevel(s anstv1.Severity) string {
 }
 
 // buildResultMessage returns a human-readable message for the SARIF result.
-func buildResultMessage(f *anstv1.Finding) string {
+func buildResultMessage(f *commit0v1.Finding) string {
 	id := f.GetAdvisory().GetId()
 	mod := f.GetModule()
 	conf := f.GetConfidence().String()
 	switch f.GetConfidence() {
-	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
 		return fmt.Sprintf("Vulnerability %s in %s: a concrete call path to the vulnerable symbol was found (%s).", id, mod, conf)
-	case anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
 		return fmt.Sprintf("Vulnerability %s in %s: the vulnerable package is reachable but symbol-level confirmation is unavailable (%s).", id, mod, conf)
-	case anstv1.Confidence_CONFIDENCE_NOT_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE:
 		return fmt.Sprintf("Vulnerability %s in %s: no call path to the vulnerable symbol was found (%s). Suppressed but auditable.", id, mod, conf)
 	default: // UNKNOWN
 		return fmt.Sprintf("Vulnerability %s in %s: reachability could not be determined (%s). Surfaced because unknown ≠ safe.", id, mod, conf)

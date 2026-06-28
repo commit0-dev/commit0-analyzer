@@ -1,5 +1,5 @@
-// Command rust-reachability is the anst-analyzer plugin for Rust (crates.io)
-// reachability-first SCA. It implements the anstv1.Analyzer gRPC service via
+// Command rust-reachability is the commit0-analyzer plugin for Rust (crates.io)
+// reachability-first SCA. It implements the commit0v1.Analyzer gRPC service via
 // the shared pkg/plugin.Serve helper, mirroring go-reachability/main.go.
 //
 // # Transport
@@ -36,23 +36,23 @@ import (
 	"context"
 	"fmt"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	anstplugin "github.com/ducthinh993/anst-analyzer/pkg/plugin"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/cargo"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/engine"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/cargo"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/engine"
 )
 
-// grpcServer implements anstv1.AnalyzerServer for the Rust reachability plugin.
+// grpcServer implements commit0v1.AnalyzerServer for the Rust reachability plugin.
 type grpcServer struct {
-	anstv1.UnimplementedAnalyzerServer
+	commit0v1.UnimplementedAnalyzerServer
 }
 
 // Metadata returns plugin identity and protocol version for the host handshake.
 func (s *grpcServer) Metadata(
 	_ context.Context,
-	_ *anstv1.MetadataRequest,
-) (*anstv1.MetadataResponse, error) {
-	return &anstv1.MetadataResponse{
+	_ *commit0v1.MetadataRequest,
+) (*commit0v1.MetadataResponse, error) {
+	return &commit0v1.MetadataResponse{
 		Name:               "rust-reachability",
 		Version:            "0.1.0",
 		ProtocolVersion:    "0.1",
@@ -65,8 +65,8 @@ func (s *grpcServer) Metadata(
 // host. When the closure is unavailable, every finding carries Incomplete=true
 // (the wire-level partiality marker).
 func (s *grpcServer) Analyze(
-	req *anstv1.AnalyzeRequest,
-	stream anstv1.Analyzer_AnalyzeServer,
+	req *commit0v1.AnalyzeRequest,
+	stream commit0v1.Analyzer_AnalyzeServer,
 ) error {
 	ctx := stream.Context()
 

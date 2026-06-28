@@ -44,9 +44,9 @@ type Comparator struct {
 func Corpus() []CorpusEntry {
 	return []CorpusEntry{
 		{
-			Name:        "anst-analyzer",
+			Name:        "commit0-analyzer",
 			Language:    "go",
-			Repo:        "github.com/ducthinh993/anst-analyzer",
+			Repo:        "github.com/commit0-dev/commit0-analyzer",
 			Ref:         "faa7ed3a5e4527eb6a075741a7b744fb13c3191a",
 			Comparators: []string{ToolOSVScanner, ToolGovulncheck, ToolGrype, ToolTrivy},
 			Note:        "self-scan; Go reachability suppression vs govulncheck symbol parity",

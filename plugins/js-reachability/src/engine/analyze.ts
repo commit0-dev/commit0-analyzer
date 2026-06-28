@@ -35,8 +35,8 @@ import { buildFinding, sortFindings } from "../finding.js";
 import { detectEntrypoints } from "../entry/detect-entrypoints.js";
 import { buildProjectModel } from "../project/build-project-model.js";
 import { computeWorkspaceClosure } from "../project/dep-closure.js";
-import { Confidence } from "../gen/anst/v1/plugin.js";
-import type { Finding } from "../gen/anst/v1/plugin.js";
+import { Confidence } from "../gen/commit0/v1/plugin.js";
+import type { Finding } from "../gen/commit0/v1/plugin.js";
 import * as telemetry from "../telemetry.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────

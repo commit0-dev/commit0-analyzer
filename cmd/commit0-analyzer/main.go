@@ -3,11 +3,11 @@ package main
 import (
 	"os"
 
-	"github.com/ducthinh993/anst-analyzer/internal/cli"
-	"github.com/ducthinh993/anst-analyzer/internal/policy"
+	"github.com/commit0-dev/commit0-analyzer/internal/cli"
+	"github.com/commit0-dev/commit0-analyzer/internal/policy"
 )
 
-// main is the anst-analyzer entry point.
+// main is the commit0-analyzer entry point.
 //
 // It wraps the CLI run in policy.RunWithRecovery so that any unexpected panic
 // inside the CLI produces exit code 3 (operational error / fail-closed) rather

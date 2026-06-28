@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/ghfetch"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/ghfetch"
 )
 
 // ─── ParseCommitURL ───────────────────────────────────────────────────────────

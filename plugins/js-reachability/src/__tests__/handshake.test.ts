@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { buildHandshakeLine, checkMagicCookie, serveUntilDone } from "../handshake.js";
 
 const MAGIC_COOKIE_KEY = "ANST_PLUGIN_MAGIC_COOKIE";
-const MAGIC_COOKIE_VALUE = "anst-analyzer-v0-plugin";
+const MAGIC_COOKIE_VALUE = "commit0-analyzer-v0-plugin";
 
 describe("buildHandshakeLine", () => {
   it("produces the correct 5-field go-plugin handshake line for port 12345", () => {

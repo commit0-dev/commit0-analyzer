@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ParseAnst parses anst-analyzer's native `--format json` output into normalized
+// ParseAnst parses commit0-analyzer's native `--format json` output into normalized
 // findings. The schema is the stable jsonFinding array emitted by
 // internal/render.ToJSON: each entry carries an advisory {id, aliases}, module,
 // confidence, severity, an optional language, and a flat properties map. The

@@ -1,23 +1,23 @@
 package contract
 
 import (
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // FindingWrapper wraps a proto Finding with Go-level safety helpers.
 // Obtain one via [WrapFinding].
 type FindingWrapper struct {
-	f *anstv1.Finding
+	f *commit0v1.Finding
 }
 
 // WrapFinding returns a FindingWrapper for f.
 // f must not be nil; passing nil will panic on any method call.
-func WrapFinding(f *anstv1.Finding) FindingWrapper {
+func WrapFinding(f *commit0v1.Finding) FindingWrapper {
 	return FindingWrapper{f: f}
 }
 
 // Finding returns the underlying proto Finding.
-func (w FindingWrapper) Finding() *anstv1.Finding {
+func (w FindingWrapper) Finding() *commit0v1.Finding {
 	return w.f
 }
 
@@ -34,5 +34,5 @@ func (w FindingWrapper) Finding() *anstv1.Finding {
 // purposes; always call IsSuppressible() so this invariant is enforced in one
 // place.
 func (w FindingWrapper) IsSuppressible() bool {
-	return w.f.Confidence == anstv1.Confidence_CONFIDENCE_NOT_REACHABLE
+	return w.f.Confidence == commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE
 }

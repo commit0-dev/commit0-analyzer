@@ -16,15 +16,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/ghfetch"
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/symbolindex"
-	"github.com/ducthinh993/anst-analyzer/internal/host"
-	"github.com/ducthinh993/anst-analyzer/internal/policy"
-	"github.com/ducthinh993/anst-analyzer/internal/render"
-	"github.com/ducthinh993/anst-analyzer/internal/telemetry"
-	"github.com/ducthinh993/anst-analyzer/internal/vex"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/ghfetch"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/symbolindex"
+	"github.com/commit0-dev/commit0-analyzer/internal/host"
+	"github.com/commit0-dev/commit0-analyzer/internal/policy"
+	"github.com/commit0-dev/commit0-analyzer/internal/render"
+	"github.com/commit0-dev/commit0-analyzer/internal/telemetry"
+	"github.com/commit0-dev/commit0-analyzer/internal/vex"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // scanFlags holds all flag values for the scan sub-command.
@@ -276,7 +276,7 @@ const (
 // enricher and `nvd-cpe` source when online and ANST_NVD_API_URL is unset.
 const nvdAPIDefaultURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
-// newScanCmd returns the cobra sub-command for `anst-analyzer scan`.
+// newScanCmd returns the cobra sub-command for `commit0-analyzer scan`.
 func newScanCmd() *cobra.Command {
 	var flags scanFlags
 
@@ -365,7 +365,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	detected := detectEcosystems(moduleRoot)
 	eco, langErr := resolveLanguage(flags.language, detected)
 	if langErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: %v\n", langErr)
+		fmt.Fprintf(os.Stderr, "commit0-analyzer scan: %v\n", langErr)
 		return policy.ExitOperationalError
 	}
 
@@ -388,7 +388,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 	if !eco.hasGo && !eco.hasJS && !eco.hasRust && !eco.hasPython && !eco.hasJava && !eco.hasDotnet && !eco.hasPhp && !eco.hasRuby && !eco.hasElixir && !eco.hasDart && !eco.hasSwift && !laneASubdirFound {
 		fmt.Fprintf(os.Stderr,
-			"anst-analyzer scan: %s contains no recognised ecosystem manifest "+
+			"commit0-analyzer scan: %s contains no recognised ecosystem manifest "+
 				"(go.mod, package.json, Cargo.toml, pyproject.toml, requirements.txt, "+
 				"pom.xml, build.gradle, build.gradle.kts, "+
 				"packages.lock.json, packages.config, *.csproj, "+
@@ -404,7 +404,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	if eco.hasGo {
 		goModPath := filepath.Join(moduleRoot, "go.mod")
 		if _, err := os.Stat(goModPath); err != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: --language go selected but %s does not contain a go.mod file: %v\n",
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: --language go selected but %s does not contain a go.mod file: %v\n",
 				moduleRoot, err)
 			return policy.ExitOperationalError
 		}
@@ -424,7 +424,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// ── 2. Validate --source flag ─────────────────────────────────────────────
 	selectedSources, sourceErr := parseSourceFlag(flags.source)
 	if sourceErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: --source: %v\n", sourceErr)
+		fmt.Fprintf(os.Stderr, "commit0-analyzer scan: --source: %v\n", sourceErr)
 		return policy.ExitOperationalError
 	}
 
@@ -434,7 +434,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		var depsErr error
 		deps, depsErr = listModDeps(ctx, moduleRoot)
 		if depsErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve deps: %v\n", depsErr)
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: resolve deps: %v\n", depsErr)
 			return policy.ExitOperationalError
 		}
 	}
@@ -455,7 +455,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	//   c) default (online)     → refresh both caches from upstream.
 	incomplete := false
 	var namedSources []advisory.NamedSource
-	var protoAdvs []*anstv1.Advisory
+	var protoAdvs []*commit0v1.Advisory
 	sourcesByID := map[string][]string{}
 	// severityByID maps advisory ID → advisory.Severity (CVSS-derived).
 	// Populated alongside sourcesByID; used in stampAdvisorySeverity after
@@ -483,7 +483,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// computed → we cannot narrow → unknown ≠ safe). These are unused when the
 	// flag is off. Lane-A ecosystems are unaffected: they never run a call-graph
 	// plugin and already emit package-level findings in step 5e.
-	var pkgLevelFindings []*anstv1.Finding
+	var pkgLevelFindings []*commit0v1.Finding
 
 	// ── 4d. GitLab advisory archive (one tarball for every ecosystem) ─────────
 	// GitLab (gemnasium-db) serves many ecosystems from a single archive, so it is
@@ -494,7 +494,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// incomplete (unknown ≠ safe), never aborts; --offline skips the fetch.
 	if selectedSources[advisory.SourceGitLab] {
 		if cd, cacheErr := os.UserCacheDir(); cacheErr == nil {
-			gitlabDir := filepath.Join(cd, "anst-analyzer", "gitlab")
+			gitlabDir := filepath.Join(cd, "commit0-analyzer", "gitlab")
 			if refreshGitLabArchive(ctx, gitlabDir, flags) {
 				incomplete = true
 			}
@@ -504,7 +504,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	if eco.hasGo {
 		cacheDir, cacheErr := os.UserCacheDir()
 		if cacheErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
 			return policy.ExitOperationalError
 		}
 
@@ -518,7 +518,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				cacheCfg.SnapshotPin = flags.dbSnapshot
 				cacheCfg.Offline = true
 			} else {
-				cacheCfg.Dir = filepath.Join(cacheDir, "anst-analyzer", "vuln-db")
+				cacheCfg.Dir = filepath.Join(cacheDir, "commit0-analyzer", "vuln-db")
 				cacheCfg.Offline = flags.offline
 				if !flags.offline {
 					// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL (test seam).
@@ -543,7 +543,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 					fmt.Fprintf(os.Stderr, "warning: %s\n", fallback.Warning)
 					incomplete = true
 				} else {
-					fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory refresh: %v\n", refreshErr)
+					fmt.Fprintf(os.Stderr, "commit0-analyzer scan: advisory refresh: %v\n", refreshErr)
 					return policy.ExitOperationalError
 				}
 			}
@@ -557,7 +557,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 		// ── 4b. OSV bundle source ─────────────────────────────────────────────────
 		if selectedSources[advisory.SourceOSV] {
-			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
 			// ANST_OSV_DB_URL overrides the default OSV GCS base URL (test seam).
@@ -639,7 +639,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 					fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
 					advs = staleWarn.Advisories
 				} else {
-					fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
+					fmt.Fprintf(os.Stderr, "commit0-analyzer scan: advisory query %s@%s: %v\n",
 						dep.Path, dep.Version, queryErr)
 					incomplete = true
 					continue
@@ -692,22 +692,22 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		jsPluginBin := flags.jsPluginBin
 		if jsPluginBin == "" {
 			if d := jsDistDir(); d != "" {
-				jsPluginBin = filepath.Join(d, "anst-js-reachability")
+				jsPluginBin = filepath.Join(d, "commit0-js-reachability")
 			}
 		}
 		if jsPluginBin == "" {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available for --list-deps: cannot locate dist directory\n")
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: js plugin not available for --list-deps: cannot locate dist directory\n")
 			return policy.ExitOperationalError
 		}
 		if _, statErr := os.Stat(jsPluginBin); statErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin binary not found at %s: %v\n", jsPluginBin, statErr)
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: js plugin binary not found at %s: %v\n", jsPluginBin, statErr)
 			return policy.ExitOperationalError
 		}
 
 		// Get the dep list from the project model.
 		npmDeps, modelIncomplete, listErr := listNPMDeps(ctx, jsPluginBin, moduleRoot)
 		if listErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: list npm deps: %v\n", listErr)
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: list npm deps: %v\n", listErr)
 			return policy.ExitOperationalError
 		}
 		if modelIncomplete {
@@ -732,10 +732,10 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			// Build an OSV source for npm; reuse the same cacheDir as the Go OSV path.
 			cacheDir, cacheErr := os.UserCacheDir()
 			if cacheErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
 				return policy.ExitOperationalError
 			}
-			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
 			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
@@ -810,7 +810,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							fmt.Fprintf(os.Stderr, "warning: %s\n", staleWarn.Warning)
 							advs = staleWarn.Advisories
 						} else {
-							fmt.Fprintf(os.Stderr, "anst-analyzer scan: advisory query %s@%s: %v\n",
+							fmt.Fprintf(os.Stderr, "commit0-analyzer scan: advisory query %s@%s: %v\n",
 								dep.Name, dep.Version, queryErr)
 							incomplete = true
 							continue
@@ -920,10 +920,10 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			// Build a crates.io OSV source; reuse the same cache root as the Go/npm paths.
 			cacheDir, cacheErr := os.UserCacheDir()
 			if cacheErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
 				return policy.ExitOperationalError
 			}
-			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			cratesOSV := advisory.NewOSVBundleSource(osvCacheDir)
 			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
@@ -981,7 +981,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							advs = staleWarn.Advisories
 						} else {
 							fmt.Fprintf(os.Stderr,
-								"anst-analyzer scan: advisory query crate %s@%s: %v\n",
+								"commit0-analyzer scan: advisory query crate %s@%s: %v\n",
 								dep.Name, dep.Version, queryErr)
 							incomplete = true
 							continue
@@ -1077,10 +1077,10 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			// Build a PyPI OSV source; reuse the same cache root as the Go/npm/Rust paths.
 			cacheDir, cacheErr := os.UserCacheDir()
 			if cacheErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
 				return policy.ExitOperationalError
 			}
-			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			pypiOSV := advisory.NewOSVBundleSource(osvCacheDir)
 			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
@@ -1140,7 +1140,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							advs = staleWarn.Advisories
 						} else {
 							fmt.Fprintf(os.Stderr,
-								"anst-analyzer scan: advisory query python pkg %s@%s: %v\n",
+								"commit0-analyzer scan: advisory query python pkg %s@%s: %v\n",
 								dep.Name, dep.Version, queryErr)
 							incomplete = true
 							continue
@@ -1222,7 +1222,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		incomplete = true
 	}
 
-	var laneAFindings []*anstv1.Finding
+	var laneAFindings []*commit0v1.Finding
 	for _, laneAAdapter := range LaneAAdapters() {
 		// Determine which directories to scan for this adapter.
 		//
@@ -1307,10 +1307,10 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		if len(deps) > 0 && selectedSources[advisory.SourceOSV] {
 			cacheDir, cacheErr := os.UserCacheDir()
 			if cacheErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: cannot locate user cache dir: %v\n", cacheErr)
 				return policy.ExitOperationalError
 			}
-			osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			laneAOSV := advisory.NewOSVBundleSource(osvCacheDir)
 			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
@@ -1377,7 +1377,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							advs = staleWarn.Advisories
 						} else {
 							fmt.Fprintf(os.Stderr,
-								"anst-analyzer scan: advisory query %s pkg %s@%s: %v\n",
+								"commit0-analyzer scan: advisory query %s pkg %s@%s: %v\n",
 								laneAAdapter.Language, dep.Name, dep.Version, queryErr)
 							incomplete = true
 							continue
@@ -1411,12 +1411,12 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						// OSV advisory matches into PACKAGE_REACHABLE findings.
 						// Undecidable matches become CONFIDENCE_UNKNOWN + Incomplete=true so
 						// the policy gate correctly exits 3 rather than silently passing clean.
-						laneAConf := anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+						laneAConf := commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
 						if advs[i].Incomplete {
-							laneAConf = anstv1.Confidence_CONFIDENCE_UNKNOWN
+							laneAConf = commit0v1.Confidence_CONFIDENCE_UNKNOWN
 						}
-						laneAFindings = append(laneAFindings, &anstv1.Finding{
-							Advisory: &anstv1.AdvisoryRef{
+						laneAFindings = append(laneAFindings, &commit0v1.Finding{
+							Advisory: &commit0v1.AdvisoryRef{
 								Id:      advs[i].ID,
 								Aliases: append([]string(nil), advs[i].Aliases...),
 							},
@@ -1465,10 +1465,10 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	}
 
 	// ── 6. Build AnalyzeRequest ───────────────────────────────────────────────
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: moduleRoot,
 		Advisories: protoAdvs,
-		BuildConfig: &anstv1.BuildConfig{
+		BuildConfig: &commit0v1.BuildConfig{
 			Goos:   flags.goos,
 			Goarch: flags.goarch,
 		},
@@ -1486,7 +1486,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// never runs, no NOT_REACHABLE verdict is ever produced — skipping
 	// reachability can only widen a finding to UNKNOWN, never narrow it to a
 	// false-clean. Lane-A findings (step 5e) are unaffected either way.
-	var findings []*anstv1.Finding
+	var findings []*commit0v1.Finding
 	if flags.skipReachabilityAnalysis {
 		findings = append(findings, pkgLevelFindings...)
 		// A real advisory match must never read as a clean pass when reachability
@@ -1505,20 +1505,20 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				var buildErr error
 				pluginBin, buildErr = buildPlugin(ctx)
 				if buildErr != nil {
-					fmt.Fprintf(os.Stderr, "anst-analyzer scan: build plugin: %v\n", buildErr)
+					fmt.Fprintf(os.Stderr, "commit0-analyzer scan: build plugin: %v\n", buildErr)
 					return policy.ExitOperationalError
 				}
 			}
 			var absErr error
 			pluginBin, absErr = filepath.Abs(pluginBin)
 			if absErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve plugin binary path: %v\n", absErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: resolve plugin binary path: %v\n", absErr)
 				return policy.ExitOperationalError
 			}
 
 			pluginHash, hashErr := host.SHA256OfFile(pluginBin)
 			if hashErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: hash plugin binary: %v\n", hashErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: hash plugin binary: %v\n", hashErr)
 				return policy.ExitOperationalError
 			}
 
@@ -1529,7 +1529,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				Languages: []string{"go"},
 				SHA256:    pluginHash,
 			}); addErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register go plugin: %v\n", addErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: register go plugin: %v\n", addErr)
 				return policy.ExitOperationalError
 			}
 		}
@@ -1537,11 +1537,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		if eco.hasJS {
 			m, buildErr := buildJSPluginManifest(flags.jsPluginBin)
 			if buildErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available: %v\n", buildErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: js plugin not available: %v\n", buildErr)
 				return policy.ExitOperationalError
 			}
 			if addErr := reg.Add(m); addErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register js plugin: %v\n", addErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: register js plugin: %v\n", addErr)
 				return policy.ExitOperationalError
 			}
 		}
@@ -1550,7 +1550,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		// rustManifest is non-nil only when eco.hasRust && the binary is present.
 		if rustManifest != nil {
 			if addErr := reg.Add(rustManifest); addErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register rust plugin: %v\n", addErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: register rust plugin: %v\n", addErr)
 				return policy.ExitOperationalError
 			}
 		}
@@ -1559,7 +1559,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		// pythonManifest is non-nil only when eco.hasPython && the binary is present.
 		if pythonManifest != nil {
 			if addErr := reg.Add(pythonManifest); addErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register python plugin: %v\n", addErr)
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: register python plugin: %v\n", addErr)
 				return policy.ExitOperationalError
 			}
 		}
@@ -1581,7 +1581,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		results, runErr := host.Run(ctx, reg, req, host.RunOptions{})
 		stopPluginRun()
 		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: host.Run: %v\n", runErr)
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: host.Run: %v\n", runErr)
 			return policy.ExitOperationalError
 		}
 
@@ -1606,7 +1606,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		// that every ecosystem plugin can use without any per-language host-side wiring.
 		for _, pr := range results {
 			if pr.Err != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: plugin %s error: %v\n",
+				fmt.Fprintf(os.Stderr, "commit0-analyzer scan: plugin %s error: %v\n",
 					pr.Manifest.Name, pr.Err)
 				incomplete = true
 			}
@@ -1668,7 +1668,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 	// ── 8. Render output ──────────────────────────────────────────────────────
 	if renderErr := renderFindings(flags.format, findings); renderErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: render: %v\n", renderErr)
+		fmt.Fprintf(os.Stderr, "commit0-analyzer scan: render: %v\n", renderErr)
 		return policy.ExitOperationalError
 	}
 
@@ -1680,7 +1680,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// is the phase's cardinal-sin guard against false-clean output.
 	if flags.vexFormat != "" {
 		if vexErr := emitVEX(flags, findings, advByID, incomplete); vexErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: vex: %v\n", vexErr)
+			fmt.Fprintf(os.Stderr, "commit0-analyzer scan: vex: %v\n", vexErr)
 			return policy.ExitOperationalError
 		}
 	}
@@ -1688,7 +1688,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// ── 9. Evaluate policy gate ───────────────────────────────────────────────
 	pol, polErr := loadPolicyFromFlags(flags)
 	if polErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: policy: %v\n", polErr)
+		fmt.Fprintf(os.Stderr, "commit0-analyzer scan: policy: %v\n", polErr)
 		return policy.ExitOperationalError
 	}
 
@@ -1713,14 +1713,14 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 //   - Plugins (e.g. go-reachability, js-reachability) that use the Properties
 //     path (legacy wire contract), and
 //   - Plugins (e.g. rust-reachability) that use Finding.Incomplete (proto field).
-func hasPartialityMarker(findings []*anstv1.Finding) bool {
+func hasPartialityMarker(findings []*commit0v1.Finding) bool {
 	for _, f := range findings {
 		// Proto field: Incomplete=true (Rust plugin partiality signal).
 		if f.GetIncomplete() {
 			return true
 		}
 		// Properties marker: synthetic=true on CONFIDENCE_UNKNOWN (crash/host signal).
-		if f.GetConfidence() == anstv1.Confidence_CONFIDENCE_UNKNOWN &&
+		if f.GetConfidence() == commit0v1.Confidence_CONFIDENCE_UNKNOWN &&
 			f.GetProperties()["synthetic"] == "true" {
 			return true
 		}
@@ -1735,14 +1735,14 @@ func hasPartialityMarker(findings []*anstv1.Finding) bool {
 // undecidability (e.g. an unparseable version); the scan-level incomplete signal
 // for "reachability was skipped" is set by the caller so a real advisory match
 // can never read as a clean pass.
-func packageLevelFinding(adv *advisory.Advisory, module, language string) *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func packageLevelFinding(adv *advisory.Advisory, module, language string) *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:      adv.ID,
 			Aliases: append([]string(nil), adv.Aliases...),
 		},
 		Module:     module,
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		Incomplete: adv.Incomplete,
 		Pillar:     "sca",
 		Language:   language,
@@ -1750,21 +1750,21 @@ func packageLevelFinding(adv *advisory.Advisory, module, language string) *anstv
 }
 
 // advisorySeverityToProto maps the internal advisory.Severity to the wire
-// anstv1.Severity enum. The values are intentionally parallel (both ordered
+// commit0v1.Severity enum. The values are intentionally parallel (both ordered
 // Unspecified < Low < Medium < High < Critical), so a direct cast works, but
 // we keep an explicit mapping to make the coupling visible and catch drift.
-func advisorySeverityToProto(s advisory.Severity) anstv1.Severity {
+func advisorySeverityToProto(s advisory.Severity) commit0v1.Severity {
 	switch s {
 	case advisory.SeverityLow:
-		return anstv1.Severity_SEVERITY_LOW
+		return commit0v1.Severity_SEVERITY_LOW
 	case advisory.SeverityMedium:
-		return anstv1.Severity_SEVERITY_MEDIUM
+		return commit0v1.Severity_SEVERITY_MEDIUM
 	case advisory.SeverityHigh:
-		return anstv1.Severity_SEVERITY_HIGH
+		return commit0v1.Severity_SEVERITY_HIGH
 	case advisory.SeverityCritical:
-		return anstv1.Severity_SEVERITY_CRITICAL
+		return commit0v1.Severity_SEVERITY_CRITICAL
 	default:
-		return anstv1.Severity_SEVERITY_UNSPECIFIED
+		return commit0v1.Severity_SEVERITY_UNSPECIFIED
 	}
 }
 
@@ -1772,10 +1772,10 @@ func advisorySeverityToProto(s advisory.Severity) anstv1.Severity {
 // the matched advisory (keyed by advisory ID). It only fills SEVERITY_UNSPECIFIED
 // slots — if a plugin already set a more specific severity it is preserved.
 // Findings with no advisory (synthetic/crash markers) are skipped.
-func stampAdvisorySeverity(findings []*anstv1.Finding, severityByID map[string]advisory.Severity) {
+func stampAdvisorySeverity(findings []*commit0v1.Finding, severityByID map[string]advisory.Severity) {
 	for _, f := range findings {
 		// Only fill slots the plugin left as UNSPECIFIED.
-		if f.GetSeverity() != anstv1.Severity_SEVERITY_UNSPECIFIED {
+		if f.GetSeverity() != commit0v1.Severity_SEVERITY_UNSPECIFIED {
 			continue
 		}
 		if f.GetAdvisory() == nil {
@@ -1798,15 +1798,15 @@ func stampAdvisorySeverity(findings []*anstv1.Finding, severityByID map[string]a
 // HIGH rather than UNSPECIFIED (which would never trip the gate). Callers that
 // have advisory-level CVSS scores should populate Finding.Severity from those
 // scores instead of relying on this default.
-func stampDefaultSeverity(findings []*anstv1.Finding) {
+func stampDefaultSeverity(findings []*commit0v1.Finding) {
 	for _, f := range findings {
-		if f.GetSeverity() != anstv1.Severity_SEVERITY_UNSPECIFIED {
+		if f.GetSeverity() != commit0v1.Severity_SEVERITY_UNSPECIFIED {
 			continue
 		}
 		switch f.GetConfidence() {
-		case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-			anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
-			f.Severity = anstv1.Severity_SEVERITY_HIGH
+		case commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+			f.Severity = commit0v1.Severity_SEVERITY_HIGH
 		}
 		// UNKNOWN and NOT_REACHABLE keep SEVERITY_UNSPECIFIED.
 	}
@@ -1817,7 +1817,7 @@ func stampDefaultSeverity(findings []*anstv1.Finding) {
 // The Finding carries only an advisory reference, so without this the merged
 // multi-source attribution would not be visible in JSON/SARIF/table output.
 // Synthetic findings (e.g. a plugin crash, which have no advisory) are skipped.
-func stampSources(findings []*anstv1.Finding, sourcesByID map[string][]string) {
+func stampSources(findings []*commit0v1.Finding, sourcesByID map[string][]string) {
 	for _, f := range findings {
 		if f.GetAdvisory() == nil {
 			continue
@@ -1842,7 +1842,7 @@ func stampSources(findings []*anstv1.Finding, sourcesByID map[string][]string) {
 // This makes the dep_type visible in all output formats (SARIF properties,
 // JSON, table) and is the data that lets the policy gate apply dep-type aware
 // confidence-tiered gating without any per-language wiring in the gate itself.
-func stampDepType(findings []*anstv1.Finding, depTypeByAdvID map[string]string) {
+func stampDepType(findings []*commit0v1.Finding, depTypeByAdvID map[string]string) {
 	for _, f := range findings {
 		if f.GetAdvisory() == nil {
 			continue
@@ -1862,13 +1862,13 @@ func stampDepType(findings []*anstv1.Finding, depTypeByAdvID map[string]string) 
 // package's reachability-tier string used by advisory.Score. NOT_REACHABLE is
 // the only proven-safe tier (scores 0); an unrecognised value is treated as
 // UNKNOWN (conservative: unknown ≠ safe).
-func reachabilityTierFromConfidence(c anstv1.Confidence) string {
+func reachabilityTierFromConfidence(c commit0v1.Confidence) string {
 	switch c {
-	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
 		return advisory.ReachabilitySymbol
-	case anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
 		return advisory.ReachabilityPackage
-	case anstv1.Confidence_CONFIDENCE_NOT_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE:
 		return advisory.ReachabilityNotReachable
 	default:
 		return advisory.ReachabilityUnknown
@@ -1883,7 +1883,7 @@ func reachabilityTierFromConfidence(c anstv1.Confidence) string {
 // Stamped keys: risk_score, risk_tier, risk_rationale, and the underlying signals
 // cvss, epss, kev, cwe when present. These are additive metadata: the default
 // policy gate ignores them unless the user opts in via --gate-on kev|epss>=X|risk>=Y.
-func stampRisk(findings []*anstv1.Finding, advByID map[string]*advisory.Advisory) {
+func stampRisk(findings []*commit0v1.Finding, advByID map[string]*advisory.Advisory) {
 	for _, f := range findings {
 		if f.GetAdvisory() == nil {
 			continue
@@ -1939,7 +1939,7 @@ var freshnessSLA = advisory.FreshnessSLA{Soft: 72 * time.Hour, Hard: 720 * time.
 // or stale source exists. The strings come from the advisory package's
 // resolution helpers, so the resolved facts are never recomputed here, only
 // surfaced. Findings with no matched advisory or no source metadata are skipped.
-func stampProvenance(findings []*anstv1.Finding, advByID map[string]*advisory.Advisory) {
+func stampProvenance(findings []*commit0v1.Finding, advByID map[string]*advisory.Advisory) {
 	now := time.Now()
 	for _, f := range findings {
 		if f.GetAdvisory() == nil {
@@ -1967,7 +1967,7 @@ func stampProvenance(findings []*anstv1.Finding, advByID map[string]*advisory.Ad
 }
 
 // renderFindings writes findings to stdout in the requested format.
-func renderFindings(format string, findings []*anstv1.Finding) error {
+func renderFindings(format string, findings []*commit0v1.Finding) error {
 	switch strings.ToLower(format) {
 	case "sarif":
 		data, err := render.ToSARIF(findings)
@@ -2003,7 +2003,7 @@ func renderFindings(format string, findings []*anstv1.Finding) error {
 // finding, so a NOT_REACHABLE verdict proven over that partial dependency
 // closure must still degrade to under_investigation — never not_affected. This
 // is the cardinal-sin guard (a false-clean VEX statement on an incomplete graph).
-func emitVEX(flags scanFlags, findings []*anstv1.Finding, advByID map[string]*advisory.Advisory, scanIncomplete bool) error {
+func emitVEX(flags scanFlags, findings []*commit0v1.Finding, advByID map[string]*advisory.Advisory, scanIncomplete bool) error {
 	formatters, err := vex.Formatters(flags.vexFormat)
 	if err != nil {
 		return err
@@ -2060,13 +2060,13 @@ func vexAssessmentTime() time.Time {
 // vexReachability maps a wire Confidence to the VEX package's reachability enum.
 // CONFIDENCE_UNKNOWN (the zero value) maps to ReachabilityUnknown so an
 // undetermined finding is never asserted not_affected.
-func vexReachability(c anstv1.Confidence) vex.Reachability {
+func vexReachability(c commit0v1.Confidence) vex.Reachability {
 	switch c {
-	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
 		return vex.ReachabilitySymbolReachable
-	case anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
 		return vex.ReachabilityPackageReachable
-	case anstv1.Confidence_CONFIDENCE_NOT_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE:
 		return vex.ReachabilityNotReachable
 	default:
 		return vex.ReachabilityUnknown
@@ -2554,13 +2554,13 @@ func snapshotStalenessThreshold() time.Duration {
 }
 
 // buildGHSASource constructs the GHSA source for the given user cache root. The
-// offline OSV-format bundle under <cache>/anst-analyzer/ghsa is the breadth
+// offline OSV-format bundle under <cache>/commit0-analyzer/ghsa is the breadth
 // floor; the live GraphQL layer is token-gated (GITHUB_TOKEN) and disabled in
 // offline mode so --offline never touches the network. ANST_GHSA_GRAPHQL_URL
 // overrides the endpoint (test seam). A missing bundle directory makes Query a
 // no-op (nil,nil), so attaching GHSA never converts "no advisory" into a failure.
 func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
-	dir := filepath.Join(userCacheDir, "anst-analyzer", "ghsa")
+	dir := filepath.Join(userCacheDir, "commit0-analyzer", "ghsa")
 	if offline {
 		// Offline: bundle floor only; never attempt the live GraphQL layer.
 		return advisory.NewGHSASource(dir, advisory.WithGHSAGraphQLURL(""))
@@ -2573,14 +2573,14 @@ func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
 
 // buildGitLabSource constructs the GitLab Advisory Database (gemnasium-db)
 // source for the given user cache root. The extracted archive under
-// <cache>/anst-analyzer/gitlab is the offline floor; Query never touches the
+// <cache>/commit0-analyzer/gitlab is the offline floor; Query never touches the
 // network (it reads the already-extracted cache), so offline mode needs no
 // special handling here. ANST_GITLAB_DB_URL overrides the gitlab.com base URL
 // (test seam; also lets advanced users retarget the primary gemnasium-db host).
 // A missing cache directory makes Query a no-op (nil,nil), so attaching GitLab
 // never converts "no advisory" into a failure.
 func buildGitLabSource(userCacheDir string) advisory.Source {
-	dir := filepath.Join(userCacheDir, "anst-analyzer", "gitlab")
+	dir := filepath.Join(userCacheDir, "commit0-analyzer", "gitlab")
 	if override := os.Getenv("ANST_GITLAB_DB_URL"); override != "" {
 		return advisory.NewGitLabSource(dir, advisory.WithGitLabBaseURL(override))
 	}
@@ -2636,7 +2636,7 @@ func gitlabCacheExists(dir string) bool {
 // override honored); offline it serves only the cached feed. A feed-load failure
 // surfaces as a query error (unknown ≠ safe), never an empty clean result.
 func buildNVDCPESource(userCacheDir string, offline bool) advisory.Source {
-	dir := filepath.Join(userCacheDir, "anst-analyzer", "nvd")
+	dir := filepath.Join(userCacheDir, "commit0-analyzer", "nvd")
 	if offline {
 		return advisory.NewNVDCPESource(dir)
 	}
@@ -2700,7 +2700,7 @@ func appendSecondarySources(named []advisory.NamedSource, selected map[string]bo
 // which is gated separately behind --source nvd-cpe.
 func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string]bool) advisory.EnrichmentChain {
 	kev := &advisory.KEVEnricher{
-		CacheDir: filepath.Join(userCacheDir, "anst-analyzer", "kev"),
+		CacheDir: filepath.Join(userCacheDir, "commit0-analyzer", "kev"),
 		Offline:  offline,
 	}
 	if url := os.Getenv("ANST_KEV_URL"); url != "" {
@@ -2712,7 +2712,7 @@ func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string
 	}
 
 	if selected[advisory.SourceNVD] {
-		nvdDir := filepath.Join(userCacheDir, "anst-analyzer", "nvd")
+		nvdDir := filepath.Join(userCacheDir, "commit0-analyzer", "nvd")
 		switch {
 		case offline:
 			chain = append(chain, advisory.NewNVDEnricher(nvdDir))
@@ -2725,7 +2725,7 @@ func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string
 
 	if selected[advisory.SourceEPSS] {
 		epss := &advisory.EPSSEnricher{
-			CacheDir: filepath.Join(userCacheDir, "anst-analyzer", "epss"),
+			CacheDir: filepath.Join(userCacheDir, "commit0-analyzer", "epss"),
 			Offline:  offline,
 		}
 		if api := os.Getenv("ANST_EPSS_API_URL"); api != "" {
@@ -2779,7 +2779,7 @@ func buildPlugin(ctx context.Context) (string, error) {
 	}
 	binPath := filepath.Join(tmpDir, "go-reachability")
 
-	const pluginPkg = "github.com/ducthinh993/anst-analyzer/plugins/go-reachability"
+	const pluginPkg = "github.com/commit0-dev/commit0-analyzer/plugins/go-reachability"
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, pluginPkg)
 	cmd.Env = os.Environ()
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -2863,11 +2863,11 @@ func buildRustPluginManifest(ctx context.Context, overrideBin string) (*host.Man
 		if distDir == "" {
 			return nil, false
 		}
-		mainBin = filepath.Join(distDir, "anst-rust-reachability")
+		mainBin = filepath.Join(distDir, "commit0-rust-reachability")
 
 		// On-demand build: if the dist binary is absent, build it now.
 		if _, err := os.Stat(mainBin); err != nil {
-			const pluginPkg = "github.com/ducthinh993/anst-analyzer/plugins/rust-reachability"
+			const pluginPkg = "github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability"
 			if mkErr := os.MkdirAll(distDir, 0o755); mkErr != nil {
 				fmt.Fprintf(os.Stderr,
 					"warning: cannot create rust plugin dist dir %s: %v; rust plugin unavailable\n",
@@ -2955,11 +2955,11 @@ func buildPythonPluginManifest(ctx context.Context, overrideBin string) (*host.M
 		if distDir == "" {
 			return nil, false
 		}
-		mainBin = filepath.Join(distDir, "anst-python-reachability")
+		mainBin = filepath.Join(distDir, "commit0-python-reachability")
 
 		// On-demand build: if the dist binary is absent, build it now.
 		if _, err := os.Stat(mainBin); err != nil {
-			const pluginPkg = "github.com/ducthinh993/anst-analyzer/plugins/python-reachability"
+			const pluginPkg = "github.com/commit0-dev/commit0-analyzer/plugins/python-reachability"
 			if mkErr := os.MkdirAll(distDir, 0o755); mkErr != nil {
 				fmt.Fprintf(os.Stderr,
 					"warning: cannot create python plugin dist dir %s: %v; python plugin unavailable\n",
@@ -3080,7 +3080,7 @@ func buildJSPluginManifest(overrideBin string) (*host.Manifest, error) {
 		if distDir == "" {
 			return nil, fmt.Errorf("cannot locate js-reachability dist directory")
 		}
-		mainBin = filepath.Join(distDir, "anst-js-reachability")
+		mainBin = filepath.Join(distDir, "commit0-js-reachability")
 	}
 	if _, err := os.Stat(mainBin); err != nil {
 		return nil, fmt.Errorf("js-reachability plugin not built: %s not found (run 'make build-js-plugin'): %w", mainBin, err)

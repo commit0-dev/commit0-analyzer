@@ -1,4 +1,4 @@
-// Package host implements the anst-analyzer plugin host.
+// Package host implements the commit0-analyzer plugin host.
 //
 // Responsibilities:
 //
@@ -12,7 +12,7 @@
 //
 //   - Client (client.go): launches one plugin binary via hashicorp/go-plugin,
 //     performs the magic-cookie handshake, optionally verifies the binary hash
-//     (SecureConfig), dispenses the anstv1.AnalyzerClient, validates the plugin's
+//     (SecureConfig), dispenses the commit0v1.AnalyzerClient, validates the plugin's
 //     declared protocol version against contract.Compatible, and runs a self-test
 //     sentinel (non-empty Metadata.Name) to catch lying or broken plugins.
 //

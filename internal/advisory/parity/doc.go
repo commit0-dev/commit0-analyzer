@@ -1,5 +1,5 @@
 // Package parity is the advisory-intelligence quality harness: it measures
-// anst-analyzer's advisory coverage against external scanners (osv-scanner,
+// commit0-analyzer's advisory coverage against external scanners (osv-scanner,
 // grype, trivy, govulncheck) on a fixed corpus of real repositories and records
 // the false-positive / false-negative deltas with a reason for each.
 //

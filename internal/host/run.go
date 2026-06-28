@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // RunOptions configures a Run call.
@@ -33,7 +33,7 @@ type PluginResult struct {
 	// Findings contains every Finding received from the plugin, in the order
 	// they arrived over the stream. Deterministic aggregation across plugins is
 	// applied by Run after all workers finish.
-	Findings []*anstv1.Finding
+	Findings []*commit0v1.Finding
 
 	// Err is non-nil when the plugin crashed, timed out, or returned a gRPC
 	// error. In all error cases a synthetic CONFIDENCE_UNKNOWN Finding is also
@@ -61,7 +61,7 @@ type PluginResult struct {
 func Run(
 	ctx context.Context,
 	reg *Registry,
-	req *anstv1.AnalyzeRequest,
+	req *commit0v1.AnalyzeRequest,
 	opts RunOptions,
 ) ([]*PluginResult, error) {
 	manifests := reg.All()
@@ -105,7 +105,7 @@ func Run(
 func runPlugin(
 	ctx context.Context,
 	m *Manifest,
-	req *anstv1.AnalyzeRequest,
+	req *commit0v1.AnalyzeRequest,
 	opts RunOptions,
 ) *PluginResult {
 	result := &PluginResult{Manifest: m}
@@ -169,10 +169,10 @@ func runPlugin(
 // Plan invariant ("unknown ≠ safe"): this finding must be surfaced to the user,
 // never suppressed. The CONFIDENCE_UNKNOWN zero value ensures that a downstream
 // policy gate that only suppresses NOT_REACHABLE will not accidentally drop it.
-func syntheticUnknown(m *Manifest, cause error) *anstv1.Finding {
-	return &anstv1.Finding{
+func syntheticUnknown(m *Manifest, cause error) *commit0v1.Finding {
+	return &commit0v1.Finding{
 		Module:     m.Name,
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		Pillar:     m.Pillar,
 		Properties: map[string]string{
 			"synthetic": "true",

@@ -20,7 +20,7 @@ func TestNuGetOSVProbe_EmpiricalVersionMatching(t *testing.T) {
 	if err != nil {
 		t.Skipf("cannot locate user cache dir: %v", err)
 	}
-	osvCacheDir := filepath.Join(cacheDir, "anst-analyzer", "osv")
+	osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 	nugetCacheDir := filepath.Join(osvCacheDir, "NuGet")
 	if _, statErr := os.Stat(nugetCacheDir); statErr != nil {
 		t.Skipf("NuGet OSV cache not present at %s; skipping empirical probe", nugetCacheDir)

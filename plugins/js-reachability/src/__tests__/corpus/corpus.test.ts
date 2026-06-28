@@ -26,8 +26,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { analyze } from "../../engine/analyze.js";
-import { Confidence } from "../../gen/anst/v1/plugin.js";
-import type { Finding } from "../../gen/anst/v1/plugin.js";
+import { Confidence } from "../../gen/commit0/v1/plugin.js";
+import type { Finding } from "../../gen/commit0/v1/plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CORPUS_DIR = path.resolve(__dirname, "../../../testdata/corpus");

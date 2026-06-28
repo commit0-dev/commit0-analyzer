@@ -1,6 +1,6 @@
-# anst-analyzer Soundness Limits
+# commit0-analyzer Soundness Limits
 
-This document honestly describes what `anst-analyzer` can and cannot determine. Understanding these limits helps you interpret findings and set appropriate policy thresholds.
+This document honestly describes what `commit0-analyzer` can and cannot determine. Understanding these limits helps you interpret findings and set appropriate policy thresholds.
 
 ## The Core Invariant: `unknown ≠ safe`
 
@@ -62,7 +62,7 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 
 ## Advisory Data Scope
 
-`anst-analyzer` queries four advisory sources by default, plus two opt-in NVD modes (configurable via `--source`):
+`commit0-analyzer` queries four advisory sources by default, plus two opt-in NVD modes (configurable via `--source`):
 
 | Source | Default | Coverage | Symbol-level data |
 |---|---|---|---|
@@ -98,7 +98,7 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 
 **VEX `under_investigation` guarantee (cardinal rule).** When emitting VEX (`--vex`), anst maps `NOT_REACHABLE` → `not_affected` (justification `vulnerable_code_not_in_execute_path`), reachable → `affected`, and **everything it could not prove safe** — `UNKNOWN` or any incomplete analysis — → `under_investigation`. It is structurally impossible for an unproven finding to emit `not_affected`; doing so would weaponize the tool into a false-clean generator, so only a proven `NOT_REACHABLE` verdict ever produces `not_affected`.
 
-**Implication for Go:** `anst-analyzer` and `govulncheck` use the same advisory symbol data. The differentiation is SARIF `codeFlows`, policy-as-code gating, and multi-ecosystem support — not symbol resolution precision.
+**Implication for Go:** `commit0-analyzer` and `govulncheck` use the same advisory symbol data. The differentiation is SARIF `codeFlows`, policy-as-code gating, and multi-ecosystem support — not symbol resolution precision.
 
 **For JS/TS:** the OSV npm bundle is the only advisory source. No symbol-level data is available for npm (OSV npm entries are package-level only). The JS plugin narrows findings by building an import-reachability graph, so findings are NOT_REACHABLE for packages that are installed but never imported from a reachable entry point.
 
@@ -124,7 +124,7 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 
 ### Live fetch and caching
 
-`anst-analyzer scan` fetches advisory data from all enabled sources on first run and caches them locally. Each source is refreshed independently before the per-dependency query loop. Use `--update` to force a re-fetch of all enabled sources.
+`commit0-analyzer scan` fetches advisory data from all enabled sources on first run and caches them locally. Each source is refreshed independently before the per-dependency query loop. Use `--update` to force a re-fetch of all enabled sources.
 
 **Failure handling at the fetch boundary:** A Go vuln DB fetch failure with no usable cache exits 3 (never a silent clean pass). An OSV bundle fetch failure (secondary source — for either Go or npm) emits a warning to stderr, marks the scan **incomplete** (exit 3), but does not abort — remaining-source findings still gate. If the staleness probe for Go-DB fails but a valid local cache exists, the scan uses the existing cache, prints a warning, and exits 3 (incomplete). See `docs/usage.md` for the advisory-data modes and `--source` details.
 
@@ -259,4 +259,4 @@ VTA (Variable Type Analysis) is more expensive than CHA or RTA but provides bett
 
 ## License Note (AGPL-3.0)
 
-`anst-analyzer` is licensed under AGPL-3.0. This precludes embedding the core engine as a library in proprietary closed-source tools without releasing the embedding application's source. For CLI / CI use this is not a concern. Contact the project maintainers if library embedding in a proprietary context is a requirement.
+`commit0-analyzer` is licensed under AGPL-3.0. This precludes embedding the core engine as a library in proprietary closed-source tools without releasing the embedding application's source. For CLI / CI use this is not a concern. Contact the project maintainers if library embedding in a proprietary context is a requirement.

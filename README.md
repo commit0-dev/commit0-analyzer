@@ -1,14 +1,14 @@
-# anst-analyzer
+# commit0-analyzer
 
 **Stop drowning in dependency-CVE noise. Ship the ones that can actually hurt you.**
 
-`anst-analyzer` is an open-source, CI-native security scanner that answers the question every other SCA tool leaves open: **is this vulnerability actually reachable in my code?** It traces a real call path from your application into the vulnerable function, so a CVE in a package you import but never exercise is *proven* harmless instead of cluttering your dashboard — across **eleven language ecosystems**, from one zero-config command.
+`commit0-analyzer` is an open-source, CI-native security scanner that answers the question every other SCA tool leaves open: **is this vulnerability actually reachable in my code?** It traces a real call path from your application into the vulnerable function, so a CVE in a package you import but never exercise is *proven* harmless instead of cluttering your dashboard — across **eleven language ecosystems**, from one zero-config command.
 
-> Most scanners list every CVE in your lockfile and leave you to triage hundreds of findings by hand. anst-analyzer tells you which ones are reachable, scores them by real-world exploitability, and emits machine-readable **VEX** so the rest stop nagging you and your downstream tools.
+> Most scanners list every CVE in your lockfile and leave you to triage hundreds of findings by hand. commit0-analyzer tells you which ones are reachable, scores them by real-world exploitability, and emits machine-readable **VEX** so the rest stop nagging you and your downstream tools.
 
 ---
 
-## Why anst-analyzer
+## Why commit0-analyzer
 
 - 🎯 **Reachability, with proof.** Every finding is `reachable`, `not reachable`, or `unknown` — and "reachable" comes with a SARIF `codeFlows` call-path you can audit. No black-box verdicts.
 - 🔕 **Noise reduction you can trust.** A vulnerable dependency that's never reached is suppressed as VEX `not_affected` — but *only* when it's provably unreachable. We never guess "safe."
@@ -23,7 +23,7 @@
 ## Quick start
 
 ```sh
-go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
+go install github.com/commit0-dev/commit0-analyzer/cmd/commit0-analyzer@latest
 
 # Point it at any project — every ecosystem present is auto-detected and scanned.
 anst scan /path/to/project
@@ -120,7 +120,7 @@ Every finding gets a deterministic **0–100 risk score** (also emitted as SARIF
 
 ## How it differs
 
-| | anst-analyzer | osv-scanner / grype / trivy | govulncheck |
+| | commit0-analyzer | osv-scanner / grype / trivy | govulncheck |
 |---|---|---|---|
 | Reachability analysis | ✅ call-path proof | ❌ lockfile-only | ✅ (Go only) |
 | Ecosystems | 11 | many | Go only |
@@ -128,13 +128,13 @@ Every finding gets a deterministic **0–100 risk score** (also emitted as SARIF
 | KEV + EPSS + risk scoring | ✅ built-in | varies | ❌ |
 | `unknown ≠ safe` guarantee | ✅ | n/a | ✅ |
 
-anst-analyzer aims to combine govulncheck-class reachability with osv-scanner-class breadth — and add the exploit-intelligence and VEX layer on top.
+commit0-analyzer aims to combine govulncheck-class reachability with osv-scanner-class breadth — and add the exploit-intelligence and VEX layer on top.
 
 ---
 
 ## The promise: `unknown ≠ safe`
 
-A scanner that quietly downgrades uncertainty to "safe" is worse than no scanner. anst-analyzer never does:
+A scanner that quietly downgrades uncertainty to "safe" is worse than no scanner. commit0-analyzer never does:
 
 - Reachability it can't prove is `UNKNOWN` and **counts toward the gate** — not silently dropped.
 - A vulnerability is suppressed (`not_affected`) **only** when the vulnerable code is provably unreachable with a complete analysis.
@@ -147,7 +147,7 @@ For the full soundness model, coverage measurements, and known limits, see [`doc
 
 ## Project status
 
-anst-analyzer is under active development; the plugin protocol is `v0-PROVISIONAL`. Architecture, the plugin contract (`proto/anst/v1/plugin.proto`), and contribution guidelines live in [`docs/`](docs/). Issues and PRs welcome.
+commit0-analyzer is under active development; the plugin protocol is `v0-PROVISIONAL`. Architecture, the plugin contract (`proto/commit0/v1/plugin.proto`), and contribution guidelines live in [`docs/`](docs/). Issues and PRs welcome.
 
 ## License
 

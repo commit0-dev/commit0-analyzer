@@ -60,7 +60,7 @@ func TestParityHarness(t *testing.T) {
 		// auto-detect.
 		Language: map[string]string{"go": "go", "python": "python"},
 		ResolvePath: func(e CorpusEntry) (string, error) {
-			if e.Name == "anst-analyzer" {
+			if e.Name == "commit0-analyzer" {
 				abs, err := filepath.Abs(repoRoot)
 				if err != nil {
 					return "", err

@@ -7,53 +7,53 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
-	"github.com/ducthinh993/anst-analyzer/internal/policy"
+	"github.com/commit0-dev/commit0-analyzer/internal/policy"
 )
 
 // makeHighFinding returns a SYMBOL_REACHABLE HIGH finding for test use.
-func makeHighFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001", Url: "https://pkg.go.dev/vuln/GO-2024-0001"},
+func makeHighFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001", Url: "https://pkg.go.dev/vuln/GO-2024-0001"},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
-				{Location: &anstv1.Location{File: "cmd/main.go", Line: 1, Column: 1}, Symbol: "main.main"},
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
+				{Location: &commit0v1.Location{File: "cmd/main.go", Line: 1, Column: 1}, Symbol: "main.main"},
 			},
 		},
 	}
 }
 
 // makeNotReachableFinding returns the same advisory but NOT_REACHABLE.
-func makeNotReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001", Url: "https://pkg.go.dev/vuln/GO-2024-0001"},
+func makeNotReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001", Url: "https://pkg.go.dev/vuln/GO-2024-0001"},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 	}
 }
 
 // makePackageReachableFinding returns a PACKAGE_REACHABLE HIGH finding.
-func makePackageReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0005"},
+func makePackageReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0005"},
 		Module:     "github.com/example/pkg",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 	}
 }
 
 // makeUnknownFinding returns an UNKNOWN HIGH finding.
-func makeUnknownFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0006"},
+func makeUnknownFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0006"},
 		Module:     "github.com/example/reflect",
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 	}
 }
 
@@ -64,7 +64,7 @@ func TestPolicy_ThresholdHigh_ReachableHighFailing(t *testing.T) {
 		FailOn:       "high",
 		ReachableOnly: false,
 	}
-	findings := []*anstv1.Finding{makeHighFinding()}
+	findings := []*commit0v1.Finding{makeHighFinding()}
 
 	code := p.Evaluate(findings)
 	assert.Equal(t, policy.ExitGateFailure, code,
@@ -78,7 +78,7 @@ func TestPolicy_ThresholdHigh_NotReachable_ReachableOnly_Pass(t *testing.T) {
 		FailOn:       "high",
 		ReachableOnly: true,
 	}
-	findings := []*anstv1.Finding{makeNotReachableFinding()}
+	findings := []*commit0v1.Finding{makeNotReachableFinding()}
 
 	code := p.Evaluate(findings)
 	assert.Equal(t, policy.ExitPass, code,
@@ -92,7 +92,7 @@ func TestPolicy_ReachableOnly_PackageReachable_Fails(t *testing.T) {
 		FailOn:       "high",
 		ReachableOnly: true,
 	}
-	findings := []*anstv1.Finding{makePackageReachableFinding()}
+	findings := []*commit0v1.Finding{makePackageReachableFinding()}
 
 	code := p.Evaluate(findings)
 	assert.Equal(t, policy.ExitGateFailure, code,
@@ -106,7 +106,7 @@ func TestPolicy_ReachableOnly_Unknown_Fails(t *testing.T) {
 		FailOn:       "high",
 		ReachableOnly: true,
 	}
-	findings := []*anstv1.Finding{makeUnknownFinding()}
+	findings := []*commit0v1.Finding{makeUnknownFinding()}
 
 	code := p.Evaluate(findings)
 	assert.Equal(t, policy.ExitGateFailure, code,
@@ -119,13 +119,13 @@ func TestPolicy_ReachableOnly_Unknown_Fails(t *testing.T) {
 func TestPolicy_ReachableOnly_OnlyNotReachableExcludable(t *testing.T) {
 	cases := []struct {
 		name       string
-		confidence anstv1.Confidence
+		confidence commit0v1.Confidence
 		wantCode   int
 	}{
-		{"symbol_reachable", anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE, policy.ExitGateFailure},
-		{"package_reachable", anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, policy.ExitGateFailure},
-		{"unknown", anstv1.Confidence_CONFIDENCE_UNKNOWN, policy.ExitGateFailure},
-		{"not_reachable", anstv1.Confidence_CONFIDENCE_NOT_REACHABLE, policy.ExitPass},
+		{"symbol_reachable", commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE, policy.ExitGateFailure},
+		{"package_reachable", commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, policy.ExitGateFailure},
+		{"unknown", commit0v1.Confidence_CONFIDENCE_UNKNOWN, policy.ExitGateFailure},
+		{"not_reachable", commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE, policy.ExitPass},
 	}
 
 	for _, tc := range cases {
@@ -135,13 +135,13 @@ func TestPolicy_ReachableOnly_OnlyNotReachableExcludable(t *testing.T) {
 				FailOn:       "high",
 				ReachableOnly: true,
 			}
-			f := &anstv1.Finding{
-				Advisory:   &anstv1.AdvisoryRef{Id: "GO-TEST-0001"},
+			f := &commit0v1.Finding{
+				Advisory:   &commit0v1.AdvisoryRef{Id: "GO-TEST-0001"},
 				Module:     "example.com/mod",
 				Confidence: tc.confidence,
-				Severity:   anstv1.Severity_SEVERITY_HIGH,
+				Severity:   commit0v1.Severity_SEVERITY_HIGH,
 			}
-			code := p.Evaluate([]*anstv1.Finding{f})
+			code := p.Evaluate([]*commit0v1.Finding{f})
 			assert.Equal(t, tc.wantCode, code,
 				"%s: unexpected exit code", tc.name)
 		})
@@ -155,7 +155,7 @@ func TestPolicy_ThresholdCritical_HighDoesNotFail(t *testing.T) {
 		FailOn:       "critical",
 		ReachableOnly: false,
 	}
-	findings := []*anstv1.Finding{makeHighFinding()}
+	findings := []*commit0v1.Finding{makeHighFinding()}
 
 	code := p.Evaluate(findings)
 	assert.Equal(t, policy.ExitPass, code,
@@ -168,13 +168,13 @@ func TestPolicy_BelowThreshold_LowFindings(t *testing.T) {
 		FailOn:       "high",
 		ReachableOnly: false,
 	}
-	f := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-TEST-0002"},
+	f := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-TEST-0002"},
 		Module:     "example.com/mod",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_LOW,
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_LOW,
 	}
-	code := p.Evaluate([]*anstv1.Finding{f})
+	code := p.Evaluate([]*commit0v1.Finding{f})
 	assert.Equal(t, policy.ExitPass, code,
 		"LOW finding below high threshold must exit 0")
 }
@@ -209,7 +209,7 @@ func TestPolicy_IncompleteScan_NeverExitsZero(t *testing.T) {
 		ReachableOnly: false,
 	}
 	// Even with zero findings, incomplete must not exit 0.
-	code := p.EvaluateWithFlags([]*anstv1.Finding{}, policy.EvalFlags{Incomplete: true})
+	code := p.EvaluateWithFlags([]*commit0v1.Finding{}, policy.EvalFlags{Incomplete: true})
 	assert.NotEqual(t, policy.ExitPass, code,
 		"incomplete scan must never exit 0 (fail closed)")
 	assert.Equal(t, policy.ExitOperationalError, code,
@@ -228,7 +228,7 @@ func TestPolicy_IncompleteScan_GatingFinding_ExitsGateFailure(t *testing.T) {
 	}
 	// A PACKAGE_REACHABLE HIGH finding fails the gate; incomplete must not mask it.
 	code := p.EvaluateWithFlags(
-		[]*anstv1.Finding{makePackageReachableFinding()},
+		[]*commit0v1.Finding{makePackageReachableFinding()},
 		policy.EvalFlags{Incomplete: true},
 	)
 	assert.Equal(t, policy.ExitGateFailure, code,
@@ -256,7 +256,7 @@ func TestPolicy_EvaluateWithIgnores(t *testing.T) {
 			},
 		},
 	}
-	findings := []*anstv1.Finding{makeHighFinding()}
+	findings := []*commit0v1.Finding{makeHighFinding()}
 
 	code := p.Evaluate(findings)
 	assert.Equal(t, policy.ExitPass, code,
@@ -265,15 +265,15 @@ func TestPolicy_EvaluateWithIgnores(t *testing.T) {
 
 // makeCriticalSymbolReachableFinding returns a SYMBOL_REACHABLE CRITICAL finding
 // for use in elevated-ignore gate tests.
-func makeCriticalSymbolReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-CRIT", Url: "https://pkg.go.dev/vuln/GO-2024-CRIT"},
+func makeCriticalSymbolReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-CRIT", Url: "https://pkg.go.dev/vuln/GO-2024-CRIT"},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_CRITICAL,
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
-				{Location: &anstv1.Location{File: "cmd/main.go", Line: 1, Column: 1}, Symbol: "main.main"},
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
+				{Location: &commit0v1.Location{File: "cmd/main.go", Line: 1, Column: 1}, Symbol: "main.main"},
 			},
 		},
 	}
@@ -300,7 +300,7 @@ func TestPolicy_NonElevatedIgnore_CriticalSymbolReachable_DoesNotSuppress(t *tes
 	}
 
 	f := makeCriticalSymbolReachableFinding()
-	code := p.Evaluate([]*anstv1.Finding{f})
+	code := p.Evaluate([]*commit0v1.Finding{f})
 
 	// The non-elevated ignore must be refused: the finding must still gate (Red Team #15d).
 	assert.Equal(t, policy.ExitGateFailure, code,
@@ -326,7 +326,7 @@ func TestPolicy_ElevatedIgnore_CriticalSymbolReachable_Suppresses(t *testing.T) 
 	}
 
 	f := makeCriticalSymbolReachableFinding()
-	code := p.Evaluate([]*anstv1.Finding{f})
+	code := p.Evaluate([]*commit0v1.Finding{f})
 
 	assert.Equal(t, policy.ExitPass, code,
 		"elevated ignore of SYMBOL_REACHABLE CRITICAL must suppress the finding (Red Team #15d)")
@@ -337,41 +337,41 @@ func TestPolicy_ElevatedIgnore_CriticalSymbolReachable_Suppresses(t *testing.T) 
 // regardless of confidence or severity. Dev-only dependencies are not in the runtime
 // execution path; they are surfaced for audit, not for CI failure.
 func TestPolicy_DevOnly_NeverGates(t *testing.T) {
-	makeCriticalDevOnly := func() *anstv1.Finding {
-		return &anstv1.Finding{
-			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-DEV"},
+	makeCriticalDevOnly := func() *commit0v1.Finding {
+		return &commit0v1.Finding{
+			Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-DEV"},
 			Module:     "example.com/devtool",
-			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-			Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+			Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 			Properties: map[string]string{"dev_only": "true"},
 		}
 	}
 
 	t.Run("dev_only_passes_reachable_only_false", func(t *testing.T) {
 		p := &policy.Policy{FailOn: "critical", ReachableOnly: false}
-		code := p.EvaluateWithFlags([]*anstv1.Finding{makeCriticalDevOnly()}, policy.EvalFlags{})
+		code := p.EvaluateWithFlags([]*commit0v1.Finding{makeCriticalDevOnly()}, policy.EvalFlags{})
 		assert.Equal(t, policy.ExitPass, code,
 			"dev_only CRITICAL SYMBOL_REACHABLE must not gate (ReachableOnly=false)")
 	})
 
 	t.Run("dev_only_passes_reachable_only_true", func(t *testing.T) {
 		p := &policy.Policy{FailOn: "critical", ReachableOnly: true}
-		code := p.EvaluateWithFlags([]*anstv1.Finding{makeCriticalDevOnly()}, policy.EvalFlags{})
+		code := p.EvaluateWithFlags([]*commit0v1.Finding{makeCriticalDevOnly()}, policy.EvalFlags{})
 		assert.Equal(t, policy.ExitPass, code,
 			"dev_only CRITICAL SYMBOL_REACHABLE must not gate (ReachableOnly=true)")
 	})
 
 	t.Run("non_dev_only_still_gates", func(t *testing.T) {
 		// Prove the only difference is the dev_only property: without it, same finding gates.
-		f := &anstv1.Finding{
-			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-DEV"},
+		f := &commit0v1.Finding{
+			Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-DEV"},
 			Module:     "example.com/devtool",
-			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-			Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+			Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 			// No Properties / dev_only not set.
 		}
 		p := &policy.Policy{FailOn: "critical", ReachableOnly: false}
-		code := p.EvaluateWithFlags([]*anstv1.Finding{f}, policy.EvalFlags{})
+		code := p.EvaluateWithFlags([]*commit0v1.Finding{f}, policy.EvalFlags{})
 		assert.Equal(t, policy.ExitGateFailure, code,
 			"identical finding WITHOUT dev_only must still gate (proves tag is the only differentiator)")
 	})
@@ -384,31 +384,31 @@ func TestPolicy_DevOnly_NeverGates(t *testing.T) {
 func TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses(t *testing.T) {
 	cases := []struct {
 		name       string
-		confidence anstv1.Confidence
-		severity   anstv1.Severity
+		confidence commit0v1.Confidence
+		severity   commit0v1.Severity
 	}{
 		{
 			name:       "symbol_reachable_high",
-			confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-			severity:   anstv1.Severity_SEVERITY_HIGH,
+			confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			severity:   commit0v1.Severity_SEVERITY_HIGH,
 		},
 		{
 			name:       "package_reachable_critical",
-			confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-			severity:   anstv1.Severity_SEVERITY_CRITICAL,
+			confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 		},
 		{
 			name:       "unknown_critical",
-			confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-			severity:   anstv1.Severity_SEVERITY_CRITICAL,
+			confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+			severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 		},
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			f := &anstv1.Finding{
-				Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-REG"},
+			f := &commit0v1.Finding{
+				Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-REG"},
 				Module:     "example.com/mod",
 				Confidence: tc.confidence,
 				Severity:   tc.severity,
@@ -428,7 +428,7 @@ func TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses(t *testing.T) {
 				Ignores:       []policy.IgnoreEntry{nonElevated},
 			}
 
-			code := p.Evaluate([]*anstv1.Finding{f})
+			code := p.Evaluate([]*commit0v1.Finding{f})
 			assert.Equal(t, policy.ExitPass, code,
 				"%s: non-elevated ignore must suppress non-(SYMBOL_REACHABLE+CRITICAL) finding", tc.name)
 		})
@@ -437,12 +437,12 @@ func TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses(t *testing.T) {
 
 // makeLowFinding returns a PACKAGE_REACHABLE LOW finding with optional risk
 // properties, used to exercise the opt-in additive gate predicates.
-func makeLowFinding(props map[string]string) *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0009"},
+func makeLowFinding(props map[string]string) *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0009"},
 		Module:     "github.com/example/low",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_LOW,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_LOW,
 		Properties: props,
 	}
 }
@@ -457,7 +457,7 @@ func TestPolicy_DefaultGateOn_UnchangedByPredicateSupport(t *testing.T) {
 
 	cases := []struct {
 		name string
-		f    *anstv1.Finding
+		f    *commit0v1.Finding
 		want int
 	}{
 		{"symbol_high", makeHighFinding(), policy.ExitGateFailure},
@@ -467,7 +467,7 @@ func TestPolicy_DefaultGateOn_UnchangedByPredicateSupport(t *testing.T) {
 		{"package_low", makeLowFinding(nil), policy.ExitPass},
 	}
 	for _, tc := range cases {
-		assert.Equal(t, tc.want, p.Evaluate([]*anstv1.Finding{tc.f}), tc.name)
+		assert.Equal(t, tc.want, p.Evaluate([]*commit0v1.Finding{tc.f}), tc.name)
 	}
 }
 
@@ -479,18 +479,18 @@ func TestPolicy_GateOnKEV(t *testing.T) {
 
 	// LOW finding, KEV-listed → gates via the predicate (severity alone would not).
 	kevLow := makeLowFinding(map[string]string{"kev": "true"})
-	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{kevLow}),
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*commit0v1.Finding{kevLow}),
 		"KEV-listed reachable finding must gate even below the severity threshold")
 
 	// LOW finding, not KEV → predicate does not fire, severity below threshold → pass.
 	plainLow := makeLowFinding(map[string]string{"kev": "false"})
-	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{plainLow}),
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*commit0v1.Finding{plainLow}),
 		"non-KEV sub-threshold finding must not gate")
 
 	// NOT_REACHABLE must never gate even when KEV-listed (eligibility preserved).
 	nr := makeNotReachableFinding()
 	nr.Properties = map[string]string{"kev": "true"}
-	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{nr}),
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*commit0v1.Finding{nr}),
 		"NOT_REACHABLE must never gate, even KEV-listed")
 }
 
@@ -500,16 +500,16 @@ func TestPolicy_GateOnEPSS(t *testing.T) {
 	require.NoError(t, err)
 
 	high := makeLowFinding(map[string]string{"epss": "0.70"})
-	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{high}),
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*commit0v1.Finding{high}),
 		"EPSS 0.70 ≥ 0.5 must gate")
 
 	low := makeLowFinding(map[string]string{"epss": "0.30"})
-	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{low}),
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*commit0v1.Finding{low}),
 		"EPSS 0.30 < 0.5 must not gate")
 
 	// Missing EPSS data: predicate cannot fire; sub-critical severity → pass.
 	none := makeLowFinding(nil)
-	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{none}),
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*commit0v1.Finding{none}),
 		"missing EPSS data must not gate via the epss predicate")
 }
 
@@ -519,11 +519,11 @@ func TestPolicy_GateOnRisk(t *testing.T) {
 	require.NoError(t, err)
 
 	high := makeLowFinding(map[string]string{"risk_score": "80.0"})
-	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{high}),
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*commit0v1.Finding{high}),
 		"risk 80 ≥ 70 must gate")
 
 	low := makeLowFinding(map[string]string{"risk_score": "50.0"})
-	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{low}),
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*commit0v1.Finding{low}),
 		"risk 50 < 70 must not gate")
 }
 
@@ -534,7 +534,7 @@ func TestPolicy_Predicates_AddNeverRemove(t *testing.T) {
 	require.NoError(t, err)
 
 	// A HIGH finding with no KEV signal must still gate via the base severity path.
-	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{makeHighFinding()}),
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*commit0v1.Finding{makeHighFinding()}),
 		"base severity gate must still fire when a predicate is configured")
 }
 

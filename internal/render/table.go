@@ -6,24 +6,24 @@ import (
 	"sort"
 	"strings"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // confidenceShort maps Confidence enum values to short display labels.
-var confidenceShort = map[anstv1.Confidence]string{
-	anstv1.Confidence_CONFIDENCE_UNKNOWN:          "UNKNOWN",
-	anstv1.Confidence_CONFIDENCE_NOT_REACHABLE:    "NOT_REACHABLE",
-	anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE: "PKG_REACHABLE",
-	anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:  "SYM_REACHABLE",
+var confidenceShort = map[commit0v1.Confidence]string{
+	commit0v1.Confidence_CONFIDENCE_UNKNOWN:          "UNKNOWN",
+	commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE:    "NOT_REACHABLE",
+	commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE: "PKG_REACHABLE",
+	commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:  "SYM_REACHABLE",
 }
 
 // severityShort maps Severity enum values to short display labels.
-var severityShort = map[anstv1.Severity]string{
-	anstv1.Severity_SEVERITY_UNSPECIFIED: "UNSPEC",
-	anstv1.Severity_SEVERITY_LOW:         "LOW",
-	anstv1.Severity_SEVERITY_MEDIUM:      "MEDIUM",
-	anstv1.Severity_SEVERITY_HIGH:        "HIGH",
-	anstv1.Severity_SEVERITY_CRITICAL:    "CRITICAL",
+var severityShort = map[commit0v1.Severity]string{
+	commit0v1.Severity_SEVERITY_UNSPECIFIED: "UNSPEC",
+	commit0v1.Severity_SEVERITY_LOW:         "LOW",
+	commit0v1.Severity_SEVERITY_MEDIUM:      "MEDIUM",
+	commit0v1.Severity_SEVERITY_HIGH:        "HIGH",
+	commit0v1.Severity_SEVERITY_CRITICAL:    "CRITICAL",
 }
 
 // ToTable converts a slice of findings into a TTY-friendly human-readable table.
@@ -34,9 +34,9 @@ var severityShort = map[anstv1.Severity]string{
 // The PATH column shows the first file:line of the reachability path when present,
 // or "-" for path-less findings. nil input produces a header-only table noting
 // no findings.
-func ToTable(findings []*anstv1.Finding) []byte {
+func ToTable(findings []*commit0v1.Finding) []byte {
 	// Sort: severity descending, then advisory ID ascending.
-	sorted := make([]*anstv1.Finding, len(findings))
+	sorted := make([]*commit0v1.Finding, len(findings))
 	copy(sorted, findings)
 	sort.Slice(sorted, func(i, j int) bool {
 		si := sorted[i].GetSeverity()
@@ -93,7 +93,7 @@ func ToTable(findings []*anstv1.Finding) []byte {
 		buf.WriteByte('\n')
 
 		// For SYMBOL_REACHABLE findings, print a condensed call path below the row.
-		if f.GetConfidence() == anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE {
+		if f.GetConfidence() == commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE {
 			if p := f.GetPath(); p != nil {
 				for i, step := range p.GetSteps() {
 					prefix := "  ├─"
@@ -125,7 +125,7 @@ func ToTable(findings []*anstv1.Finding) []byte {
 
 // provenanceNote renders the indented cross-source audit line for a finding from
 // its stamped properties, or "" when the finding carries no provenance signal.
-func provenanceNote(f *anstv1.Finding) string {
+func provenanceNote(f *commit0v1.Finding) string {
 	props := f.GetProperties()
 	prov := props["provenance"]
 	if prov == "" {
@@ -142,18 +142,18 @@ func provenanceNote(f *anstv1.Finding) string {
 }
 
 // severityRankTable is the sorting rank for severities in the table (higher = more severe).
-var severityRankTable = map[anstv1.Severity]int{
-	anstv1.Severity_SEVERITY_UNSPECIFIED: 0,
-	anstv1.Severity_SEVERITY_LOW:         1,
-	anstv1.Severity_SEVERITY_MEDIUM:      2,
-	anstv1.Severity_SEVERITY_HIGH:        3,
-	anstv1.Severity_SEVERITY_CRITICAL:    4,
+var severityRankTable = map[commit0v1.Severity]int{
+	commit0v1.Severity_SEVERITY_UNSPECIFIED: 0,
+	commit0v1.Severity_SEVERITY_LOW:         1,
+	commit0v1.Severity_SEVERITY_MEDIUM:      2,
+	commit0v1.Severity_SEVERITY_HIGH:        3,
+	commit0v1.Severity_SEVERITY_CRITICAL:    4,
 }
 
 // riskCell renders the fused risk signal for the table's RISK column from the
 // finding's properties (stamped by the risk-fusion pass). It prefers the numeric
 // score, then the tier label, and shows "-" when no risk signal is present.
-func riskCell(f *anstv1.Finding) string {
+func riskCell(f *commit0v1.Finding) string {
 	props := f.GetProperties()
 	score := props["risk_score"]
 	tier := strings.ToUpper(props["risk_tier"])

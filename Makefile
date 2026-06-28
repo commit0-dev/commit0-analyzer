@@ -4,7 +4,7 @@
 GOPATH_BIN := $(shell go env GOPATH)/bin
 export PATH := $(PATH):$(GOPATH_BIN)
 
-## generate: regenerate protobuf/gRPC stubs (Go + TypeScript) from proto/anst/v1/plugin.proto
+## generate: regenerate protobuf/gRPC stubs (Go + TypeScript) from proto/commit0/v1/plugin.proto
 generate:
 	buf generate
 	buf generate --template buf.gen.js.yaml
@@ -33,7 +33,7 @@ build: build-js-plugin
 build-js-plugin:
 	@if command -v bun >/dev/null 2>&1; then \
 		echo "Building js-reachability plugin..."; \
-		(cd plugins/js-reachability && bun install && bun build src/main.ts --compile --outfile dist/anst-js-reachability); \
+		(cd plugins/js-reachability && bun install && bun build src/main.ts --compile --outfile dist/commit0-js-reachability); \
 		echo "Placing oxc sidecar..."; \
 		mkdir -p plugins/js-reachability/dist/oxc-binding; \
 		GOOS=$$(go env GOOS); \
@@ -89,7 +89,7 @@ tidy:
 
 ## clean: remove build artifacts
 clean:
-	rm -f anst-analyzer
+	rm -f commit0-analyzer
 
 ## hooks: install git hooks via lefthook (run once after cloning)
 hooks:

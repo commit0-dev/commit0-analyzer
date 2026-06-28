@@ -1,6 +1,6 @@
 version: v2
 
-# Generates TypeScript stubs from proto/anst/v1/plugin.proto into the JS plugin.
+# Generates TypeScript stubs from proto/commit0/v1/plugin.proto into the JS plugin.
 # Run: buf generate --template buf.gen.js.yaml
 # Requires ts-proto installed in plugins/js-reachability (npm install).
 

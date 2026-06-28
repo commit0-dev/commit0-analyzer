@@ -155,7 +155,7 @@ func buildNPMFixtureProject(t *testing.T, pkgName, resolvedVersion string) strin
 func jsPluginBinaryPath(t *testing.T) string {
 	t.Helper()
 	repoRoot := repoRoot(t)
-	binPath := filepath.Join(repoRoot, "plugins", "js-reachability", "dist", "anst-js-reachability")
+	binPath := filepath.Join(repoRoot, "plugins", "js-reachability", "dist", "commit0-js-reachability")
 	if _, err := os.Stat(binPath); err != nil {
 		return ""
 	}

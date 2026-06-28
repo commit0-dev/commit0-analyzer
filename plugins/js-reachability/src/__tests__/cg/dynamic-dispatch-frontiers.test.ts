@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyze } from "../../engine/analyze.js";
 import { buildCallGraph } from "../../cg/build.js";
-import { Confidence } from "../../gen/anst/v1/plugin.js";
+import { Confidence } from "../../gen/commit0/v1/plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const gate = path.resolve(__dirname, "../../../testdata/projects/gate-g1");

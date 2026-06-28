@@ -1,7 +1,7 @@
 package engine
 
 import (
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -36,41 +36,41 @@ type ConfidenceInput struct {
 //   - ReachabilityPath is nil for everything except SYMBOL_REACHABLE.
 //   - PACKAGE_REACHABLE requires SymbolLevel==false and PkgImported==true.
 //   - Interface dispatch resolved by VTA yields SYMBOL_REACHABLE (not UNKNOWN).
-func AssignConfidence(inp ConfidenceInput) (anstv1.Confidence, []PathStep) {
+func AssignConfidence(inp ConfidenceInput) (commit0v1.Confidence, []PathStep) {
 	// Partial build / IllTyped → UNKNOWN (Red Team Crit #4).
 	if inp.IllTyped {
-		return anstv1.Confidence_CONFIDENCE_UNKNOWN, nil
+		return commit0v1.Confidence_CONFIDENCE_UNKNOWN, nil
 	}
 
 	// Package-level advisory (SymbolLevel==false).
 	if !inp.SymbolLevel {
 		if inp.PkgImported {
-			return anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, nil
+			return commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, nil
 		}
-		return anstv1.Confidence_CONFIDENCE_NOT_REACHABLE, nil
+		return commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE, nil
 	}
 
 	// Symbol-level but resolution failed → UNKNOWN (Red Team Crit #12b).
 	if !inp.Resolved {
-		return anstv1.Confidence_CONFIDENCE_UNKNOWN, nil
+		return commit0v1.Confidence_CONFIDENCE_UNKNOWN, nil
 	}
 
 	// Symbol resolved and BFS found a path → SYMBOL_REACHABLE.
 	// This covers plain calls AND VTA-resolved interface dispatch
 	// (Red Team Med #15a: interface dispatch ≠ reflection).
 	if inp.BFSResult.Reachable {
-		return anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE, inp.BFSResult.Path
+		return commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE, inp.BFSResult.Path
 	}
 
 	// No call-graph edge. Check for reflection / address-taken pattern
 	// (Red Team Crit #3): if reflection is present in the reachable subgraph
 	// AND the target is address-taken, we cannot safely claim NOT_REACHABLE.
 	if inp.ReflectInPath && inp.TargetAddrTaken {
-		return anstv1.Confidence_CONFIDENCE_UNKNOWN, nil
+		return commit0v1.Confidence_CONFIDENCE_UNKNOWN, nil
 	}
 
 	// Clean graph, symbol resolved, no edge found → NOT_REACHABLE.
-	return anstv1.Confidence_CONFIDENCE_NOT_REACHABLE, nil
+	return commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE, nil
 }
 
 // EntryPointsForProgram auto-detects the BFS root set from the SSA program.

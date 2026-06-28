@@ -8,24 +8,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
-	"github.com/ducthinh993/anst-analyzer/internal/render"
+	"github.com/commit0-dev/commit0-analyzer/internal/render"
 )
 
 // ── JS/TS Finding helpers ─────────────────────────────────────────────────────
 
 // jsPackageReachableFinding returns a PACKAGE_REACHABLE JS finding representing
 // the serialize-javascript vulnerability (the Gate G1-JS advisory).
-func jsPackageReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func jsPackageReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GHSA-h9rv-jmmf-4pgx",
 			Url: "https://osv.dev/vulnerability/GHSA-h9rv-jmmf-4pgx",
 		},
 		Module:     "serialize-javascript",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{
 			"algorithm": "conservative-flow",
 			"language":  "js",
@@ -38,23 +38,23 @@ func jsPackageReachableFinding() *anstv1.Finding {
 
 // jsSymbolReachableFinding returns a SYMBOL_REACHABLE JS finding with a
 // two-step ReachabilityPath (first-party call → import site).
-func jsSymbolReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func jsSymbolReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GHSA-synth-sym-001",
 			Url: "https://osv.dev/vulnerability/GHSA-synth-sym-001",
 		},
 		Module:     "serialize-javascript",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
 				{
-					Location: &anstv1.Location{File: "src/index.js", Line: 3, Column: 1},
+					Location: &commit0v1.Location{File: "src/index.js", Line: 3, Column: 1},
 					Symbol:   "run",
 				},
 				{
-					Location: &anstv1.Location{File: "src/index.js", Line: 5, Column: 10},
+					Location: &commit0v1.Location{File: "src/index.js", Line: 5, Column: 10},
 					Symbol:   "serialize",
 				},
 			},
@@ -71,15 +71,15 @@ func jsSymbolReachableFinding() *anstv1.Finding {
 
 // jsNotReachableFinding returns a NOT_REACHABLE JS finding for lodash (installed
 // but not imported from any entrypoint).
-func jsNotReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func jsNotReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GHSA-lodash-not-imported",
 			Url: "https://osv.dev/vulnerability/GHSA-lodash-not-imported",
 		},
 		Module:     "lodash",
-		Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_MEDIUM,
+		Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_MEDIUM,
 		Properties: map[string]string{
 			"algorithm": "conservative-flow",
 			"language":  "js",
@@ -91,15 +91,15 @@ func jsNotReachableFinding() *anstv1.Finding {
 }
 
 // jsUnknownFinding returns an UNKNOWN JS finding for a dynamic-require path.
-func jsUnknownFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func jsUnknownFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GHSA-dyn-require-001",
 			Url: "https://osv.dev/vulnerability/GHSA-dyn-require-001",
 		},
 		Module:     "some-package",
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{
 			"algorithm": "conservative-flow",
 			"language":  "js",
@@ -112,15 +112,15 @@ func jsUnknownFinding() *anstv1.Finding {
 
 // jsPhantomReachableFinding returns a PACKAGE_REACHABLE JS finding for a
 // phantom (undeclared) dependency. The phantom property must be rendered.
-func jsPhantomReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func jsPhantomReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GHSA-phantom-dep-001",
 			Url: "https://osv.dev/vulnerability/GHSA-phantom-dep-001",
 		},
 		Module:     "hoisted-phantom",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 		Properties: map[string]string{
 			"algorithm": "conservative-flow",
 			"language":  "js",
@@ -140,7 +140,7 @@ func TestSARIF_JS_PackageReachable_NoCodeFlows(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := jsPackageReachableFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -169,7 +169,7 @@ func TestSARIF_JS_SymbolReachable_HasCodeFlows(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := jsSymbolReachableFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -205,7 +205,7 @@ func TestSARIF_JS_NotReachable_Suppressed(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := jsNotReachableFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -238,7 +238,7 @@ func TestSARIF_JS_Unknown_SurfacedAsNormalResult(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := jsUnknownFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -266,7 +266,7 @@ func TestSARIF_JS_Phantom_RenderedWithPhantomTag(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := jsPhantomReachableFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -305,7 +305,7 @@ func TestSARIF_JS_Phantom_RenderedWithPhantomTag(t *testing.T) {
 func TestSARIF_JS_MixedTiers_AllFiveTiers(t *testing.T) {
 	schema := compileSARIFSchema(t)
 
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		jsPackageReachableFinding(),
 		jsSymbolReachableFinding(),
 		jsNotReachableFinding(),
@@ -371,7 +371,7 @@ func TestSARIF_JS_MixedTiers_AllFiveTiers(t *testing.T) {
 // TestJSON_JS_AllFiveTiers verifies that all five JS tier findings are correctly
 // marshalled to JSON: confidence labels, language, phantom property.
 func TestJSON_JS_AllFiveTiers(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		jsPackageReachableFinding(),
 		jsSymbolReachableFinding(),
 		jsNotReachableFinding(),
@@ -432,7 +432,7 @@ func TestJSON_JS_AllFiveTiers(t *testing.T) {
 // TestTable_JS_AllFiveTiers verifies that all five JS tier findings appear in
 // the table output with correct confidence labels and language attribution.
 func TestTable_JS_AllFiveTiers(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		jsPackageReachableFinding(),
 		jsSymbolReachableFinding(),
 		jsNotReachableFinding(),
@@ -466,7 +466,7 @@ func TestTable_JS_AllFiveTiers(t *testing.T) {
 // TestTable_JS_Deterministic verifies that ToTable produces byte-identical
 // output across two calls with the same findings.
 func TestTable_JS_Deterministic(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		jsPackageReachableFinding(),
 		jsNotReachableFinding(),
 		jsUnknownFinding(),
@@ -483,11 +483,11 @@ func TestSARIF_JS_LanguageFieldOnFindings(t *testing.T) {
 	schema := compileSARIFSchema(t)
 
 	// A TypeScript finding: language should be "ts".
-	tsF := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GHSA-ts-vuln-001"},
+	tsF := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GHSA-ts-vuln-001"},
 		Module:     "some-ts-lib",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{
 			"language": "ts",
 		},
@@ -495,7 +495,7 @@ func TestSARIF_JS_LanguageFieldOnFindings(t *testing.T) {
 		Pillar:   "sca",
 	}
 
-	out, err := render.ToSARIF([]*anstv1.Finding{tsF})
+	out, err := render.ToSARIF([]*commit0v1.Finding{tsF})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -514,17 +514,17 @@ func TestSARIF_JS_LanguageFieldOnFindings(t *testing.T) {
 func TestSARIF_JS_UNKNOWN_IsGateEligible_RendersWithoutSuppression(t *testing.T) {
 	schema := compileSARIFSchema(t)
 
-	f := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GHSA-unknown-js-001"},
+	f := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GHSA-unknown-js-001"},
 		Module:     "dynamic-loader",
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{"language": "js"},
 		Language:   "js",
 		Pillar:     "sca",
 	}
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 

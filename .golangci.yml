@@ -13,7 +13,7 @@ linters:
   exclusions:
     # Generated protobuf/gRPC files are not subject to linting.
     paths:
-      - "pkg/contract/anstv1"
+      - "pkg/contract/commit0v1"
 
 issues:
   max-issues-per-linter: 50

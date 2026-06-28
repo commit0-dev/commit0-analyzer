@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
-	"github.com/ducthinh993/anst-analyzer/internal/policy"
+	"github.com/commit0-dev/commit0-analyzer/internal/policy"
 )
 
 // TestIgnore_FutureExpiry_Suppresses verifies that an ignore entry whose ExpiresAt
@@ -50,7 +50,7 @@ func TestIgnore_ExpiredEntry_DoesNotSuppress(t *testing.T) {
 		ReachableOnly: false,
 		Ignores:      []policy.IgnoreEntry{entry},
 	}
-	code := p.Evaluate([]*anstv1.Finding{f})
+	code := p.Evaluate([]*commit0v1.Finding{f})
 	assert.Equal(t, policy.ExitGateFailure, code,
 		"expired ignore must NOT suppress finding; gate must fail (Red Team #15d fail-closed)")
 }
@@ -106,14 +106,14 @@ func TestIgnore_WildcardModule_Rejected(t *testing.T) {
 // TestIgnore_SymbolReachableCritical_RequiresElevatedFlag validates Red Team #15d:
 // ignoring a SYMBOL_REACHABLE CRITICAL finding requires the ElevatedIgnore flag.
 func TestIgnore_SymbolReachableCritical_RequiresElevatedFlag(t *testing.T) {
-	criticalFinding := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-CRIT"},
+	criticalFinding := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-CRIT"},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_CRITICAL,
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
-				{Location: &anstv1.Location{File: "cmd/main.go", Line: 1}, Symbol: "main.main"},
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
+				{Location: &commit0v1.Location{File: "cmd/main.go", Line: 1}, Symbol: "main.main"},
 			},
 		},
 	}
@@ -152,23 +152,23 @@ func TestIgnore_ExactTupleMatching(t *testing.T) {
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 
-	exactMatch := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+	exactMatch := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 	}
-	differentAdvisory := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-9999"},
+	differentAdvisory := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-9999"},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 	}
-	differentModule := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+	differentModule := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
 		Module:     "github.com/other/lib",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 	}
 
 	assert.True(t, entry.Matches(exactMatch), "exact (advisoryID, module) must match")
@@ -187,26 +187,26 @@ func TestIgnore_OptionalSymbol_NarrowerMatch(t *testing.T) {
 		ExpiresAt:  time.Now().Add(24 * time.Hour),
 	}
 
-	withMatchingSymbol := &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+	withMatchingSymbol := &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
 		Module:   "golang.org/x/net",
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
 				{Symbol: "golang.org/x/net/http2.(*Transport).RoundTrip"},
 			},
 		},
 	}
-	withOtherSymbol := &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+	withOtherSymbol := &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
 		Module:   "golang.org/x/net",
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
 				{Symbol: "golang.org/x/net/http2.(*ClientConn).RoundTrip"},
 			},
 		},
 	}
-	noPath := &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+	noPath := &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
 		Module:   "golang.org/x/net",
 	}
 

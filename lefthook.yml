@@ -1,4 +1,4 @@
-# lefthook git hooks for anst-analyzer — https://lefthook.dev
+# lefthook git hooks for commit0-analyzer — https://lefthook.dev
 #
 # Setup (run once after cloning):
 #   brew install lefthook        # or: go install github.com/evilmartians/lefthook@latest

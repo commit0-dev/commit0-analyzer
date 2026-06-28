@@ -8,8 +8,8 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 
-	"github.com/ducthinh993/anst-analyzer/pkg/contract"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/pkg/contract"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 	// execution. Binary hash pinning (SecureConfig) in internal/host is the
 	// actual integrity mechanism.
 	MagicCookieKey   = "ANST_PLUGIN_MAGIC_COOKIE"
-	MagicCookieValue = "anst-analyzer-v0-plugin"
+	MagicCookieValue = "anst-analyzer-v0-plugin" // TODO: bump to commit0-analyzer-v0-plugin once bun recompiles plugin binaries in CI
 )
 
 // HandshakeConfig is the shared go-plugin handshake used by both host and
@@ -39,15 +39,15 @@ var HandshakeConfig = goplugin.HandshakeConfig{
 }
 
 // AnalyzerGRPCPlugin is the go-plugin plugin type that carries the
-// anstv1.Analyzer gRPC service. It implements both goplugin.Plugin
+// commit0v1.Analyzer gRPC service. It implements both goplugin.Plugin
 // (net/rpc path, which we reject) and goplugin.GRPCPlugin.
 //
-// Host side: set Impl to nil; GRPCClient returns an anstv1.AnalyzerClient.
+// Host side: set Impl to nil; GRPCClient returns an commit0v1.AnalyzerClient.
 // Plugin side: set Impl to the concrete AnalyzerServer; GRPCServer registers it.
 type AnalyzerGRPCPlugin struct {
 	// Impl is the server-side implementation. It must be non-nil on the plugin
 	// (server) process and is ignored on the host (client) process.
-	Impl anstv1.AnalyzerServer
+	Impl commit0v1.AnalyzerServer
 }
 
 // GRPCServer registers the AnalyzerServer implementation with the go-plugin
@@ -56,19 +56,19 @@ func (p *AnalyzerGRPCPlugin) GRPCServer(_ *goplugin.GRPCBroker, s *grpc.Server) 
 	if p.Impl == nil {
 		return fmt.Errorf("plugin.AnalyzerGRPCPlugin: Impl must be set on the server side")
 	}
-	anstv1.RegisterAnalyzerServer(s, p.Impl)
+	commit0v1.RegisterAnalyzerServer(s, p.Impl)
 	return nil
 }
 
-// GRPCClient returns an anstv1.AnalyzerClient connected over the go-plugin
+// GRPCClient returns an commit0v1.AnalyzerClient connected over the go-plugin
 // managed gRPC connection. Called by go-plugin on the host (client) side.
-// The returned value is an anstv1.AnalyzerClient; the caller must type-assert.
+// The returned value is an commit0v1.AnalyzerClient; the caller must type-assert.
 func (p *AnalyzerGRPCPlugin) GRPCClient(
 	_ context.Context,
 	_ *goplugin.GRPCBroker,
 	cc *grpc.ClientConn,
 ) (interface{}, error) {
-	return anstv1.NewAnalyzerClient(cc), nil
+	return commit0v1.NewAnalyzerClient(cc), nil
 }
 
 // Server implements goplugin.Plugin for the net/rpc path, which is not
@@ -85,7 +85,7 @@ func (p *AnalyzerGRPCPlugin) Client(_ *goplugin.MuxBroker, _ *rpc.Client) (inter
 
 // PluginMap returns a go-plugin PluginSet with impl registered under PluginName.
 // Pass impl=nil on the host (client) side.
-func PluginMap(impl anstv1.AnalyzerServer) goplugin.PluginSet {
+func PluginMap(impl commit0v1.AnalyzerServer) goplugin.PluginSet {
 	return goplugin.PluginSet{
 		PluginName: &AnalyzerGRPCPlugin{Impl: impl},
 	}
@@ -97,7 +97,7 @@ func PluginMap(impl anstv1.AnalyzerServer) goplugin.PluginSet {
 // Usage in a plugin main():
 //
 //	func main() { plugin.Serve(&myAnalyzer{}) }
-func Serve(impl anstv1.AnalyzerServer) {
+func Serve(impl commit0v1.AnalyzerServer) {
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: HandshakeConfig,
 		Plugins:         PluginMap(impl),

@@ -47,7 +47,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
 )
 
 func init() {

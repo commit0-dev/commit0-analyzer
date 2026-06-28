@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/internal/host"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/host"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // jsDistDir returns the absolute path to the compiled JS plugin distribution,
@@ -54,7 +54,7 @@ func TestJSPlugin_RealBinary_TransportE2E(t *testing.T) {
 		t.Skip("cannot locate js-reachability dist directory; skipping")
 	}
 
-	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	mainBin := filepath.Join(distDir, "commit0-js-reachability")
 	if _, err := os.Stat(mainBin); err != nil {
 		t.Skipf("js-reachability binary not found at %s (run 'make build-js-plugin'): %v", mainBin, err)
 	}
@@ -90,7 +90,7 @@ func TestJSPlugin_RealBinary_TransportE2E(t *testing.T) {
 	require.NoError(t, reg.Add(m), "registry must accept the built dist artifacts")
 
 	ctx := context.Background()
-	results, err := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, err := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		// No SkipHashCheck: go-plugin verifies the binary before exec using the
 		// SHA256 in SecureConfig.
 	})
@@ -115,7 +115,7 @@ func TestJSPlugin_RealBinary_MetadataFields(t *testing.T) {
 		t.Skip("cannot locate js-reachability dist directory; skipping")
 	}
 
-	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	mainBin := filepath.Join(distDir, "commit0-js-reachability")
 	if _, err := os.Stat(mainBin); err != nil {
 		t.Skipf("js-reachability binary not found at %s (run 'make build-js-plugin'): %v", mainBin, err)
 	}
@@ -132,7 +132,7 @@ func TestJSPlugin_RealBinary_MetadataFields(t *testing.T) {
 	require.NoError(t, err, "Launch must succeed for compiled binary")
 	defer pc.Kill()
 
-	meta, err := pc.Analyzer().Metadata(ctx, &anstv1.MetadataRequest{})
+	meta, err := pc.Analyzer().Metadata(ctx, &commit0v1.MetadataRequest{})
 	require.NoError(t, err, "Metadata RPC must succeed")
 
 	assert.Equal(t, "js-reachability", meta.GetName(),
@@ -156,7 +156,7 @@ func TestJSPlugin_RealBinary_TamperRejection(t *testing.T) {
 		t.Skip("cannot locate js-reachability dist directory; skipping")
 	}
 
-	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	mainBin := filepath.Join(distDir, "commit0-js-reachability")
 	sidecarPath := filepath.Join(distDir, "oxc-binding", jsSidecarName())
 	if _, err := os.Stat(mainBin); err != nil {
 		t.Skipf("js-reachability binary not built: %v", err)
@@ -169,7 +169,7 @@ func TestJSPlugin_RealBinary_TamperRejection(t *testing.T) {
 	// real dist.
 	tmpDir := t.TempDir()
 
-	mainDst := filepath.Join(tmpDir, "anst-js-reachability")
+	mainDst := filepath.Join(tmpDir, "commit0-js-reachability")
 	sidecarDst := filepath.Join(tmpDir, jsSidecarName())
 
 	copyFile(t, mainBin, mainDst, 0o755)
@@ -218,7 +218,7 @@ func TestJSPlugin_RealBinary_TamperRejectionViaLaunch(t *testing.T) {
 		t.Skip("cannot locate js-reachability dist directory; skipping")
 	}
 
-	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	mainBin := filepath.Join(distDir, "commit0-js-reachability")
 	sidecarPath := filepath.Join(distDir, "oxc-binding", jsSidecarName())
 	if _, err := os.Stat(mainBin); err != nil {
 		t.Skipf("js-reachability binary not built: %v", err)
@@ -230,7 +230,7 @@ func TestJSPlugin_RealBinary_TamperRejectionViaLaunch(t *testing.T) {
 	// ── sub-test 1: tampered sidecar rejected by Launch ──────────────────────
 	t.Run("tampered_sidecar_rejected_by_launch", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		mainDst := filepath.Join(tmpDir, "anst-js-reachability")
+		mainDst := filepath.Join(tmpDir, "commit0-js-reachability")
 		sidecarDst := filepath.Join(tmpDir, jsSidecarName())
 
 		copyFile(t, mainBin, mainDst, 0o755)
@@ -263,7 +263,7 @@ func TestJSPlugin_RealBinary_TamperRejectionViaLaunch(t *testing.T) {
 		require.NoError(t, reg.Add(m), "registry must accept artifact paths")
 
 		ctx := context.Background()
-		results, runErr := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{})
+		results, runErr := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{})
 		require.NoError(t, runErr, "Run itself must not fail (crash isolation)")
 		require.Len(t, results, 1)
 		require.Error(t, results[0].Err, "tampered sidecar must cause a launch error")
@@ -274,7 +274,7 @@ func TestJSPlugin_RealBinary_TamperRejectionViaLaunch(t *testing.T) {
 	// ── sub-test 2: tampered main binary rejected by Launch ───────────────────
 	t.Run("tampered_main_rejected_by_launch", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		mainDst := filepath.Join(tmpDir, "anst-js-reachability")
+		mainDst := filepath.Join(tmpDir, "commit0-js-reachability")
 		sidecarDst := filepath.Join(tmpDir, jsSidecarName())
 
 		copyFile(t, mainBin, mainDst, 0o755)
@@ -306,7 +306,7 @@ func TestJSPlugin_RealBinary_TamperRejectionViaLaunch(t *testing.T) {
 		require.NoError(t, reg.Add(m), "registry must accept artifact paths")
 
 		ctx := context.Background()
-		results, runErr := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{})
+		results, runErr := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{})
 		require.NoError(t, runErr, "Run itself must not fail (crash isolation)")
 		require.Len(t, results, 1)
 		require.Error(t, results[0].Err, "tampered main binary must cause a launch error")

@@ -7,7 +7,7 @@ import (
 )
 
 // Author is the VEX document author/publisher anst stamps into every document.
-const Author = "anst-analyzer"
+const Author = "commit0-analyzer"
 
 // Status is a VEX exploitability status. The string values are the OpenVEX
 // vocabulary; the CycloneDX and CSAF formatters translate them to their own

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/symbolextract"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/symbolextract"
 )
 
 // makeEchoPlugin writes a tiny shell script to tmp that always prints the

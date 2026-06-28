@@ -1,20 +1,20 @@
-# anst-analyzer Usage Guide
+# commit0-analyzer Usage Guide
 
 ## Overview
 
-`anst-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules, JavaScript/TypeScript packages, Rust crates, Python projects, JVM (Java/Kotlin/Scala), .NET, PHP, Ruby, Elixir, Dart, and Swift applications. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to install-only scanners.
+`commit0-analyzer` is a CI-native, reachability-first software composition analysis tool for Go modules, JavaScript/TypeScript packages, Rust crates, Python projects, JVM (Java/Kotlin/Scala), .NET, PHP, Ruby, Elixir, Dart, and Swift applications. It determines whether vulnerable dependency symbols are actually reachable from your code's entry points, reducing false-positive noise compared to install-only scanners.
 
-**Differentiator vs `govulncheck` / `npm audit`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. For Go, advisory symbol data comes from the same Go vulnerability database (`vuln.go.dev`), so symbol-level precision is equivalent; the differentiation is SARIF output, policy gating, and multi-ecosystem support. For JS/TS, the differentiator is package-level import-graph reachability versus `npm audit`'s install-only scope. For Python, the differentiator is AST-driven call-graph analysis that works without code execution (lockfile-static), with positive-reachability-focused confidence tiers suited to dynamic languages. For Rust, anst-analyzer provides reachability checking where Cargo.audit and other tools offer only dependency-level scanning.
+**Differentiator vs `govulncheck` / `npm audit`:** SARIF `codeFlows` call-path proofs + policy-as-code gate. For Go, advisory symbol data comes from the same Go vulnerability database (`vuln.go.dev`), so symbol-level precision is equivalent; the differentiation is SARIF output, policy gating, and multi-ecosystem support. For JS/TS, the differentiator is package-level import-graph reachability versus `npm audit`'s install-only scope. For Python, the differentiator is AST-driven call-graph analysis that works without code execution (lockfile-static), with positive-reachability-focused confidence tiers suited to dynamic languages. For Rust, commit0-analyzer provides reachability checking where Cargo.audit and other tools offer only dependency-level scanning.
 
 ## Installation
 
 ```sh
-go install github.com/ducthinh993/anst-analyzer/cmd/anst@latest
+go install github.com/commit0-dev/commit0-analyzer/cmd/commit0-analyzer@latest
 ```
 
 ## Commands
 
-### `anst-analyzer scan [path]`
+### `commit0-analyzer scan [path]`
 
 Scans a project for reachable dependency vulnerabilities. The path defaults to the current directory. Supported project roots:
 
@@ -134,7 +134,7 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 
 #### Advisory Sources
 
-`anst-analyzer` queries one or more advisory sources per scan. Use `--source` to select which sources are active:
+`commit0-analyzer` queries one or more advisory sources per scan. Use `--source` to select which sources are active:
 
 | Source token | Default | Description |
 |---|---|---|
@@ -174,9 +174,9 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 - For Swift, OSV.dev includes SwiftURL ecosystem advisories. Reachability is package-level (lockfile-static; `Package.swift` is executable Swift and is never evaluated). Packages are identified by their git repository URL (anst normalizes resolved URLs to match advisory identifiers). Version matching uses SemVer 2.0. All dependencies in `Package.resolved` are tagged as runtime (dependency types are not distinguished in the lockfile).
 
 **Cache directories:**
-- Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
-- OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/`, `osv/npm/`, `osv/crates-io/`, `osv/PyPI/`, `osv/Maven/`, `osv/NuGet/`, `osv/Packagist/`, `osv/RubyGems/`, `osv/Hex/`, `osv/Pub/`, `osv/SwiftURL/` on Linux; same structure under `~/Library/Caches/anst-analyzer/osv/` on macOS.
-- GitLab (gemnasium-db) cache: `$XDG_CACHE_HOME/anst-analyzer/gitlab/` (Linux) / `~/Library/Caches/anst-analyzer/gitlab/` (macOS). One extracted tree (`<package_type>/<package_slug>/<id>.yml`) shared across all ecosystems, re-downloaded at most once per day.
+- Go vuln DB writable cache: `$XDG_CACHE_HOME/commit0-analyzer/vuln-db` (Linux) / `~/Library/Caches/commit0-analyzer/vuln-db` (macOS).
+- OSV bundle cache: `$XDG_CACHE_HOME/commit0-analyzer/osv/Go/`, `osv/npm/`, `osv/crates-io/`, `osv/PyPI/`, `osv/Maven/`, `osv/NuGet/`, `osv/Packagist/`, `osv/RubyGems/`, `osv/Hex/`, `osv/Pub/`, `osv/SwiftURL/` on Linux; same structure under `~/Library/Caches/commit0-analyzer/osv/` on macOS.
+- GitLab (gemnasium-db) cache: `$XDG_CACHE_HOME/commit0-analyzer/gitlab/` (Linux) / `~/Library/Caches/commit0-analyzer/gitlab/` (macOS). One extracted tree (`<package_type>/<package_slug>/<id>.yml`) shared across all ecosystems, re-downloaded at most once per day.
 
 #### Enrichment Columns
 
@@ -194,7 +194,7 @@ gate — it is reported for prioritization until you opt in via `--gate-on`:
 
 #### Risk Prioritization
 
-`anst-analyzer` fuses reachability with CVSS, KEV, and EPSS into a deterministic, explainable
+`commit0-analyzer` fuses reachability with CVSS, KEV, and EPSS into a deterministic, explainable
 0–100 risk score (also written to SARIF `rank`). The model is a pure function — no clock, no
 network, reproducible byte-for-byte:
 
@@ -210,17 +210,17 @@ predicates to `--gate-on` to additionally fail on exploit signals:
 
 ```sh
 # Gate on the default tiers, plus anything KEV-listed or EPSS ≥ 0.5.
-anst-analyzer scan --gate-on reachable+unknown,kev,epss>=0.5
+commit0-analyzer scan --gate-on reachable+unknown,kev,epss>=0.5
 
 # Gate on the default tiers, plus any fused risk score ≥ 70.
-anst-analyzer scan --gate-on reachable+unknown,risk>=70
+commit0-analyzer scan --gate-on reachable+unknown,risk>=70
 ```
 
 Predicates only *add* gating; a missing EPSS/KEV/risk signal never relaxes the gate.
 
 #### VEX Output
 
-`anst-analyzer scan --vex <format>` emits a Vulnerability Exploitability eXchange document in
+`commit0-analyzer scan --vex <format>` emits a Vulnerability Exploitability eXchange document in
 addition to the normal output. Formats: `openvex`, `cyclonedx` (CycloneDX-VEX), `csaf`
 (CSAF 2.0), or `all`. `--vex-out` sets the path (`-`/empty = stdout for a single format;
 with `--vex all` it must be a directory).
@@ -235,15 +235,15 @@ Status mapping is the cardinal soundness contract — anst **never** emits a fal
 
 ```sh
 # Emit OpenVEX to stdout alongside SARIF on disk.
-anst-analyzer scan --format sarif --vex openvex --vex-out vex.openvex.json
+commit0-analyzer scan --format sarif --vex openvex --vex-out vex.openvex.json
 
 # Emit all three VEX formats into a directory.
-anst-analyzer scan --vex all --vex-out ./vex/
+commit0-analyzer scan --vex all --vex-out ./vex/
 ```
 
 #### Advisory DB Modes
 
-`anst-analyzer scan` operates in three distinct advisory-data modes:
+`commit0-analyzer scan` operates in three distinct advisory-data modes:
 
 | Mode | Flags | Behaviour |
 |------|-------|-----------|
@@ -260,69 +260,69 @@ anst-analyzer scan --vex all --vex-out ./vex/
 ```sh
 # Zero-config (default): point it at any project. anst auto-detects every
 # ecosystem present (Go, JS/TS, Rust, Python, JVM, .NET, PHP, Ruby, Elixir, Dart, Swift) and scans them all — no --language.
-anst-analyzer scan /path/to/project
+commit0-analyzer scan /path/to/project
 
 # Symbol-level enrichment from advisory fix patches, where available (Go, JS/TS, Python only).
-anst-analyzer scan /path/to/project --symbols
+commit0-analyzer scan /path/to/project --symbols
 
 # Python dep_type segmentation is on by default (non-runtime deps don't gate);
 # gate only on provably-reachable findings, suppressing UNKNOWN on non-runtime deps:
-anst-analyzer scan /path/to/python-project --gate-on reachable
+commit0-analyzer scan /path/to/python-project --gate-on reachable
 
 # Optional: narrow to a single ecosystem for speed (--language defaults to auto).
-anst-analyzer scan /path/to/rust-crate --language rust
+commit0-analyzer scan /path/to/rust-crate --language rust
 
 # Scan a Java/Kotlin/Scala project (Maven or Gradle):
-anst-analyzer scan /path/to/java-project --language java
+commit0-analyzer scan /path/to/java-project --language java
 
 # Scan a .NET project (NuGet):
-anst-analyzer scan /path/to/dotnet-project --language dotnet
+commit0-analyzer scan /path/to/dotnet-project --language dotnet
 
 # Scan a PHP project (Composer):
-anst-analyzer scan /path/to/php-project --language php
+commit0-analyzer scan /path/to/php-project --language php
 
 # Scan a Ruby project (Bundler):
-anst-analyzer scan /path/to/ruby-project --language ruby
+commit0-analyzer scan /path/to/ruby-project --language ruby
 
 # Scan an Elixir project (Hex):
-anst-analyzer scan /path/to/elixir-project --language elixir
+commit0-analyzer scan /path/to/elixir-project --language elixir
 
 # Scan a Dart project (Pub):
-anst-analyzer scan /path/to/dart-project --language dart
+commit0-analyzer scan /path/to/dart-project --language dart
 
 # Scan a Swift project (SwiftPM):
-anst-analyzer scan /path/to/swift-project --language swift
+commit0-analyzer scan /path/to/swift-project --language swift
 
 # Query only the Go vuln DB (skip OSV).
-anst-analyzer scan --source go-vuln-db
+commit0-analyzer scan --source go-vuln-db
 
 # Force a re-fetch of all enabled sources even when caches are current.
-anst-analyzer scan --update
+commit0-analyzer scan --update
 
 # Offline mode: use existing local caches, no network access.
-anst-analyzer scan --offline
+commit0-analyzer scan --offline
 
 # Offline with only Go vuln DB (OSV cache not needed).
-anst-analyzer scan --offline --source go-vuln-db
+commit0-analyzer scan --offline --source go-vuln-db
 
 # Pinned snapshot for reproducible CI (Go-DB read-only, never fetched).
-anst-analyzer scan /path/to/mymodule \
+commit0-analyzer scan /path/to/mymodule \
   --db-snapshot /path/to/vuln-db-snapshot \
   --source go-vuln-db \
   --offline
 
 # JSON output, gate on CRITICAL only.
-anst-analyzer scan --format json --fail-on critical
+commit0-analyzer scan --format json --fail-on critical
 
 # Table output for humans; use a policy file for richer control.
-anst-analyzer scan --format table --policy policy.yaml
+commit0-analyzer scan --format table --policy policy.yaml
 
 # Offline determinism: two runs with same inputs produce byte-identical SARIF.
-GOPROXY=off anst-analyzer scan /path/to/module \
+GOPROXY=off commit0-analyzer scan /path/to/module \
   --db-snapshot /pinned/snapshot \
   --source go-vuln-db \
   --offline > run1.sarif
-GOPROXY=off anst-analyzer scan /path/to/module \
+GOPROXY=off commit0-analyzer scan /path/to/module \
   --db-snapshot /pinned/snapshot \
   --source go-vuln-db \
   --offline > run2.sarif
@@ -375,9 +375,9 @@ If the ratio exceeds 1.5× on your target, switch to RTA via `--algorithm rta` a
 
 ## Advisory Snapshot Management
 
-`anst-analyzer` uses a **fetch-and-cache-only** model. It fetches your own copy of the Go vulnerability database into a local cache; it never redistributes advisory data.
+`commit0-analyzer` uses a **fetch-and-cache-only** model. It fetches your own copy of the Go vulnerability database into a local cache; it never redistributes advisory data.
 
-**Default writable cache:** `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) or `$HOME/Library/Caches/anst-analyzer/vuln-db` (macOS).
+**Default writable cache:** `$XDG_CACHE_HOME/commit0-analyzer/vuln-db` (Linux) or `$HOME/Library/Caches/commit0-analyzer/vuln-db` (macOS).
 
 **Pinned snapshot format:** a directory of OSV JSON files plus `anst-snapshot-manifest.json` (generated by the cache layer when it fetches from `vuln.go.dev`). The manifest records a SHA-256 content digest and the `modified` timestamp from the DB at fetch time.
 

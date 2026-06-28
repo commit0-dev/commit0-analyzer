@@ -1,5 +1,5 @@
 // Package corpus provides the reachability corpus harness and precision/recall
-// metrics for anst-analyzer. It runs the analyzer over labeled fixture modules,
+// metrics for commit0-analyzer. It runs the analyzer over labeled fixture modules,
 // computes TP/FP/FN counts, and optionally records govulncheck baseline metadata.
 //
 // The harness calls the reachability engine via exec of the compiled plugin binary
@@ -24,9 +24,9 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	"github.com/ducthinh993/anst-analyzer/internal/host"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/host"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // CorpusCase defines a single labeled corpus entry.
@@ -117,7 +117,7 @@ func Run(ctx context.Context, cases []CorpusCase, opts RunOptions) (*Metrics, er
 		conf, runErr := runCase(ctx, c, snapDir, pluginBin, pluginHash)
 		if runErr != nil {
 			// A hard error means the case could not be evaluated — UNKNOWN (conservative).
-			conf = anstv1.Confidence_CONFIDENCE_UNKNOWN
+			conf = commit0v1.Confidence_CONFIDENCE_UNKNOWN
 		}
 
 		m.Evaluate(c.Name, c.AdvisoryID, c.Expected, conf)
@@ -132,7 +132,7 @@ func runCase(
 	ctx context.Context,
 	c CorpusCase,
 	snapshotDir, pluginBin, pluginHash string,
-) (anstv1.Confidence, error) {
+) (commit0v1.Confidence, error) {
 	modDir := c.ModuleDir
 	if !filepath.IsAbs(modDir) {
 		modDir = filepath.Join(corpusRoot(), modDir)
@@ -141,11 +141,11 @@ func runCase(
 	// Query the advisory from the pinned snapshot.
 	advs, err := queryAdvisory(ctx, c.AdvisoryID, snapshotDir)
 	if err != nil {
-		return anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		return commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			fmt.Errorf("corpus case %q: advisory query: %w", c.Name, err)
 	}
 
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot:  modDir,
 		Entrypoints: c.Entrypoints,
 		Advisories:  advs,
@@ -161,13 +161,13 @@ func runCase(
 		SHA256:    pluginHash,
 	}
 	if err := reg.Add(manifest); err != nil {
-		return anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		return commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			fmt.Errorf("corpus case %q: registry.Add: %w", c.Name, err)
 	}
 
 	results, err := host.Run(ctx, reg, req, host.RunOptions{})
 	if err != nil {
-		return anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		return commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			fmt.Errorf("corpus case %q: host.Run: %w", c.Name, err)
 	}
 
@@ -175,7 +175,7 @@ func runCase(
 	for _, pr := range results {
 		if pr.Err != nil {
 			// Plugin error → UNKNOWN (fail-closed).
-			return anstv1.Confidence_CONFIDENCE_UNKNOWN, pr.Err
+			return commit0v1.Confidence_CONFIDENCE_UNKNOWN, pr.Err
 		}
 		for _, f := range pr.Findings {
 			if f.GetAdvisory().GetId() == c.AdvisoryID {
@@ -185,11 +185,11 @@ func runCase(
 	}
 
 	// No finding at all → UNKNOWN (conservative).
-	return anstv1.Confidence_CONFIDENCE_UNKNOWN, nil
+	return commit0v1.Confidence_CONFIDENCE_UNKNOWN, nil
 }
 
 // queryAdvisory fetches an advisory from the pinned snapshot and returns a proto slice.
-func queryAdvisory(ctx context.Context, advisoryID, snapshotDir string) ([]*anstv1.Advisory, error) {
+func queryAdvisory(ctx context.Context, advisoryID, snapshotDir string) ([]*commit0v1.Advisory, error) {
 	if snapshotDir == "" {
 		return nil, fmt.Errorf("no snapshot directory configured")
 	}
@@ -209,7 +209,7 @@ func queryAdvisory(ctx context.Context, advisoryID, snapshotDir string) ([]*anst
 		advs = staleWarn.Advisories
 	}
 
-	var result []*anstv1.Advisory
+	var result []*commit0v1.Advisory
 	for i := range advs {
 		if advs[i].ID == advisoryID {
 			result = append(result, advs[i].ToProto())
@@ -230,7 +230,7 @@ func buildPluginBinary(ctx context.Context) (string, error) {
 	}
 	binPath := filepath.Join(tmpDir, "go-reachability")
 
-	pluginPkg := "github.com/ducthinh993/anst-analyzer/plugins/go-reachability"
+	pluginPkg := "github.com/commit0-dev/commit0-analyzer/plugins/go-reachability"
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, pluginPkg)
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()

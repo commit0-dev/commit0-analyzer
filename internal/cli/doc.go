@@ -1,8 +1,8 @@
-// Package cli implements the anst-analyzer command-line interface.
+// Package cli implements the commit0-analyzer command-line interface.
 //
 // Commands:
 //
-//	anst-analyzer scan [path]   Run the full reachability SCA pipeline.
+//	commit0-analyzer scan [path]   Run the full reachability SCA pipeline.
 //
 // The scan command resolves module dependencies, queries the advisory service,
 // drives the go-reachability plugin through the host, renders findings, and

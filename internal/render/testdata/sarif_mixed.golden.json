@@ -5,8 +5,8 @@
     {
       "tool": {
         "driver": {
-          "name": "anst-analyzer",
-          "informationUri": "https://github.com/ducthinh993/anst-analyzer"
+          "name": "commit0-analyzer",
+          "informationUri": "https://github.com/commit0-dev/commit0-analyzer"
         }
       },
       "results": [

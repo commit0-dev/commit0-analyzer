@@ -10,7 +10,7 @@ import (
 
 // Automatic dependency installation (deepest-security default).
 //
-// By default `anst-analyzer scan` materializes the scanned project's dependency
+// By default `commit0-analyzer scan` materializes the scanned project's dependency
 // closure before analysis so that reachability analysis sees the real installed
 // graph. Users opt out with --skip-deps-install (or --offline, which never
 // installs).

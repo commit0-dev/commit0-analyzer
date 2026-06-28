@@ -26,7 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildCallGraph } from "../../cg/build.js";
 import { queryReachability } from "../../reach/query.js";
-import { Confidence } from "../../gen/anst/v1/plugin.js";
+import { Confidence } from "../../gen/commit0/v1/plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(__dirname, "../../../testdata/projects");

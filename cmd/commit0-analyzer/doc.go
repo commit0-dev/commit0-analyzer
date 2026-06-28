@@ -1,4 +1,4 @@
-// Package main is the entry point for the anst-analyzer CLI binary.
+// Package main is the entry point for the commit0-analyzer CLI binary.
 //
 // It parses command-line flags, wires together the plugin host, advisory
 // resolver, renderers, and policy gate, then drives a scan to completion.

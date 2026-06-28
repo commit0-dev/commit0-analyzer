@@ -1,4 +1,4 @@
-module github.com/ducthinh993/anst-analyzer
+module github.com/commit0-dev/commit0-analyzer
 
 go 1.26.4
 

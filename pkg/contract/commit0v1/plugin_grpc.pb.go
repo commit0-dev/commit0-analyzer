@@ -1,4 +1,4 @@
-// Package anst.v1 defines the versioned gRPC plugin contract for anst-analyzer.
+// Package commit0.v1 defines the versioned gRPC plugin contract for commit0-analyzer.
 //
 // # Version and Compatibility Policy
 //
@@ -37,9 +37,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: anst/v1/plugin.proto
+// source: commit0/v1/plugin.proto
 
-package anstv1
+package commit0v1
 
 import (
 	context "context"
@@ -54,15 +54,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Analyzer_Metadata_FullMethodName = "/anst.v1.Analyzer/Metadata"
-	Analyzer_Analyze_FullMethodName  = "/anst.v1.Analyzer/Analyze"
+	Analyzer_Metadata_FullMethodName = "/commit0.v1.Analyzer/Metadata"
+	Analyzer_Analyze_FullMethodName  = "/commit0.v1.Analyzer/Analyze"
 )
 
 // AnalyzerClient is the client API for Analyzer service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Analyzer is the gRPC service every anst-analyzer plugin must implement.
+// Analyzer is the gRPC service every commit0-analyzer plugin must implement.
 //
 // Transport: subprocess + gRPC over stdio (hashicorp/go-plugin pattern).
 // The host launches the plugin as a child process and communicates over its
@@ -128,7 +128,7 @@ type Analyzer_AnalyzeClient = grpc.ServerStreamingClient[Finding]
 // All implementations must embed UnimplementedAnalyzerServer
 // for forward compatibility.
 //
-// Analyzer is the gRPC service every anst-analyzer plugin must implement.
+// Analyzer is the gRPC service every commit0-analyzer plugin must implement.
 //
 // Transport: subprocess + gRPC over stdio (hashicorp/go-plugin pattern).
 // The host launches the plugin as a child process and communicates over its
@@ -221,7 +221,7 @@ type Analyzer_AnalyzeServer = grpc.ServerStreamingServer[Finding]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Analyzer_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "anst.v1.Analyzer",
+	ServiceName: "commit0.v1.Analyzer",
 	HandlerType: (*AnalyzerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -236,5 +236,5 @@ var Analyzer_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "anst/v1/plugin.proto",
+	Metadata: "commit0/v1/plugin.proto",
 }

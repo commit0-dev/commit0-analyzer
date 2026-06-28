@@ -3,7 +3,7 @@
   "skipped_comparators": [
     {
       "comparator": "govulncheck",
-      "reason": "could not run on anst-analyzer: run govulncheck: exit status 1"
+      "reason": "could not run on commit0-analyzer: run govulncheck: exit status 1"
     },
     {
       "comparator": "grype",
@@ -21,7 +21,7 @@
   "comparisons": null,
   "coverage_gains": [
     {
-      "corpus": "anst-analyzer",
+      "corpus": "commit0-analyzer",
       "baseline_sources": "go-vuln-db,osv",
       "full_sources": "go-vuln-db,osv,ghsa",
       "baseline_count": 47,
@@ -55,7 +55,7 @@
   ],
   "assertions": [
     {
-      "name": "determinism/anst-analyzer",
+      "name": "determinism/commit0-analyzer",
       "passed": true,
       "detail": "two identical runs byte-compared"
     },
@@ -75,7 +75,7 @@
       "detail": "two identical runs byte-compared"
     },
     {
-      "name": "fail-closed/anst-analyzer",
+      "name": "fail-closed/commit0-analyzer",
       "passed": true,
       "detail": "injected source failure exit code = 3 (must be non-zero)"
     },

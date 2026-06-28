@@ -38,7 +38,7 @@ func RunWithRecovery(fn func() int) (code int) {
 		if r := recover(); r != nil {
 			// Log the panic value without importing a logger here; callers may
 			// wrap this further with structured logging.
-			fmt.Printf("anst-analyzer: panic recovered (exit %d): %v\n", ExitOperationalError, r)
+			fmt.Printf("commit0-analyzer: panic recovered (exit %d): %v\n", ExitOperationalError, r)
 			code = ExitOperationalError
 		}
 	}()

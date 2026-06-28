@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // dummyPath is a minimal non-nil PathStep slice used to verify that
@@ -33,7 +33,7 @@ func TestAssignConfidence(t *testing.T) {
 	tests := []struct {
 		name         string
 		inp          ConfidenceInput
-		wantConf     anstv1.Confidence
+		wantConf     commit0v1.Confidence
 		wantPathNil  bool
 		wantPathLen  int // only checked when wantPathNil==false
 	}{
@@ -46,7 +46,7 @@ func TestAssignConfidence(t *testing.T) {
 				Resolved:    true, // ill-typed overrides everything
 				BFSResult:   ReachResult{Reachable: true, Path: dummyPath},
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			wantPathNil: true,
 		},
 		// ── package-level advisory (SymbolLevel=false) ───────────────────────
@@ -56,7 +56,7 @@ func TestAssignConfidence(t *testing.T) {
 				SymbolLevel: false,
 				PkgImported: true,
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 			wantPathNil: true,
 		},
 		{
@@ -65,7 +65,7 @@ func TestAssignConfidence(t *testing.T) {
 				SymbolLevel: false,
 				PkgImported: false,
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			wantPathNil: true,
 		},
 		// ── symbol-level + unresolved → UNKNOWN ──────────────────────────────
@@ -76,7 +76,7 @@ func TestAssignConfidence(t *testing.T) {
 				Resolved:        false,
 				ResolutionError: "package not found in SSA program",
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			wantPathNil: true,
 		},
 		// ── resolved + BFS found a path → SYMBOL_REACHABLE ───────────────────
@@ -88,7 +88,7 @@ func TestAssignConfidence(t *testing.T) {
 				PkgImported: true,
 				BFSResult:   ReachResult{Reachable: true, Path: dummyPath},
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 			wantPathNil: false,
 			wantPathLen: len(dummyPath),
 		},
@@ -103,7 +103,7 @@ func TestAssignConfidence(t *testing.T) {
 				ReflectInPath:   true,
 				TargetAddrTaken: true,
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			wantPathNil: true,
 		},
 		// ── reflect present but addr-NOT-taken → NOT_REACHABLE ───────────────
@@ -118,7 +118,7 @@ func TestAssignConfidence(t *testing.T) {
 				ReflectInPath:   true,
 				TargetAddrTaken: false,
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			wantPathNil: true,
 		},
 		// ── resolved + no edge + clean graph → NOT_REACHABLE ─────────────────
@@ -132,7 +132,7 @@ func TestAssignConfidence(t *testing.T) {
 				ReflectInPath:   false,
 				TargetAddrTaken: false,
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			wantPathNil: true,
 		},
 		// ── addr-taken alone (no reflect) must not escalate to UNKNOWN ────────
@@ -146,7 +146,7 @@ func TestAssignConfidence(t *testing.T) {
 				ReflectInPath:   false,
 				TargetAddrTaken: true,
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			wantPathNil: true,
 		},
 		// ── ill-typed overrides even a BFS hit ────────────────────────────────
@@ -158,7 +158,7 @@ func TestAssignConfidence(t *testing.T) {
 				Resolved:    true,
 				BFSResult:   ReachResult{Reachable: true, Path: dummyPath},
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			wantPathNil: true,
 		},
 		// ── package-level advisory ignores BFS / resolution ──────────────────
@@ -170,7 +170,7 @@ func TestAssignConfidence(t *testing.T) {
 				Resolved:    true,
 				BFSResult:   ReachResult{Reachable: true, Path: dummyPath},
 			},
-			wantConf:    anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			wantConf:    commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 			wantPathNil: true,
 		},
 	}
@@ -214,7 +214,7 @@ func TestAssignConfidence_PathOnlyOnSymbolReachable(t *testing.T) {
 
 	for i, inp := range cases {
 		conf, path := AssignConfidence(inp)
-		if conf != anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE {
+		if conf != commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE {
 			assert.Nil(t, path,
 				"case %d (conf=%s): path must be nil for non-SYMBOL_REACHABLE confidence",
 				i, conf)

@@ -12,25 +12,25 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 
-	"github.com/ducthinh993/anst-analyzer/pkg/contract"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	anstplugin "github.com/ducthinh993/anst-analyzer/pkg/plugin"
+	"github.com/commit0-dev/commit0-analyzer/pkg/contract"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 )
 
 // PluginClient wraps a launched go-plugin Client together with the dispensed
-// anstv1.AnalyzerClient. Callers issue RPCs through Analyzer() and tear down
+// commit0v1.AnalyzerClient. Callers issue RPCs through Analyzer() and tear down
 // the subprocess through Kill().
 type PluginClient struct {
 	manifest *Manifest
 	raw      *goplugin.Client // manages the OS subprocess
-	analyzer anstv1.AnalyzerClient
+	analyzer commit0v1.AnalyzerClient
 }
 
 // Manifest returns the Manifest this client was launched from.
 func (pc *PluginClient) Manifest() *Manifest { return pc.manifest }
 
 // Analyzer returns the gRPC client for issuing Metadata / Analyze RPCs.
-func (pc *PluginClient) Analyzer() anstv1.AnalyzerClient { return pc.analyzer }
+func (pc *PluginClient) Analyzer() commit0v1.AnalyzerClient { return pc.analyzer }
 
 // Kill terminates the plugin subprocess immediately. go-plugin calls the OS
 // kill and waits for the process to be reaped, so no zombie is left behind.
@@ -120,24 +120,24 @@ func Launch(ctx context.Context, m *Manifest, opts LaunchOptions) (*PluginClient
 		return nil, fmt.Errorf("launch %s: rpc client: %w", m.Name, err)
 	}
 
-	// Dispense the anstv1.Analyzer interface through the plugin map.
+	// Dispense the commit0v1.Analyzer interface through the plugin map.
 	dispensed, err := rpcClient.Dispense(anstplugin.PluginName)
 	if err != nil {
 		raw.Kill()
 		return nil, fmt.Errorf("launch %s: dispense %q: %w", m.Name, anstplugin.PluginName, err)
 	}
 
-	analyzer, ok := dispensed.(anstv1.AnalyzerClient)
+	analyzer, ok := dispensed.(commit0v1.AnalyzerClient)
 	if !ok {
 		raw.Kill()
 		return nil, fmt.Errorf(
-			"launch %s: dispensed value is not anstv1.AnalyzerClient (got %T)",
+			"launch %s: dispensed value is not commit0v1.AnalyzerClient (got %T)",
 			m.Name, dispensed,
 		)
 	}
 
 	// ── Handshake step 2: protocol version compatibility ─────────────────────
-	meta, err := analyzer.Metadata(ctx, &anstv1.MetadataRequest{})
+	meta, err := analyzer.Metadata(ctx, &commit0v1.MetadataRequest{})
 	if err != nil {
 		raw.Kill()
 		return nil, fmt.Errorf("launch %s: Metadata RPC: %w", m.Name, err)

@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // TestStampProvenance verifies that the cross-source audit trail is stamped onto
@@ -35,13 +35,13 @@ func TestStampProvenance(t *testing.T) {
 		"GO-2024-0003": {ID: "GO-2024-0003"},
 	}
 
-	conflicted := &anstv1.Finding{Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0001"}}
-	clean := &anstv1.Finding{Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0002"}}
-	noMeta := &anstv1.Finding{Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0003"}}
-	unmatched := &anstv1.Finding{Advisory: &anstv1.AdvisoryRef{Id: "GO-9999-9999"}}
-	noAdvisory := &anstv1.Finding{Module: "synthetic-plugin-error"}
+	conflicted := &commit0v1.Finding{Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0001"}}
+	clean := &commit0v1.Finding{Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0002"}}
+	noMeta := &commit0v1.Finding{Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0003"}}
+	unmatched := &commit0v1.Finding{Advisory: &commit0v1.AdvisoryRef{Id: "GO-9999-9999"}}
+	noAdvisory := &commit0v1.Finding{Module: "synthetic-plugin-error"}
 
-	stampProvenance([]*anstv1.Finding{conflicted, clean, noMeta, unmatched, noAdvisory}, advByID)
+	stampProvenance([]*commit0v1.Finding{conflicted, clean, noMeta, unmatched, noAdvisory}, advByID)
 
 	cp := conflicted.GetProperties()
 	assert.Equal(t, "ghsa HIGH; osv.dev MEDIUM", cp["provenance"],
@@ -75,10 +75,10 @@ func TestStampSources(t *testing.T) {
 		"GO-2024-0002": {"osv.dev"},
 	}
 
-	findings := []*anstv1.Finding{
-		{Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0001"}},                                                 // both sources
-		{Advisory: &anstv1.AdvisoryRef{Id: "GO-2024-0002"}, Properties: map[string]string{"goos": "linux"}}, // existing props preserved
-		{Advisory: &anstv1.AdvisoryRef{Id: "GO-9999-9999"}},                                                 // unmapped → untouched
+	findings := []*commit0v1.Finding{
+		{Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0001"}},                                                 // both sources
+		{Advisory: &commit0v1.AdvisoryRef{Id: "GO-2024-0002"}, Properties: map[string]string{"goos": "linux"}}, // existing props preserved
+		{Advisory: &commit0v1.AdvisoryRef{Id: "GO-9999-9999"}},                                                 // unmapped → untouched
 		{Module: "synthetic-plugin-error"},                                                                  // nil advisory → skipped
 	}
 
@@ -113,17 +113,17 @@ func TestStampRisk(t *testing.T) {
 		"GO-2024-0002": {ID: "GO-2024-0002"},
 	}
 
-	reachable := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+	reachable := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 	}
-	notReachable := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0002"},
-		Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+	notReachable := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0002"},
+		Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 	}
-	noAdvisory := &anstv1.Finding{Module: "synthetic-plugin-error"}
+	noAdvisory := &commit0v1.Finding{Module: "synthetic-plugin-error"}
 
-	stampRisk([]*anstv1.Finding{reachable, notReachable, noAdvisory}, advByID)
+	stampRisk([]*commit0v1.Finding{reachable, notReachable, noAdvisory}, advByID)
 
 	// Reachable + KEV → critical tier, signals surfaced.
 	rp := reachable.GetProperties()

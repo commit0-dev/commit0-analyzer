@@ -1,5 +1,5 @@
-// Command python-reachability is the anst-analyzer plugin for Python (PyPI)
-// reachability-first SCA. It implements the anstv1.Analyzer gRPC service via
+// Command python-reachability is the commit0-analyzer plugin for Python (PyPI)
+// reachability-first SCA. It implements the commit0v1.Analyzer gRPC service via
 // the shared pkg/plugin.Serve helper, mirroring the pattern established by
 // go-reachability and rust-reachability.
 //
@@ -71,8 +71,8 @@ import (
 	"sync"
 	"time"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	anstplugin "github.com/ducthinh993/anst-analyzer/pkg/plugin"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 )
 
 // ---------------------------------------------------------------------------
@@ -1190,17 +1190,17 @@ func runListDeps(root string) {
 // gRPC server implementation
 // ---------------------------------------------------------------------------
 
-// grpcServer implements anstv1.AnalyzerServer for the Python reachability plugin.
+// grpcServer implements commit0v1.AnalyzerServer for the Python reachability plugin.
 type grpcServer struct {
-	anstv1.UnimplementedAnalyzerServer
+	commit0v1.UnimplementedAnalyzerServer
 }
 
 // Metadata returns plugin identity and protocol version for the host handshake.
 func (s *grpcServer) Metadata(
 	_ context.Context,
-	_ *anstv1.MetadataRequest,
-) (*anstv1.MetadataResponse, error) {
-	return &anstv1.MetadataResponse{
+	_ *commit0v1.MetadataRequest,
+) (*commit0v1.MetadataResponse, error) {
+	return &commit0v1.MetadataResponse{
 		Name:               "python-reachability",
 		Version:            "0.1.0",
 		ProtocolVersion:    "0.1",
@@ -1223,8 +1223,8 @@ func (s *grpcServer) Metadata(
 //	dist imported + no symbol data       → CONFIDENCE_PACKAGE_REACHABLE
 //	any undecidable condition            → CONFIDENCE_UNKNOWN + Incomplete
 func (s *grpcServer) Analyze(
-	req *anstv1.AnalyzeRequest,
-	stream anstv1.Analyzer_AnalyzeServer,
+	req *commit0v1.AnalyzeRequest,
+	stream commit0v1.Analyzer_AnalyzeServer,
 ) error {
 	ctx := stream.Context()
 	projectRoot := req.GetModuleRoot()
@@ -1290,9 +1290,9 @@ func (s *grpcServer) Analyze(
 
 // buildFinding maps one advisory to a Finding using the call-graph result.
 func buildFinding(
-	adv *anstv1.Advisory,
+	adv *commit0v1.Advisory,
 	cg cgResponse,
-) *anstv1.Finding {
+) *commit0v1.Finding {
 	dn := normaliseDistName(adv.GetModule())
 
 	props := map[string]string{
@@ -1304,12 +1304,12 @@ func buildFinding(
 
 	// When the closure analysis failed entirely, every finding is UNKNOWN+incomplete.
 	if cg.Error != "" && len(cg.DistReachable) == 0 {
-		return &anstv1.Finding{
+		return &commit0v1.Finding{
 			Advisory:   advRef(adv),
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Incomplete: true,
-			Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+			Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 			Language:   "python",
 			Properties: props,
 		}
@@ -1320,24 +1320,24 @@ func buildFinding(
 	switch {
 	case !inClosure && !cg.Incomplete:
 		// Complete graph proof: dist is wholly absent → NOT_REACHABLE
-		return &anstv1.Finding{
+		return &commit0v1.Finding{
 			Advisory:   advRef(adv),
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			Incomplete: false,
-			Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+			Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 			Language:   "python",
 			Properties: props,
 		}
 
 	case !inClosure && cg.Incomplete:
 		// Incomplete graph: cannot prove absence → UNKNOWN+incomplete
-		return &anstv1.Finding{
+		return &commit0v1.Finding{
 			Advisory:   advRef(adv),
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Incomplete: true,
-			Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+			Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 			Language:   "python",
 			Properties: props,
 		}
@@ -1353,12 +1353,12 @@ func buildFinding(
 			}
 		}
 		if anySymbolHit {
-			return &anstv1.Finding{
+			return &commit0v1.Finding{
 				Advisory:   advRef(adv),
 				Module:     adv.GetModule(),
-				Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+				Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 				Incomplete: cg.Incomplete,
-				Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+				Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 				Language:   "python",
 				Properties: props,
 			}
@@ -1366,48 +1366,48 @@ func buildFinding(
 		// Symbol data available but symbol not found in call path; if the
 		// graph is complete, the symbol was not reached.  If incomplete, UNKNOWN.
 		if cg.Incomplete {
-			return &anstv1.Finding{
+			return &commit0v1.Finding{
 				Advisory:   advRef(adv),
 				Module:     adv.GetModule(),
-				Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+				Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 				Incomplete: true,
-				Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+				Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 				Language:   "python",
 				Properties: props,
 			}
 		}
 		// Complete graph: symbol is genuinely not in call path → PACKAGE_REACHABLE
 		// (dist is imported but the specific vulnerable symbol was not reached).
-		return &anstv1.Finding{
+		return &commit0v1.Finding{
 			Advisory:   advRef(adv),
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 			Incomplete: false,
-			Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+			Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 			Language:   "python",
 			Properties: props,
 		}
 
 	case reachable:
 		// Dist imported but no symbol-level data → PACKAGE_REACHABLE
-		return &anstv1.Finding{
+		return &commit0v1.Finding{
 			Advisory:   advRef(adv),
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 			Incomplete: cg.Incomplete,
-			Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+			Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 			Language:   "python",
 			Properties: props,
 		}
 
 	default:
 		// Fallthrough: undecidable → UNKNOWN + incomplete (conservative)
-		return &anstv1.Finding{
+		return &commit0v1.Finding{
 			Advisory:   advRef(adv),
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Incomplete: true,
-			Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_PYPI,
+			Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_PYPI,
 			Language:   "python",
 			Properties: props,
 		}
@@ -1415,8 +1415,8 @@ func buildFinding(
 }
 
 // advRef builds an AdvisoryRef from an Advisory.
-func advRef(adv *anstv1.Advisory) *anstv1.AdvisoryRef {
-	return &anstv1.AdvisoryRef{
+func advRef(adv *commit0v1.Advisory) *commit0v1.AdvisoryRef {
+	return &commit0v1.AdvisoryRef{
 		Id: adv.GetId(),
 	}
 }

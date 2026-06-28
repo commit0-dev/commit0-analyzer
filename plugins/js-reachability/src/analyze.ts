@@ -6,15 +6,15 @@
  * writes a Finding[] JSON array to stdout.  No gRPC, no host required.
  *
  * Usage:
- *   dist/anst-js-reachability --analyze <request.json>
- *   dist/anst-js-reachability --analyze -   # reads stdin
+ *   dist/commit0-js-reachability --analyze <request.json>
+ *   dist/commit0-js-reachability --analyze -   # reads stdin
  *
  * Determinism: two runs with identical input produce byte-identical output.
  */
 
 import fs from "node:fs";
 import { analyze } from "./engine/analyze.js";
-import { Advisory, AnalyzeRequest, Finding } from "./gen/anst/v1/plugin.js";
+import { Advisory, AnalyzeRequest, Finding } from "./gen/commit0/v1/plugin.js";
 
 export async function run(): Promise<void> {
   const arg = process.argv[3]; // argv[2] is "--analyze"

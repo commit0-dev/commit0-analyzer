@@ -1,4 +1,4 @@
-// Package policy implements the policy-as-code gate for anst-analyzer.
+// Package policy implements the policy-as-code gate for commit0-analyzer.
 //
 // Responsibilities:
 //   - Evaluate a set of findings against a user-supplied policy configuration.
@@ -34,35 +34,35 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	"github.com/ducthinh993/anst-analyzer/pkg/contract"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	"github.com/commit0-dev/commit0-analyzer/pkg/contract"
 )
 
 // severityRank maps Severity enum values to comparable integers.
 // Higher number = higher severity.
-var severityRank = map[anstv1.Severity]int{
-	anstv1.Severity_SEVERITY_UNSPECIFIED: 0,
-	anstv1.Severity_SEVERITY_LOW:         1,
-	anstv1.Severity_SEVERITY_MEDIUM:      2,
-	anstv1.Severity_SEVERITY_HIGH:        3,
-	anstv1.Severity_SEVERITY_CRITICAL:    4,
+var severityRank = map[commit0v1.Severity]int{
+	commit0v1.Severity_SEVERITY_UNSPECIFIED: 0,
+	commit0v1.Severity_SEVERITY_LOW:         1,
+	commit0v1.Severity_SEVERITY_MEDIUM:      2,
+	commit0v1.Severity_SEVERITY_HIGH:        3,
+	commit0v1.Severity_SEVERITY_CRITICAL:    4,
 }
 
 // parseSeverity converts a threshold string (e.g. "high") to a Severity enum.
-func parseSeverity(s string) (anstv1.Severity, error) {
+func parseSeverity(s string) (commit0v1.Severity, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "low":
-		return anstv1.Severity_SEVERITY_LOW, nil
+		return commit0v1.Severity_SEVERITY_LOW, nil
 	case "medium":
-		return anstv1.Severity_SEVERITY_MEDIUM, nil
+		return commit0v1.Severity_SEVERITY_MEDIUM, nil
 	case "high":
-		return anstv1.Severity_SEVERITY_HIGH, nil
+		return commit0v1.Severity_SEVERITY_HIGH, nil
 	case "critical":
-		return anstv1.Severity_SEVERITY_CRITICAL, nil
+		return commit0v1.Severity_SEVERITY_CRITICAL, nil
 	case "":
-		return anstv1.Severity_SEVERITY_UNSPECIFIED, nil
+		return commit0v1.Severity_SEVERITY_UNSPECIFIED, nil
 	default:
-		return anstv1.Severity_SEVERITY_UNSPECIFIED,
+		return commit0v1.Severity_SEVERITY_UNSPECIFIED,
 			fmt.Errorf("unknown severity threshold %q: must be low|medium|high|critical", s)
 	}
 }
@@ -271,7 +271,7 @@ func parseGatePredicate(tok string) (gatePredicate, error) {
 // pass): properties["kev"], properties["epss"], properties["risk_score"]. A
 // missing or unparseable signal simply does not match — it never excludes the
 // finding from the base gate (additive only; unknown ≠ safe).
-func (p *Policy) matchesPredicate(f *anstv1.Finding) bool {
+func (p *Policy) matchesPredicate(f *commit0v1.Finding) bool {
 	if len(p.GatePredicates) == 0 {
 		return false
 	}
@@ -324,7 +324,7 @@ func (p *Policy) effectiveGateOn() string {
 //
 // Legacy exclusion: properties["dev_only"]="true" → never eligible.
 // This covers the older JS/Go wire that doesn't use dep_type.
-func (p *Policy) isGateEligible(f *anstv1.Finding) bool {
+func (p *Policy) isGateEligible(f *commit0v1.Finding) bool {
 	props := f.GetProperties()
 
 	// Legacy dev-only tag (JS/Go) — always overrides.
@@ -352,11 +352,11 @@ func (p *Policy) isGateEligible(f *anstv1.Finding) bool {
 
 	// Apply the confidence floor.
 	switch f.GetConfidence() {
-	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+	case commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
 		// Always gate-eligible (provably reachable or not proven safe).
 		return true
-	case anstv1.Confidence_CONFIDENCE_UNKNOWN:
+	case commit0v1.Confidence_CONFIDENCE_UNKNOWN:
 		// UNKNOWN gates unless gate-on="reachable" (hyper-dynamic opt-out).
 		return gateOn != GateOnReachable
 	default:
@@ -368,7 +368,7 @@ func (p *Policy) isGateEligible(f *anstv1.Finding) bool {
 
 // isIgnored reports whether f is suppressed by an active (non-expired, matching)
 // ignore entry.
-func (p *Policy) isIgnored(f *anstv1.Finding) bool {
+func (p *Policy) isIgnored(f *commit0v1.Finding) bool {
 	for _, ig := range p.Ignores {
 		if isActiveIgnore(ig, f) {
 			return true
@@ -379,13 +379,13 @@ func (p *Policy) isIgnored(f *anstv1.Finding) bool {
 
 // meetsThreshold reports whether f's severity meets or exceeds the configured
 // fail-on threshold.
-func (p *Policy) meetsThreshold(f *anstv1.Finding) bool {
+func (p *Policy) meetsThreshold(f *commit0v1.Finding) bool {
 	threshold, err := parseSeverity(p.FailOn)
 	if err != nil {
 		// Unknown threshold: fail closed — treat everything as above threshold.
 		return true
 	}
-	if threshold == anstv1.Severity_SEVERITY_UNSPECIFIED {
+	if threshold == commit0v1.Severity_SEVERITY_UNSPECIFIED {
 		// No threshold configured: nothing triggers a failure.
 		return false
 	}
@@ -394,7 +394,7 @@ func (p *Policy) meetsThreshold(f *anstv1.Finding) bool {
 
 // Evaluate runs the gate against findings using default (complete scan) flags.
 // Returns ExitPass, ExitGateFailure, or ExitOperationalError.
-func (p *Policy) Evaluate(findings []*anstv1.Finding) int {
+func (p *Policy) Evaluate(findings []*commit0v1.Finding) int {
 	return p.EvaluateWithFlags(findings, EvalFlags{})
 }
 
@@ -407,7 +407,7 @@ func (p *Policy) Evaluate(findings []*anstv1.Finding) int {
 // gate does flags.Incomplete take effect, returning ExitOperationalError
 // (fail-closed: an incomplete scan with no gate failure must never read as a pass).
 // A complete scan with no gate failure returns ExitPass.
-func (p *Policy) EvaluateWithFlags(findings []*anstv1.Finding, flags EvalFlags) int {
+func (p *Policy) EvaluateWithFlags(findings []*commit0v1.Finding, flags EvalFlags) int {
 	for _, f := range findings {
 		if !p.isGateEligible(f) {
 			continue

@@ -7,15 +7,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
-	"github.com/ducthinh993/anst-analyzer/internal/render"
+	"github.com/commit0-dev/commit0-analyzer/internal/render"
 )
 
 // TestJSON_StableOutput verifies that repeated calls with the same input produce
 // byte-identical JSON (deterministic key order + finding sort).
 func TestJSON_StableOutput(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		symbolReachableFinding3Steps(),
 		packageReachableFinding(),
 		unknownFinding(),
@@ -33,7 +33,7 @@ func TestJSON_StableOutput(t *testing.T) {
 // TestJSON_GoldenFile verifies that the JSON output matches the golden file and
 // contains required fields: confidence, source attribution, path.
 func TestJSON_GoldenFile(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		symbolReachableFinding3Steps(),
 		packageReachableFinding(),
 		unknownFinding(),
@@ -100,24 +100,24 @@ func TestJSON_GoldenFile(t *testing.T) {
 // TestJSON_SortOrder verifies findings are sorted deterministically (by advisory ID).
 func TestJSON_SortOrder(t *testing.T) {
 	// Provide findings in reverse order; output must be sorted by advisory ID.
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0003"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0003"},
 			Module:     "example.com/z",
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-			Severity:   anstv1.Severity_SEVERITY_LOW,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+			Severity:   commit0v1.Severity_SEVERITY_LOW,
 		},
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
 			Module:     "example.com/a",
-			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-			Severity:   anstv1.Severity_SEVERITY_HIGH,
+			Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		},
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0002"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0002"},
 			Module:     "example.com/b",
-			Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-			Severity:   anstv1.Severity_SEVERITY_MEDIUM,
+			Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			Severity:   commit0v1.Severity_SEVERITY_MEDIUM,
 		},
 	}
 
@@ -150,10 +150,10 @@ func TestJSON_NilInput(t *testing.T) {
 // summary must never be emitted under a "sources" key (which previously collided
 // with the real source list and read as "go-vuln-db UNSPECIFIED").
 func TestJSON_ProvenanceBlockDistinctFromSources(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Advisory:   &commit0v1.AdvisoryRef{Id: "GO-2024-0001"},
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Properties: map[string]string{
 				"sources":           "go-vuln-db,osv.dev",
 				"provenance":        "go-vuln-db UNSPECIFIED; osv.dev HIGH",

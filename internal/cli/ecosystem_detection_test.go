@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // writeFixtureFile creates a file at dir/name with minimal valid content.
@@ -443,22 +443,22 @@ func TestWarnUnsupportedEcosystems_JSOnly(t *testing.T) {
 // TestHasPartialityMarker_EmptySlice verifies that no findings → no marker.
 func TestHasPartialityMarker_EmptySlice(t *testing.T) {
 	assert.False(t, hasPartialityMarker(nil), "nil slice → no partiality marker")
-	assert.False(t, hasPartialityMarker([]*anstv1.Finding{}), "empty slice → no partiality marker")
+	assert.False(t, hasPartialityMarker([]*commit0v1.Finding{}), "empty slice → no partiality marker")
 }
 
 // TestHasPartialityMarker_NoSyntheticFindings verifies that normal reachable
 // findings without the synthetic marker do not trigger the signal.
 func TestHasPartialityMarker_NoSyntheticFindings(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 			Properties: map[string]string{"sources": "osv.dev"},
 		},
 		{
-			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 		},
 		{
-			Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 		},
 	}
 	assert.False(t, hasPartialityMarker(findings),
@@ -469,9 +469,9 @@ func TestHasPartialityMarker_NoSyntheticFindings(t *testing.T) {
 // CONFIDENCE_UNKNOWN finding WITHOUT the "synthetic"="true" property does NOT
 // trigger the incomplete signal. Only the explicit marker counts.
 func TestHasPartialityMarker_UnknownWithoutSyntheticKey(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Properties: map[string]string{"reason": "dynamic dispatch"},
 		},
 	}
@@ -486,14 +486,14 @@ func TestHasPartialityMarker_UnknownWithSyntheticTrue(t *testing.T) {
 	// This is the shape a plugin emits to signal partial analysis (e.g. Rust
 	// plugin detected partial Cargo.lock resolve, Python plugin detected no-venv).
 	// The host must translate this into incomplete=true at the policy gate.
-	partialFinding := &anstv1.Finding{
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+	partialFinding := &commit0v1.Finding{
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		Properties: map[string]string{
 			"synthetic": "true",
 			"cause":     "partial Cargo.lock resolution: 3 crates unresolved",
 		},
 	}
-	findings := []*anstv1.Finding{partialFinding}
+	findings := []*commit0v1.Finding{partialFinding}
 	assert.True(t, hasPartialityMarker(findings),
 		"CONFIDENCE_UNKNOWN + Properties[synthetic]=true → partiality marker MUST be detected")
 }
@@ -503,15 +503,15 @@ func TestHasPartialityMarker_UnknownWithSyntheticTrue(t *testing.T) {
 // Plugins emit real findings for resolved deps and one synthetic UNKNOWN per
 // unresolvable dep; the host must flag incomplete even if most deps resolved.
 func TestHasPartialityMarker_MixedFindingsWithMarker(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
 			// Normal reachable finding for a resolved dep.
-			Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 			Properties: map[string]string{"sources": "osv.dev"},
 		},
 		{
 			// Synthetic UNKNOWN for a dep the plugin could not resolve.
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Properties: map[string]string{
 				"synthetic": "true",
 				"cause":     "crate serde: cfg feature resolution incomplete",
@@ -526,9 +526,9 @@ func TestHasPartialityMarker_MixedFindingsWithMarker(t *testing.T) {
 // Properties["synthetic"]="false" (or any value other than "true") does NOT
 // trigger the signal. The marker is a boolean-valued property.
 func TestHasPartialityMarker_SyntheticKeyWrongValue(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Properties: map[string]string{"synthetic": "false"},
 		},
 	}
@@ -539,9 +539,9 @@ func TestHasPartialityMarker_SyntheticKeyWrongValue(t *testing.T) {
 // TestHasPartialityMarker_NilProperties verifies that a CONFIDENCE_UNKNOWN
 // finding with nil Properties (common zero-value case) is handled safely.
 func TestHasPartialityMarker_NilProperties(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			// Properties is nil (zero value) — must not panic.
 		},
 	}

@@ -8,7 +8,7 @@ type CycloneDXFormatter struct{}
 func (CycloneDXFormatter) Name() string { return "cyclonedx" }
 
 // FileName returns the conventional filename for multi-format output.
-func (CycloneDXFormatter) FileName() string { return "anst.cyclonedx.vex.json" }
+func (CycloneDXFormatter) FileName() string { return "commit0.cyclonedx.vex.json" }
 
 type cdxDoc struct {
 	BOMFormat       string    `json:"bomFormat"`

@@ -44,14 +44,14 @@ func buildPluginBinary(t *testing.T) string {
 	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "go-reachability")
 	cmd := exec.Command("go", "build", "-o", binPath,
-		"github.com/ducthinh993/anst-analyzer/plugins/go-reachability")
+		"github.com/commit0-dev/commit0-analyzer/plugins/go-reachability")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "build plugin binary:\n%s", out)
 	return binPath
 }
 
-// runScanBinary runs the anst-analyzer binary with the given args and captures
+// runScanBinary runs the commit0-analyzer binary with the given args and captures
 // stdout/stderr. It returns (stdout, stderr, exitCode). It delegates to
 // runScanBinaryWithEnv so it inherits the hermetic KEV seam (no live CISA).
 func runScanBinary(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
@@ -78,12 +78,12 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 	t.Helper()
 
 	// Build the CLI binary fresh.
-	cliBin := filepath.Join(t.TempDir(), "anst-analyzer")
+	cliBin := filepath.Join(t.TempDir(), "commit0-analyzer")
 	build := exec.Command("go", "build", "-o", cliBin,
-		"github.com/ducthinh993/anst-analyzer/cmd/anst")
+		"github.com/commit0-dev/commit0-analyzer/cmd/commit0-analyzer")
 	build.Env = os.Environ()
 	out, err := build.CombinedOutput()
-	require.NoError(t, err, "build anst-analyzer CLI:\n%s", out)
+	require.NoError(t, err, "build commit0-analyzer CLI:\n%s", out)
 
 	env := append(os.Environ(), extraEnv...)
 	if !envHasKey(extraEnv, "ANST_KEV_URL") {
@@ -341,9 +341,9 @@ func TestScan_ByteIdenticalSARIF_OfflineDeterminism(t *testing.T) {
 
 	runWithGoproxyOff := func() string {
 		t.Helper()
-		cliBin := filepath.Join(t.TempDir(), "anst-analyzer")
+		cliBin := filepath.Join(t.TempDir(), "commit0-analyzer")
 		build := exec.Command("go", "build", "-o", cliBin,
-			"github.com/ducthinh993/anst-analyzer/cmd/anst")
+			"github.com/commit0-dev/commit0-analyzer/cmd/commit0-analyzer")
 		build.Env = os.Environ()
 		out, err := build.CombinedOutput()
 		require.NoError(t, err, "build CLI:\n%s", out)
@@ -957,9 +957,9 @@ func TestScan_DBSnapshotIsReadOnly(t *testing.T) {
 // and returns the path to the binary.
 func buildRustPluginBinary(t *testing.T) string {
 	t.Helper()
-	binPath := filepath.Join(t.TempDir(), "anst-rust-reachability")
+	binPath := filepath.Join(t.TempDir(), "commit0-rust-reachability")
 	cmd := exec.Command("go", "build", "-o", binPath,
-		"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability")
+		"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "build rust plugin binary:\n%s", out)
@@ -976,7 +976,7 @@ func TestScan_BuildRustPluginManifest_BinaryAbsent(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Cargo.toml"),
 		[]byte("[package]\nname = \"test-crate\"\nversion = \"0.1.0\"\n"), 0o644))
 
-	nonExistentBin := filepath.Join(t.TempDir(), "anst-rust-reachability-nonexistent")
+	nonExistentBin := filepath.Join(t.TempDir(), "commit0-rust-reachability-nonexistent")
 	_, stderr, code := runScanBinary(t,
 		"scan",
 		dir,
@@ -1388,7 +1388,7 @@ func TestScan_BuildPythonPluginManifest_BinaryAbsent(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "pyproject.toml"),
 		[]byte("[project]\nname = \"test-project\"\nversion = \"0.1.0\"\n"), 0o644))
 
-	nonExistentBin := filepath.Join(t.TempDir(), "anst-python-reachability-nonexistent")
+	nonExistentBin := filepath.Join(t.TempDir(), "commit0-python-reachability-nonexistent")
 	_, stderr, code := runScanBinary(t,
 		"scan",
 		dir,
@@ -1530,9 +1530,9 @@ func TestScan_PythonEcosystem_AutoDetect_NoPlugin(t *testing.T) {
 // dir and returns the path to the binary. Mirrors buildRustPluginBinary.
 func buildPythonPluginBinary(t *testing.T) string {
 	t.Helper()
-	binPath := filepath.Join(t.TempDir(), "anst-python-reachability")
+	binPath := filepath.Join(t.TempDir(), "commit0-python-reachability")
 	cmd := exec.Command("go", "build", "-o", binPath,
-		"github.com/ducthinh993/anst-analyzer/plugins/python-reachability")
+		"github.com/commit0-dev/commit0-analyzer/plugins/python-reachability")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "build python plugin binary:\n%s", out)
