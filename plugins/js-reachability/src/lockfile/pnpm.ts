@@ -89,6 +89,32 @@ export async function parsePnpmLockfile(
 
   // ── 1. Parse packages block ───────────────────────────────────────────────
   const packagesRaw = lock["packages"] as Record<string, unknown> | undefined;
+  // In lockfile v9 (lockfileVersion '9.0', emitted by pnpm@11) the `optional`
+  // flag was moved out of `packages` and into the `snapshots` block.
+  // Resolution/engines/cpu/os stay in `packages`; `optional` lives in `snapshots`.
+  // v6 lockfiles keep `optional` on the package entry and have no `snapshots`
+  // block, so checking both covers every lockfile version.
+  //
+  // Snapshot keys can be peer-suffixed: `name@version(@peer@v)` even when the
+  // packages block key is the bare `name@version`. Pre-build a set of base keys
+  // (peer suffix stripped) that carry `optional: true` in any snapshot entry.
+  const snapshotsRaw = lock["snapshots"] as Record<string, unknown> | undefined;
+  const snapshotOptionalBaseKeys = new Set<string>();
+  if (snapshotsRaw && typeof snapshotsRaw === "object") {
+    for (const [snapshotKey, snapshotVal] of Object.entries(snapshotsRaw)) {
+      if (
+        (snapshotVal as Record<string, unknown> | undefined)?.["optional"] ===
+        true
+      ) {
+        // Strip peer-dep context suffix to obtain the base key used in `packages`.
+        const parenIdx = snapshotKey.indexOf("(");
+        const baseKey =
+          parenIdx >= 0 ? snapshotKey.slice(0, parenIdx) : snapshotKey;
+        snapshotOptionalBaseKeys.add(baseKey);
+      }
+    }
+  }
+
   if (packagesRaw && typeof packagesRaw === "object") {
     for (const rawKey of Object.keys(packagesRaw)) {
       // Normalise: ensure leading slash
@@ -102,7 +128,11 @@ export async function parsePnpmLockfile(
 
       // Read platform constraints from the lockfile entry.
       const entry = packagesRaw[rawKey] as Record<string, unknown> | undefined;
-      const entryOptional = entry?.["optional"] === true;
+      // `optional` is in `packages` for v6 or in `snapshots` for v9 (keyed by
+      // base name@version, possibly under a peer-suffixed snapshot key). The
+      // pre-built set covers both the peer-less and peer-suffixed snapshot cases.
+      const entryOptional =
+        snapshotOptionalBaseKeys.has(rawKey) || entry?.["optional"] === true;
       const entryOs = Array.isArray(entry?.["os"])
         ? (entry["os"] as string[])
         : undefined;
@@ -149,15 +179,28 @@ export async function parsePnpmLockfile(
         }
       }
       if (!resolved) {
-        // Suppress dep-unresolved for optional packages whose os/cpu constraints
-        // exclude the current host: they are legitimately not installed.
-        const platformSkip =
-          entryOptional &&
-          isPlatformExcluded(entryOs, entryCpu, host?.platform, host?.arch);
-        if (platformSkip) {
-          // Platform-excluded optional package: do not insert a fabricated dir
-          // into the graph so no downstream stage tries to read a path that
-          // does not exist on the current platform.
+        // Soundness: host-platform reachability analysis.
+        //
+        // Two cases where a missing store path is expected, not a coverage gap:
+        //
+        // 1. OPTIONAL dep (marked optional in `packages` v6 or `snapshots` v9):
+        //    pnpm did not install it on this host; the importer tolerates its
+        //    absence via try/catch require. It cannot contribute import paths at
+        //    runtime on this host → skip from `incomplete`.
+        //
+        // 2. Platform-EXCLUDED dep with explicit os/cpu constraints that rule out
+        //    the current host: even if not marked optional, the package is
+        //    definitionally absent from the host runtime by its own declared
+        //    constraints → skip from `incomplete`.
+        //
+        // unknown ≠ safe: a required dep with no os/cpu constraints and no
+        // optional flag whose store path is missing is a real gap → keep it.
+        const platformExcluded =
+          isPlatformExcluded(entryOs, entryCpu, host?.platform, host?.arch) &&
+          (entryOs !== undefined || entryCpu !== undefined);
+        if (entryOptional || platformExcluded) {
+          // Expected-absent: do not insert a fabricated dir into the graph so
+          // no downstream stage tries to read a path that does not exist on disk.
           continue;
         }
         // Store entry absent or dangling symlink — surface as incomplete

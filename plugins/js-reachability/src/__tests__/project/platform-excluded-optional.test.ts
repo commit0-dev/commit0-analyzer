@@ -116,10 +116,11 @@ describe("pnpm optional dep excluded by cpu constraint emits no dep-unresolved",
   });
 });
 
-describe("pnpm optional dep whose constraints match host but store is absent emits dep-unresolved", () => {
-  it("emits dep-unresolved for optional dep whose constraints match host but store is absent", async () => {
-    // platform-absent-match declares os: [darwin] cpu: [arm64]; store is missing.
-    // On darwin/arm64 the package should run → its absence is a real problem.
+describe("pnpm optional dep whose store is absent emits no dep-unresolved", () => {
+  it("optional dep whose constraints match host but store is absent is NOT incomplete", async () => {
+    // platform-absent-match declares os: [darwin] cpu: [arm64] and optional: true.
+    // Its store path is missing. Because it is optional, pnpm chose not to install it;
+    // it cannot contribute import paths at runtime on this host → not a coverage gap.
     const { incomplete } = await parsePnpmLockfile(
       path.join(fixtures, "pnpm-optional-platform"),
       DARWIN_ARM64
@@ -127,7 +128,7 @@ describe("pnpm optional dep whose constraints match host but store is absent emi
     const unresolved = incomplete.filter(
       (e) => e.kind === "dep-unresolved" && e.scope.includes("platform-absent-match")
     );
-    expect(unresolved).toHaveLength(1);
+    expect(unresolved).toHaveLength(0);
   });
 
   it("does NOT emit dep-unresolved for same dep when host platform is excluded", async () => {
@@ -169,19 +170,16 @@ describe("pnpm graph does not contain fabricated dirs for platform-excluded opti
     expect(linuxPkg).toBeUndefined();
   });
 
-  it("platform-included package is present in the lockfile graph", async () => {
-    // On linux/x64 the linux-only dep must remain in the graph.
+  it("optional package with missing store is absent from graph even on a matching platform", async () => {
+    // platform-only-linux is optional: true with os: [linux]. On linux/x64 its os
+    // constraint matches the host, but the store path is missing and it is optional →
+    // pnpm did not install it → absent from the runtime → absent from graph.
     const { graph } = await parsePnpmLockfile(
       path.join(fixtures, "pnpm-optional-platform"),
       LINUX_X64
     );
-    // platform-only-linux has os: [linux] — matches linux/x64.
-    // It has no store dir on disk, so resolvedDir is fabricated, but it stays in graph
-    // (not platform-excluded on this host) and surfaces as dep-unresolved instead.
     const linuxPkg = [...graph.values()].find((p) => p.name === "platform-only-linux");
-    // The package SHOULD appear in the graph on linux (not excluded), even if store absent.
-    // dep-unresolved is emitted separately; the graph entry uses the fabricated storeDir.
-    expect(linuxPkg).toBeDefined();
+    expect(linuxPkg).toBeUndefined();
   });
 });
 
