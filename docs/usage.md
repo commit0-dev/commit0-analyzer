@@ -53,11 +53,18 @@ Scans a project for reachable dependency vulnerabilities. The path defaults to t
 | `--offline` | `false` | Disable network access; use existing writable cache or `--db-snapshot` |
 | `--update` | `false` | Force re-fetch of advisory data even when the cached version is current |
 | `--fail-on` | `high` | Minimum severity to fail: `low`, `medium`, `high`, `critical` |
-| `--source` | `go-vuln-db,osv` | Comma-separated advisory sources: `go-vuln-db`, `osv` (see below) |
+| `--source` | `go-vuln-db,osv,ghsa` | Comma-separated advisory sources: `go-vuln-db`, `osv`, `ghsa` (default). KEV + CWE enrichment is always on; opt-in: `epss`, `nvd`, `nvd-cpe` (see below) |
+| `--vex` | _(off)_ | Emit a VEX document alongside the normal output: `openvex`, `cyclonedx`, `csaf`, or `all` (see below) |
+| `--vex-out` | _(stdout)_ | VEX output path; `-` or empty writes to stdout (single format only); with `--vex all` this must be a directory |
 | `--goos` | _(host GOOS)_ | GOOS override for Go build config |
 | `--goarch` | _(host GOARCH)_ | GOARCH override for Go build config |
 | `--tags` | _(none)_ | Comma-separated Go build tags |
 | `--plugin-binary` | _(auto-built)_ | Path to pre-built `go-reachability` plugin binary |
+
+The `--gate-on` flag also accepts opt-in, additive **risk predicates** appended after the
+confidence tier (comma-separated): `kev`, `epss>=X` (`0 ≤ X ≤ 1`), and `risk>=Y` (`0 ≤ Y ≤ 100`).
+Predicates only *add* gating; they never relax the default gate. Example:
+`--gate-on reachable+unknown,kev,epss>=0.5`. See the Risk Prioritization section below.
 
 #### Exit Codes
 
@@ -75,15 +82,29 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 
 `anst-analyzer` queries one or more advisory sources per scan. Use `--source` to select which sources are active:
 
-| Source token | Description |
-|---|---|
-| `go-vuln-db` | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
-| `osv` | OSV.dev offline bundle. Multiple ecosystems: Go, npm/JS, Rust (crates.io), Python (PyPI), Maven (JVM), NuGet (.NET), Packagist (PHP), RubyGems (Ruby), Hex (Elixir), Pub (Dart), SwiftURL (Swift). Package-level data (all ecosystems). |
+| Source token | Default | Description |
+|---|---|---|
+| `go-vuln-db` | on | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
+| `osv` | on | OSV.dev offline bundle. Multiple ecosystems: Go, npm/JS, Rust (crates.io), Python (PyPI), Maven (JVM), NuGet (.NET), Packagist (PHP), RubyGems (Ruby), Hex (Elixir), Pub (Dart), SwiftURL (Swift). Package-level data (all ecosystems). |
+| `ghsa` | on | GitHub Security Advisory database. Hybrid: an OSV-format cached bundle is the offline floor; a live GraphQL layer adds freshness when `GITHUB_TOKEN` is set. With neither a bundle nor a token, GHSA is a no-op (returns no advisories without claiming clean), so enabling it is coverage-monotonic. |
+| `epss` | opt-in | FIRST EPSS exploit-prediction **enricher**. It augments already-matched advisories with each CVE's exploitation probability/percentile; it is **not** a package→advisory matcher. Opt-in because the feeds (query API + daily CSV snapshot) are heavy enough to slow a default scan. |
+| `nvd` | opt-in | NVD CVE-keyed **enricher** (NIST NVD API 2.0). It augments already-matched advisories with CVSS vectors/base scores and CWE ids keyed by CVE; it is **not** a package→advisory matcher. Opt-in because the public API is rate-limited (5 requests / 30 s without a key). |
+| `nvd-cpe` | opt-in | NVD **CPE-breadth** source. Explicitly lower-confidence, non-gating CPE-based matches. NVD is CPE-keyed, not package-coordinate-keyed, so these matches never claim symbol/package reachability precision. |
 
-**Default: both sources on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For Rust-only, Python-only, JVM-only, .NET-only, or PHP-only scans, `--source osv` is automatically used.
+**Default: `go-vuln-db`, `osv`, and `ghsa` on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For Rust-only, Python-only, JVM-only, .NET-only, or PHP-only scans, `--source osv` is automatically used. The `epss`, `nvd`, and `nvd-cpe` tokens are opt-in; add them explicitly, e.g. `--source go-vuln-db,osv,ghsa,nvd,epss`.
+
+**Always-on enrichment (not `--source` tokens):** the local **CWE** weakness normalizer and the **CISA KEV** catalog join run on every scan. They add no package→advisory edges and are cheap (CWE is local; KEV is a single small catalog). A degraded enricher (e.g. KEV catalog unreachable) warns and is skipped — enrichment is prioritization metadata, not coverage, so it never marks the scan incomplete or changes the exit code. The heavier EPSS and rate-limited NVD enrichers are gated behind their `--source` tokens.
+
+**Environment variables:**
+- `GITHUB_TOKEN` — enables the GHSA live GraphQL layer (raises rate limits; adds freshness over the cached bundle). Optional: without it GHSA falls back to the offline bundle.
+- The NVD API 2.0 endpoint is used over its public (no-key) rate limits; `ANST_NVD_API_URL` overrides the endpoint (primarily a test seam).
+- `ANST_KEV_URL` overrides the CISA KEV catalog URL (primarily a test seam).
+- `ANST_EPSS_API_URL` and `ANST_EPSS_CSV_URL` override the FIRST EPSS query API and daily-snapshot CSV endpoints respectively (primarily test seams).
 
 **Honest coverage notes:**
 - For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and multi-ecosystem support.
+- GHSA is package-level (no symbol data); the merge layer dedups GHSA against OSV/Go-DB by alias intersection so a CVE present in multiple sources collapses to one finding with all contributing sources attributed. **Measured caveat:** the parity harness (corpus run, no `GITHUB_TOKEN`) recorded **zero new findings** from adding GHSA to the `go-vuln-db,osv` baseline across Go, Python, and npm corpus entries — the OSV.dev offline bundle already aggregates GHSA advisories, so GHSA's *offline* floor overlaps OSV almost entirely. GHSA's incremental value is the live GraphQL **freshness** layer (active only when `GITHUB_TOKEN` is set) plus per-source provenance attribution, not additional offline coverage. See `internal/advisory/parity/reports/` and `docs/soundness-limits.md` for the measured numbers.
+- NVD (`nvd`) does not add new package matches — it is CVE-keyed CVSS/CWE enrichment on advisories already matched by the other sources. The CPE-breadth source (`nvd-cpe`) can add matches but is explicitly lower-confidence and non-gating: NVD is CPE-keyed, not package-coordinate-keyed, so a CPE match is never upgraded to a reachability claim.
 - For JS/TS, OSV.dev's npm bundle is the **only** supported advisory source. It is package-level (no symbol-level data). The JS plugin uses import-graph reachability to reduce install-scope noise.
 - For Rust, OSV.dev includes crates.io advisories plus RustSec advisory data (OSV curates RustSec feeds). Rust reachability is package-level (no static call graph available).
 - For Python, OSV.dev includes PyPI advisories. Python reachability is based on positive import-and-call-graph analysis (lockfile-static, no code execution required). Dynamic languages yield UNKNOWN by design when the app's importlib behavior cannot be statically determined.
@@ -99,13 +120,76 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 - Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
 - OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/`, `osv/npm/`, `osv/crates-io/`, `osv/PyPI/`, `osv/Maven/`, `osv/NuGet/`, `osv/Packagist/`, `osv/RubyGems/`, `osv/Hex/`, `osv/Pub/`, `osv/SwiftURL/` on Linux; same structure under `~/Library/Caches/anst-analyzer/osv/` on macOS.
 
+#### Enrichment Columns
+
+When enrichment sources are active, each finding carries additive metadata in its
+properties (and, in JSON output, a typed `risk` object). None of it changes the default
+gate — it is reported for prioritization until you opt in via `--gate-on`:
+
+| Signal | Where | Meaning |
+|---|---|---|
+| `cvss` | property + `risk.cvss` | The most authoritative CVSS vector + base score for the advisory (CVSS v3.1 scored; v4.0 vectors captured losslessly, base-score math deferred — a 0 score means "not yet computed", never "safe"). |
+| `epss` | property + `risk.epss` | FIRST EPSS exploitation probability/percentile for the CVE. A missing EPSS signal lowers nothing to "safe". |
+| `kev` | property + `risk.kev` | CISA Known-Exploited-Vulnerabilities flag (+ due date). Present only when the CVE is in the catalog **and** the catalog was fetched; a fetch failure is incomplete, never "not exploited". |
+| `cwe` | property + `risk.cwe` | Associated CWE identifier(s). |
+| `risk_score` / `risk_tier` | property + `risk.score`/`risk.tier` + SARIF `rank` | The fused 0–100 risk score and band (see below). |
+
+#### Risk Prioritization
+
+`anst-analyzer` fuses reachability with CVSS, KEV, and EPSS into a deterministic, explainable
+0–100 risk score (also written to SARIF `rank`). The model is a pure function — no clock, no
+network, reproducible byte-for-byte:
+
+- A proven `NOT_REACHABLE` finding scores 0 (the only proven-safe state).
+- KEV (known exploited in the wild) dominates: a KEV-listed reachable finding is boosted into
+  the top band.
+- Reachability scales the CVSS backbone (symbol > package > unknown), and a reachability
+  **floor** guarantees a reachable finding is never demoted to "ignore" even with no
+  CVSS/EPSS/KEV data — missing enrichment never lowers risk to "safe".
+
+**Opt-in risk gating.** The default gate is unchanged (reachable-tier + dep_type). Append
+predicates to `--gate-on` to additionally fail on exploit signals:
+
+```sh
+# Gate on the default tiers, plus anything KEV-listed or EPSS ≥ 0.5.
+anst-analyzer scan --gate-on reachable+unknown,kev,epss>=0.5
+
+# Gate on the default tiers, plus any fused risk score ≥ 70.
+anst-analyzer scan --gate-on reachable+unknown,risk>=70
+```
+
+Predicates only *add* gating; a missing EPSS/KEV/risk signal never relaxes the gate.
+
+#### VEX Output
+
+`anst-analyzer scan --vex <format>` emits a Vulnerability Exploitability eXchange document in
+addition to the normal output. Formats: `openvex`, `cyclonedx` (CycloneDX-VEX), `csaf`
+(CSAF 2.0), or `all`. `--vex-out` sets the path (`-`/empty = stdout for a single format;
+with `--vex all` it must be a directory).
+
+Status mapping is the cardinal soundness contract — anst **never** emits a false `not_affected`:
+
+| Reachability verdict | VEX status | Justification |
+|---|---|---|
+| `NOT_REACHABLE` (proven) | `not_affected` | `vulnerable_code_not_in_execute_path` |
+| `PACKAGE_REACHABLE` / `SYMBOL_REACHABLE` | `affected` | — |
+| `UNKNOWN` / incomplete | `under_investigation` | never downgraded to `not_affected` |
+
+```sh
+# Emit OpenVEX to stdout alongside SARIF on disk.
+anst-analyzer scan --format sarif --vex openvex --vex-out vex.openvex.json
+
+# Emit all three VEX formats into a directory.
+anst-analyzer scan --vex all --vex-out ./vex/
+```
+
 #### Advisory DB Modes
 
 `anst-analyzer scan` operates in three distinct advisory-data modes:
 
 | Mode | Flags | Behaviour |
 |------|-------|-----------|
-| **Online** (default) | _(none)_ | Fetches advisories from both enabled sources into writable local caches. Only re-fetches when the upstream data is newer than the cached version. |
+| **Online** (default) | _(none)_ | Fetches advisories from all enabled sources into writable local caches. Only re-fetches when the upstream data is newer than the cached version. |
 | **Offline** | `--offline` | Reads existing caches; never contacts the network. If `--source` explicitly includes `osv` and the OSV cache is absent, the scan is marked **incomplete** (exit 3). |
 | **Pinned snapshot** | `--db-snapshot <dir>` | Pins the Go vuln DB to a pre-built snapshot directory (read-only, manifest-verified). OSV is silently skipped when its cache is absent (backward-compatible; use `--source go-vuln-db` to be explicit). |
 
