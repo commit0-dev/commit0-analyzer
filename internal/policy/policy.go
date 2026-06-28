@@ -28,6 +28,7 @@ package policy
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,6 +92,30 @@ const (
 	GateOnAll                = "all"
 )
 
+// Opt-in gate predicate kinds (purely additive risk-prioritization knobs). They
+// extend the gate-on string with risk-signal predicates that gate eligible
+// findings independently of the severity threshold. Default behaviour (no
+// predicates) is unchanged: the existing confidence-tier + severity gate runs as
+// before. Predicates only ADD gating — they never exclude a finding the base gate
+// would already catch, preserving "unknown ≠ safe".
+//
+// Grammar (comma-separated tokens after the confidence tier):
+//   - "kev"      → gate any finding whose advisory is KEV-listed.
+//   - "epss>=X"  → gate any finding whose EPSS probability is ≥ X (0 ≤ X ≤ 1).
+//   - "risk>=Y"  → gate any finding whose fused risk score is ≥ Y (0 ≤ Y ≤ 100).
+const (
+	gatePredicateKEV  = "kev"
+	gatePredicateEPSS = "epss"
+	gatePredicateRisk = "risk"
+)
+
+// gatePredicate is a single opt-in additive gate knob parsed from the gate-on
+// string. Threshold is meaningful only for the epss/risk kinds.
+type gatePredicate struct {
+	kind      string
+	threshold float64
+}
+
 // nonRuntimeDepTypes is the set of dep_type values that do NOT fail the gate by
 // default (they are not in the production execution path).
 var nonRuntimeDepTypes = map[string]bool{
@@ -133,6 +158,10 @@ type Policy struct {
 	// Empty string defaults to GateOnReachableAndUnknown (sound default).
 	// NOT_REACHABLE is never gate-eligible regardless of this setting.
 	GateOn string
+	// GatePredicates are the opt-in, additive risk-signal knobs parsed from the
+	// gate-on string (kev, epss>=X, risk>=Y). Empty by default — the gate then
+	// behaves exactly as before. They never remove a finding from the base gate.
+	GatePredicates []gatePredicate
 	// Ignores is the list of active ignore entries.
 	Ignores []IgnoreEntry
 }
@@ -146,16 +175,17 @@ func LoadPolicy(data []byte) (*Policy, error) {
 		return nil, fmt.Errorf("policy: YAML parse error: %w", err)
 	}
 
-	// Validate gate-on value if present.
-	gateOn := strings.ToLower(strings.TrimSpace(raw.GateOn))
-	if gateOn != "" && gateOn != GateOnReachable && gateOn != GateOnReachableAndUnknown && gateOn != GateOnAll {
-		return nil, fmt.Errorf("policy: unknown gate-on value %q: must be reachable|reachable+unknown|all", raw.GateOn)
+	// Parse gate-on into its confidence tier and any opt-in additive predicates.
+	gateOn, preds, gateErr := parseGateOn(raw.GateOn)
+	if gateErr != nil {
+		return nil, gateErr
 	}
 
 	p := &Policy{
-		FailOn:        raw.FailOn,
-		ReachableOnly: raw.ReachableOnly,
-		GateOn:        gateOn,
+		FailOn:         raw.FailOn,
+		ReachableOnly:  raw.ReachableOnly,
+		GateOn:         gateOn,
+		GatePredicates: preds,
 	}
 
 	for i, ig := range raw.Ignores {
@@ -180,6 +210,89 @@ func LoadPolicy(data []byte) (*Policy, error) {
 		p.Ignores = append(p.Ignores, entry)
 	}
 	return p, nil
+}
+
+// parseGateOn splits a raw gate-on string into its confidence tier and any
+// opt-in additive predicates. Tokens are comma-separated and case-insensitive:
+//   - exactly one tier token (reachable | reachable+unknown | all); optional —
+//     when absent the tier defaults to GateOnReachableAndUnknown.
+//   - zero or more predicate tokens (kev, epss>=X, risk>=Y).
+//
+// A backward-compatible call (e.g. "reachable+unknown" or "") yields the same
+// tier and no predicates, so the existing gate path and goldens are untouched.
+func parseGateOn(raw string) (tier string, preds []gatePredicate, err error) {
+	for _, tok := range strings.Split(raw, ",") {
+		tok = strings.ToLower(strings.TrimSpace(tok))
+		if tok == "" {
+			continue
+		}
+		switch tok {
+		case GateOnReachable, GateOnReachableAndUnknown, GateOnAll:
+			if tier != "" {
+				return "", nil, fmt.Errorf("policy: gate-on %q sets more than one confidence tier", raw)
+			}
+			tier = tok
+			continue
+		}
+		pred, perr := parseGatePredicate(tok)
+		if perr != nil {
+			return "", nil, fmt.Errorf("policy: gate-on token %q: %w", tok, perr)
+		}
+		preds = append(preds, pred)
+	}
+	return tier, preds, nil
+}
+
+// parseGatePredicate parses a single opt-in predicate token: "kev", "epss>=X",
+// or "risk>=Y". The comparator is always ">=" (gate when the signal is at or
+// above the threshold). Any other shape is an error so a typo never silently
+// disables gating.
+func parseGatePredicate(tok string) (gatePredicate, error) {
+	if tok == gatePredicateKEV {
+		return gatePredicate{kind: gatePredicateKEV}, nil
+	}
+	for _, kind := range []string{gatePredicateEPSS, gatePredicateRisk} {
+		prefix := kind + ">="
+		if !strings.HasPrefix(tok, prefix) {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(tok[len(prefix):]), 64)
+		if err != nil {
+			return gatePredicate{}, fmt.Errorf("invalid %s threshold: %w", kind, err)
+		}
+		return gatePredicate{kind: kind, threshold: v}, nil
+	}
+	return gatePredicate{}, fmt.Errorf(
+		"unknown gate-on token: must be reachable|reachable+unknown|all|kev|epss>=X|risk>=Y")
+}
+
+// matchesPredicate reports whether a finding satisfies any opt-in predicate. The
+// risk signals are read from the finding's properties (stamped by the risk-fusion
+// pass): properties["kev"], properties["epss"], properties["risk_score"]. A
+// missing or unparseable signal simply does not match — it never excludes the
+// finding from the base gate (additive only; unknown ≠ safe).
+func (p *Policy) matchesPredicate(f *anstv1.Finding) bool {
+	if len(p.GatePredicates) == 0 {
+		return false
+	}
+	props := f.GetProperties()
+	for _, pred := range p.GatePredicates {
+		switch pred.kind {
+		case gatePredicateKEV:
+			if props["kev"] == "true" {
+				return true
+			}
+		case gatePredicateEPSS:
+			if v, err := strconv.ParseFloat(props["epss"], 64); err == nil && v >= pred.threshold {
+				return true
+			}
+		case gatePredicateRisk:
+			if v, err := strconv.ParseFloat(props["risk_score"], 64); err == nil && v >= pred.threshold {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // effectiveGateOn returns the gate-on tier in effect, defaulting to
@@ -302,7 +415,11 @@ func (p *Policy) EvaluateWithFlags(findings []*anstv1.Finding, flags EvalFlags) 
 		if p.isIgnored(f) {
 			continue
 		}
-		if p.meetsThreshold(f) {
+		// An eligible, non-ignored finding gates when it meets the severity
+		// threshold (existing behaviour) OR matches an opt-in risk predicate
+		// (kev / epss>=X / risk>=Y). Predicates only ADD gating; with none
+		// configured the verdict is byte-identical to the pre-change gate.
+		if p.meetsThreshold(f) || p.matchesPredicate(f) {
 			return ExitGateFailure
 		}
 	}

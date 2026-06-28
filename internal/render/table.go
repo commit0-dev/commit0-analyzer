@@ -53,8 +53,8 @@ func ToTable(findings []*anstv1.Finding) []byte {
 	var buf bytes.Buffer
 
 	// Header.
-	header := fmt.Sprintf("%-20s  %-10s  %-15s  %-35s  %s",
-		"ADVISORY", "SEVERITY", "CONFIDENCE", "MODULE", "ENTRY POINT")
+	header := fmt.Sprintf("%-20s  %-10s  %-15s  %-12s  %-35s  %s",
+		"ADVISORY", "SEVERITY", "CONFIDENCE", "RISK", "MODULE", "ENTRY POINT")
 	buf.WriteString(header)
 	buf.WriteByte('\n')
 	buf.WriteString(strings.Repeat("-", len(header)+10))
@@ -81,10 +81,11 @@ func ToTable(findings []*anstv1.Finding) []byte {
 			}
 		}
 
-		line := fmt.Sprintf("%-20s  %-10s  %-15s  %-35s  %s",
+		line := fmt.Sprintf("%-20s  %-10s  %-15s  %-12s  %-35s  %s",
 			truncate(advisoryID, 20),
 			truncate(sev, 10),
 			truncate(conf, 15),
+			truncate(riskCell(f), 12),
 			truncate(mod, 35),
 			entryPoint,
 		)
@@ -110,9 +111,34 @@ func ToTable(findings []*anstv1.Finding) []byte {
 				}
 			}
 		}
+
+		// Cross-source audit trail: surface provenance (and any severity conflict
+		// or stale source) as an indented note line when present.
+		if note := provenanceNote(f); note != "" {
+			buf.WriteString(note)
+			buf.WriteByte('\n')
+		}
 	}
 
 	return buf.Bytes()
+}
+
+// provenanceNote renders the indented cross-source audit line for a finding from
+// its stamped properties, or "" when the finding carries no provenance signal.
+func provenanceNote(f *anstv1.Finding) string {
+	props := f.GetProperties()
+	prov := props["provenance"]
+	if prov == "" {
+		return ""
+	}
+	note := "  provenance: " + prov
+	if c := props["severity_conflict"]; c != "" {
+		note += "  [severity conflict: " + c + "]"
+	}
+	if s := props["stale_source"]; s != "" {
+		note += "  [stale: " + s + "]"
+	}
+	return note
 }
 
 // severityRankTable is the sorting rank for severities in the table (higher = more severe).
@@ -122,6 +148,25 @@ var severityRankTable = map[anstv1.Severity]int{
 	anstv1.Severity_SEVERITY_MEDIUM:      2,
 	anstv1.Severity_SEVERITY_HIGH:        3,
 	anstv1.Severity_SEVERITY_CRITICAL:    4,
+}
+
+// riskCell renders the fused risk signal for the table's RISK column from the
+// finding's properties (stamped by the risk-fusion pass). It prefers the numeric
+// score, then the tier label, and shows "-" when no risk signal is present.
+func riskCell(f *anstv1.Finding) string {
+	props := f.GetProperties()
+	score := props["risk_score"]
+	tier := strings.ToUpper(props["risk_tier"])
+	switch {
+	case score != "" && tier != "":
+		return tier + " " + score
+	case score != "":
+		return score
+	case tier != "":
+		return tier
+	default:
+		return "-"
+	}
 }
 
 // truncate returns s truncated to maxLen runes, appending "…" if shortened.

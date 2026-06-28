@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -21,29 +23,32 @@ import (
 	"github.com/ducthinh993/anst-analyzer/internal/policy"
 	"github.com/ducthinh993/anst-analyzer/internal/render"
 	"github.com/ducthinh993/anst-analyzer/internal/telemetry"
+	"github.com/ducthinh993/anst-analyzer/internal/vex"
 	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
 )
 
 // scanFlags holds all flag values for the scan sub-command.
 type scanFlags struct {
-	format           string
-	policyFile       string
-	dbSnapshot       string
-	offline          bool
-	update           bool
-	failOn           string
-	gateOn           string // confidence floor for gating: reachable|reachable+unknown|all
-	goos             string
-	goarch           string
-	tags             string
-	pluginBin        string
-	jsPluginBin      string // path to pre-built js-reachability plugin binary (skip build)
-	rustPluginBin    string // path to pre-built rust-reachability plugin binary (skip build)
-	pythonPluginBin  string // path to pre-built python-reachability plugin binary (skip build)
-	source           string // comma-separated source names; default "go-vuln-db,osv"
-	sourceExplicit   bool   // true when --source was explicitly set by the user
-	language         string // "auto"|"go"|"js"|"rust"|"python"; default "auto"
-	symbols          bool   // resolve vulnerable-symbol data from advisory fix patches
+	format          string
+	policyFile      string
+	dbSnapshot      string
+	offline         bool
+	update          bool
+	failOn          string
+	gateOn          string // confidence floor for gating: reachable|reachable+unknown|all
+	goos            string
+	goarch          string
+	tags            string
+	pluginBin       string
+	jsPluginBin     string // path to pre-built js-reachability plugin binary (skip build)
+	rustPluginBin   string // path to pre-built rust-reachability plugin binary (skip build)
+	pythonPluginBin string // path to pre-built python-reachability plugin binary (skip build)
+	source          string // comma-separated source names; default "go-vuln-db,osv,ghsa"
+	sourceExplicit  bool   // true when --source was explicitly set by the user
+	language        string // "auto"|"go"|"js"|"rust"|"python"; default "auto"
+	symbols         bool   // resolve vulnerable-symbol data from advisory fix patches
+	vexFormat       string // VEX output format(s): openvex|cyclonedx|csaf|all; "" = off
+	vexOut          string // VEX output path; "" or "-" = stdout (single format only)
 }
 
 // ecosystems records which ecosystem marker files were detected in a module root.
@@ -219,11 +224,44 @@ func warnUnsupportedEcosystems(eco ecosystems, w io.Writer) bool {
 // "go-vuln-db" is both the flag token and the canonical name (SourceGoVulnDB).
 // "osv" is the short flag token; its canonical name is "osv.dev" (SourceOSV).
 // The full canonical name "osv.dev" is also accepted for forward compatibility.
+//
+// "ghsa" is the GitHub Security Advisory source (real, in the default set).
+// "nvd" enables the NVD CVE-keyed enricher (it is NOT a package→advisory source;
+// it augments matched advisories with CVSS/CWE detail). "nvd-cpe" enables the
+// opt-in, lower-confidence CPE-breadth source. "epss" enables the EPSS exploit-
+// prediction enricher. KEV and CWE enrichment are always on (not --source tokens).
 var sourceAliases = map[string]string{
 	"go-vuln-db": advisory.SourceGoVulnDB, // SourceGoVulnDB = "go-vuln-db"
 	"osv":        advisory.SourceOSV,      // short alias for "osv.dev"
 	"osv.dev":    advisory.SourceOSV,      // SourceOSV = "osv.dev" (full canonical)
+	"ghsa":       advisory.SourceGHSA,     // GitHub Security Advisory (default-on)
+	"nvd":        advisory.SourceNVD,      // NVD CVE-keyed enricher (opt-in)
+	"nvd-cpe":    advisory.SourceNVDCPE,   // NVD CPE-breadth source (opt-in, lower-confidence)
+	"epss":       advisory.SourceEPSS,     // EPSS exploit-prediction enricher (opt-in)
 }
+
+// defaultSourceFlag is the default --source value. GHSA joins go-vuln-db and OSV
+// as a real source; NVD enrichment (nvd) and CPE breadth (nvd-cpe) are opt-in.
+// Migration note: a default scan now also attaches GHSA. With no GHSA bundle or
+// GITHUB_TOKEN present GHSA is a no-op (returns no advisories without claiming
+// clean), so the change is coverage-monotonic and gate-compatible.
+const defaultSourceFlag = "go-vuln-db,osv,ghsa"
+
+// Source trust tiers feed advisory.NamedSource.Trust, the merge representative
+// tie-break that engages only after the symbol-level and range-width rules.
+// Higher wins; the symbol-curated Go vuln DB outranks GHSA, which outranks the
+// OSV bundle; the opt-in NVD-CPE breadth source is lowest. 0 is reserved for
+// "unset" so an unranked source never wins a tie by accident.
+const (
+	trustGoVulnDB = 4
+	trustGHSA     = 3
+	trustOSV      = 2
+	trustNVDCPE   = 1
+)
+
+// nvdAPIDefaultURL is the NVD CVE API 2.0 endpoint used by the opt-in `nvd`
+// enricher and `nvd-cpe` source when online and ANST_NVD_API_URL is unset.
+const nvdAPIDefaultURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 // newScanCmd returns the cobra sub-command for `anst-analyzer scan`.
 func newScanCmd() *cobra.Command {
@@ -283,14 +321,20 @@ Exit codes:
 	fs.StringVar(&flags.jsPluginBin, "js-plugin-binary", "", "path to pre-built js-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.rustPluginBin, "rust-plugin-binary", "", "path to pre-built rust-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.pythonPluginBin, "python-plugin-binary", "", "path to pre-built python-reachability plugin binary (skip build)")
-	fs.StringVar(&flags.source, "source", "go-vuln-db,osv",
-		"comma-separated advisory sources to query: go-vuln-db, osv (default: both)")
+	fs.StringVar(&flags.source, "source", defaultSourceFlag,
+		"comma-separated advisory sources: go-vuln-db, osv, ghsa (default). KEV + CWE enrichment always on; opt-in: epss, nvd (CVE enrichers), nvd-cpe (CPE breadth)")
 	fs.StringVar(&flags.language, "language", "auto",
 		"ecosystem to scan: auto|go|js|rust|python|java (default: auto — detected from manifest files; auto runs ALL detected ecosystems)")
 	fs.BoolVar(&flags.symbols, "symbols", false,
 		"resolve vulnerable-symbol data from advisory fix patches (network, cached) to enable symbol-level reachability; degrades to package-level when unavailable")
 	fs.StringVar(&flags.gateOn, "gate-on", "",
-		"confidence floor for gate failures: reachable (SYMBOL+PACKAGE only), reachable+unknown (default, gates UNKNOWN on runtime deps too), all (gate all non-NOT_REACHABLE findings)")
+		"confidence floor for gate failures: reachable (SYMBOL+PACKAGE only), reachable+unknown (default, gates UNKNOWN on runtime deps too), all (gate all non-NOT_REACHABLE findings). "+
+			"Append opt-in, additive risk predicates (comma-separated): kev, epss>=X, risk>=Y (e.g. reachable+unknown,kev,epss>=0.5)")
+	fs.StringVar(&flags.vexFormat, "vex", "",
+		"emit a VEX document in addition to the normal output: openvex|cyclonedx|csaf|all (off by default). "+
+			"NOT_REACHABLE→not_affected, reachable→affected, UNKNOWN/incomplete→under_investigation (never not_affected)")
+	fs.StringVar(&flags.vexOut, "vex-out", "",
+		"VEX output path; '-' or empty writes to stdout (single format only). With --vex all, this must be a directory")
 
 	return cmd
 }
@@ -390,6 +434,12 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// findings are collected so that Finding.Severity is filled from the
 	// advisory when the plugin left it UNSPECIFIED.
 	severityByID := map[string]advisory.Severity{}
+	// advByID maps advisory ID → the resolved+enriched advisory. Populated
+	// alongside severityByID; used by stampRisk after findings are collected to
+	// fuse reachability (the finding's confidence) with the advisory's CVSS/EPSS/
+	// KEV/CWE enrichment into a deterministic risk score and stamp it onto
+	// properties (risk_score, risk_tier, cvss, epss, kev, cwe).
+	advByID := map[string]*advisory.Advisory{}
 	// depTypeByAdvID maps advisory ID → dep_type (runtime | optional-extra | dev |
 	// test | docs) for Python packages. Populated during the PyPI advisory loop;
 	// used by stampDepType after findings are collected to tag each finding with
@@ -408,7 +458,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		// ── 4a. Go vuln DB source ─────────────────────────────────────────────────
 		if selectedSources[advisory.SourceGoVulnDB] {
 			var cacheCfg advisory.CacheConfig
-			cacheCfg.StalenessWarning = advisory.DefaultStalenessWarning
+			cacheCfg.StalenessWarning = snapshotStalenessThreshold()
 
 			if flags.dbSnapshot != "" {
 				// Pinned snapshot: read-only, manifest-verified, never fetched.
@@ -446,8 +496,9 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			}
 
 			namedSources = append(namedSources, advisory.NamedSource{
-				Name: advisory.SourceGoVulnDB,
-				S:    goCache,
+				Name:  advisory.SourceGoVulnDB,
+				S:     goCache,
+				Trust: trustGoVulnDB,
 			})
 		}
 
@@ -496,11 +547,18 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 			if addOSV {
 				namedSources = append(namedSources, advisory.NamedSource{
-					Name: advisory.SourceOSV,
-					S:    osvSrc,
+					Name:  advisory.SourceOSV,
+					S:     osvSrc,
+					Trust: trustOSV,
 				})
 			}
 		}
+
+		// ── 4c. GHSA + opt-in NVD-CPE secondary sources, and the NVD enricher ─────
+		// GHSA is in the default set; NVD-CPE/NVD are opt-in. The secondary sources
+		// self-guard (no-op for a missing bundle), so coverage is monotonic-up.
+		namedSources = appendSecondarySources(namedSources, selectedSources, cacheDir, flags.offline)
+		goEnrichChain := buildEnrichmentChain(cacheDir, flags.offline, selectedSources)
 
 		// ── 5. Query advisory sources for each Go dep ─────────────────────────────
 		multiSrc := advisory.NewMultiSource(namedSources...)
@@ -535,6 +593,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				}
 			}
 
+			// Post-merge enrichment (CWE+KEV default-on; NVD/EPSS opt-in via
+			// --source). A failed enricher warns and degrades but never marks the
+			// scan incomplete — enrichment is prioritization metadata, not coverage.
+			runEnrichment(ctx, goEnrichChain, advs, dep.Path+"@"+dep.Version)
+
 			for i := range advs {
 				// Propagate advisory-level Incomplete signal: an undecidable version
 				// comparison (e.g. unparseable version string) must surface as
@@ -545,6 +608,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				protoAdvs = append(protoAdvs, advs[i].ToProto())
 				if advs[i].ID != "" {
 					sourcesByID[advs[i].ID] = advs[i].Sources
+					advByID[advs[i].ID] = &advs[i]
 					if advs[i].Severity != advisory.SeverityUnspecified {
 						severityByID[advs[i].ID] = advs[i].Severity
 					}
@@ -645,11 +709,14 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 
 			if addNPMOSV {
 				npmNamedSources := []advisory.NamedSource{
-					{Name: advisory.SourceOSV, S: osvSrc},
+					{Name: advisory.SourceOSV, S: osvSrc, Trust: trustOSV},
 				}
 				// go-vuln-db source is intentionally excluded: it returns (nil,nil) for
 				// npm automatically, but we avoid the lookup overhead for clarity.
+				// GHSA (default) and opt-in NVD-CPE layer on top; both self-guard.
+				npmNamedSources = appendSecondarySources(npmNamedSources, selectedSources, cacheDir, flags.offline)
 				npmMultiSrc := advisory.NewMultiSource(npmNamedSources...)
+				npmEnrichChain := buildEnrichmentChain(cacheDir, flags.offline, selectedSources)
 
 				// Build the symbol resolver once for the entire npm dep loop when
 				// --symbols is set and the JS plugin binary is known. A missing plugin
@@ -692,6 +759,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						}
 					}
 
+					// Post-merge enrichment (CWE/KEV/NVD/EPSS, all default-on). A failed
+					// enricher warns and degrades but never marks the scan incomplete —
+					// enrichment is prioritization metadata, not vulnerability coverage.
+					runEnrichment(ctx, npmEnrichChain, advs, dep.Name+"@"+dep.Version)
+
 					// Resolve symbols before converting to proto (only when --symbols
 					// is set and the resolver was successfully constructed). Any failure
 					// inside Resolve degrades quietly: the advisory stays at
@@ -718,6 +790,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
+							advByID[advs[i].ID] = &advs[i]
 							if advs[i].Severity != advisory.SeverityUnspecified {
 								severityByID[advs[i].ID] = advs[i].Severity
 							}
@@ -819,10 +892,12 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			}
 
 			if addCratesOSV {
-				cratesMultiSrc := advisory.NewMultiSource(advisory.NamedSource{
-					Name: advisory.SourceOSV,
-					S:    cratesOSV,
-				})
+				cratesNamedSources := []advisory.NamedSource{
+					{Name: advisory.SourceOSV, S: cratesOSV, Trust: trustOSV},
+				}
+				cratesNamedSources = appendSecondarySources(cratesNamedSources, selectedSources, cacheDir, flags.offline)
+				cratesMultiSrc := advisory.NewMultiSource(cratesNamedSources...)
+				cratesEnrichChain := buildEnrichmentChain(cacheDir, flags.offline, selectedSources)
 
 				for _, dep := range cargoDeps {
 					pkg := advisory.Package{Ecosystem: advisory.EcosystemCratesIO, Name: dep.Name}
@@ -850,6 +925,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						}
 					}
 
+					// Post-merge enrichment (CWE/KEV/NVD/EPSS, all default-on). A failed
+					// enricher warns and degrades but never marks the scan incomplete —
+					// enrichment is prioritization metadata, not vulnerability coverage.
+					runEnrichment(ctx, cratesEnrichChain, advs, "crate "+dep.Name+"@"+dep.Version)
+
 					for i := range advs {
 						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
 						if advs[i].Incomplete {
@@ -858,6 +938,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
+							advByID[advs[i].ID] = &advs[i]
 							if advs[i].Severity != advisory.SeverityUnspecified {
 								severityByID[advs[i].ID] = advs[i].Severity
 							}
@@ -963,10 +1044,12 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			}
 
 			if addPyPIOSV {
-				pypiMultiSrc := advisory.NewMultiSource(advisory.NamedSource{
-					Name: advisory.SourceOSV,
-					S:    pypiOSV,
-				})
+				pypiNamedSources := []advisory.NamedSource{
+					{Name: advisory.SourceOSV, S: pypiOSV, Trust: trustOSV},
+				}
+				pypiNamedSources = appendSecondarySources(pypiNamedSources, selectedSources, cacheDir, flags.offline)
+				pypiMultiSrc := advisory.NewMultiSource(pypiNamedSources...)
+				pypiEnrichChain := buildEnrichmentChain(cacheDir, flags.offline, selectedSources)
 
 				for _, dep := range pythonDeps {
 					// Normalize the PyPI package name to lowercase to match OSV records.
@@ -996,6 +1079,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						}
 					}
 
+					// Post-merge enrichment (CWE/KEV/NVD/EPSS, all default-on). A failed
+					// enricher warns and degrades but never marks the scan incomplete —
+					// enrichment is prioritization metadata, not vulnerability coverage.
+					runEnrichment(ctx, pypiEnrichChain, advs, "python pkg "+dep.Name+"@"+dep.Version)
+
 					for i := range advs {
 						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
 						if advs[i].Incomplete {
@@ -1004,6 +1092,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
+							advByID[advs[i].ID] = &advs[i]
 							if advs[i].Severity != advisory.SeverityUnspecified {
 								severityByID[advs[i].ID] = advs[i].Severity
 							}
@@ -1181,10 +1270,12 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			}
 
 			if addLaneAOSV {
-				laneAMultiSrc := advisory.NewMultiSource(advisory.NamedSource{
-					Name: advisory.SourceOSV,
-					S:    laneAOSV,
-				})
+				laneANamedSources := []advisory.NamedSource{
+					{Name: advisory.SourceOSV, S: laneAOSV, Trust: trustOSV},
+				}
+				laneANamedSources = appendSecondarySources(laneANamedSources, selectedSources, cacheDir, flags.offline)
+				laneAMultiSrc := advisory.NewMultiSource(laneANamedSources...)
+				laneAEnrichChain := buildEnrichmentChain(cacheDir, flags.offline, selectedSources)
 
 				for _, dep := range deps {
 					// Apply adapter-specific name normalization.
@@ -1220,6 +1311,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						}
 					}
 
+					// Post-merge enrichment (CWE/KEV/NVD/EPSS, all default-on). A failed
+					// enricher warns and degrades but never marks the scan incomplete —
+					// enrichment is prioritization metadata, not vulnerability coverage.
+					runEnrichment(ctx, laneAEnrichChain, advs, laneAAdapter.Language+" pkg "+dep.Name+"@"+dep.Version)
+
 					for i := range advs {
 						// Propagate advisory-level Incomplete (undecidable version) → host incomplete.
 						if advs[i].Incomplete {
@@ -1228,6 +1324,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
+							advByID[advs[i].ID] = &advs[i]
 							if advs[i].Severity != advisory.SeverityUnspecified {
 								severityByID[advs[i].ID] = advs[i].Severity
 							}
@@ -1460,10 +1557,40 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// gate apply dep-type aware confidence-tiered gating.
 	stampDepType(findings, depTypeByAdvID)
 
+	// ── 7e. Stamp fused risk prioritization ───────────────────────────────────
+	// Fuse each finding's reachability tier (its confidence) with the matched
+	// advisory's CVSS/EPSS/KEV/CWE enrichment into a deterministic risk score and
+	// stamp it onto properties (risk_score, risk_tier, risk_rationale, cvss, epss,
+	// kev, cwe). SARIF rank, the table RISK column, and JSON risk field all read
+	// these properties. Additive metadata only — the default gate is unaffected.
+	stampRisk(findings, advByID)
+
+	// ── 7f. Stamp cross-source provenance & conflict audit trail ──────────────
+	// Surface the evidence behind the merge layer's fail-safe resolution: which
+	// sources contributed (provenance, always when source metadata exists) and,
+	// when present, where they disagreed on severity (severity_conflict) or were
+	// stale (stale_source). This never recomputes the resolved facts — it renders
+	// what mergeAdvisories already decided. Additive metadata; the gate is
+	// unaffected and stale data never flips a result to "safe".
+	stampProvenance(findings, advByID)
+
 	// ── 8. Render output ──────────────────────────────────────────────────────
 	if renderErr := renderFindings(flags.format, findings); renderErr != nil {
 		fmt.Fprintf(os.Stderr, "anst-analyzer scan: render: %v\n", renderErr)
 		return policy.ExitOperationalError
+	}
+
+	// ── 8b. Emit VEX (opt-in) ─────────────────────────────────────────────────
+	// VEX is an additional output, independent of the gate and exit code. A
+	// requested-but-failed VEX emission is an operational error (exit 3) — never
+	// a silent skip. The status mapping (NOT_REACHABLE→not_affected, reachable→
+	// affected, UNKNOWN/incomplete→under_investigation) lives in internal/vex and
+	// is the phase's cardinal-sin guard against false-clean output.
+	if flags.vexFormat != "" {
+		if vexErr := emitVEX(flags, findings, advByID, incomplete); vexErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: vex: %v\n", vexErr)
+			return policy.ExitOperationalError
+		}
 	}
 
 	// ── 9. Evaluate policy gate ───────────────────────────────────────────────
@@ -1618,6 +1745,114 @@ func stampDepType(findings []*anstv1.Finding, depTypeByAdvID map[string]string) 
 	}
 }
 
+// reachabilityTierFromConfidence maps a wire Confidence enum to the advisory
+// package's reachability-tier string used by advisory.Score. NOT_REACHABLE is
+// the only proven-safe tier (scores 0); an unrecognised value is treated as
+// UNKNOWN (conservative: unknown ≠ safe).
+func reachabilityTierFromConfidence(c anstv1.Confidence) string {
+	switch c {
+	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
+		return advisory.ReachabilitySymbol
+	case anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+		return advisory.ReachabilityPackage
+	case anstv1.Confidence_CONFIDENCE_NOT_REACHABLE:
+		return advisory.ReachabilityNotReachable
+	default:
+		return advisory.ReachabilityUnknown
+	}
+}
+
+// stampRisk computes the fused risk score for each finding and stamps the result
+// onto its properties. The reachability input is the finding's own confidence;
+// the CVSS/EPSS/KEV/CWE inputs come from the matched advisory (advByID). Findings
+// with no matched advisory (synthetic/crash markers) are skipped.
+//
+// Stamped keys: risk_score, risk_tier, risk_rationale, and the underlying signals
+// cvss, epss, kev, cwe when present. These are additive metadata: the default
+// policy gate ignores them unless the user opts in via --gate-on kev|epss>=X|risk>=Y.
+func stampRisk(findings []*anstv1.Finding, advByID map[string]*advisory.Advisory) {
+	for _, f := range findings {
+		if f.GetAdvisory() == nil {
+			continue
+		}
+		adv, ok := advByID[f.GetAdvisory().GetId()]
+		if !ok || adv == nil {
+			continue
+		}
+
+		rs := advisory.Score(adv, reachabilityTierFromConfidence(f.GetConfidence()))
+
+		if f.Properties == nil {
+			f.Properties = map[string]string{}
+		}
+		f.Properties["risk_score"] = strconv.FormatFloat(rs.Score, 'f', 1, 64)
+		f.Properties["risk_tier"] = rs.Tier
+		if rs.Rationale != "" {
+			f.Properties["risk_rationale"] = rs.Rationale
+		}
+
+		// Underlying signals, surfaced for visibility (never gate by default).
+		if vec, score, has := advisory.BestCVSS(adv); has {
+			if score > 0 {
+				f.Properties["cvss"] = strconv.FormatFloat(score, 'f', 1, 64)
+			} else if vec != "" {
+				// Unscored (e.g. v4.0) vector: surface the vector losslessly.
+				f.Properties["cvss"] = vec
+			}
+		}
+		if adv.EPSS != nil {
+			f.Properties["epss"] = strconv.FormatFloat(adv.EPSS.Probability, 'f', -1, 64)
+		}
+		if adv.KEV != nil {
+			f.Properties["kev"] = strconv.FormatBool(adv.KEV.Listed)
+		}
+		if len(adv.CWEs) > 0 {
+			f.Properties["cwe"] = strings.Join(adv.CWEs, ",")
+		}
+	}
+}
+
+// freshnessSLA is the source-freshness policy used to flag stale advisory
+// sources. A source older than Soft is reported in properties["stale_source"]
+// (warn-only). HardIncomplete is deliberately left false: stale advisory data is
+// a warning, never a surprise exit-3 — staleness must not silently flip a result.
+var freshnessSLA = advisory.FreshnessSLA{Soft: 72 * time.Hour, Hard: 720 * time.Hour}
+
+// stampProvenance records the cross-source audit trail onto each finding's
+// properties from its matched advisory's source metadata (populated by the merge
+// layer's conflict resolution). provenance — the deterministic per-source
+// severity/freshness summary — is stamped whenever source metadata exists;
+// severity_conflict and stale_source are stamped only when a real disagreement
+// or stale source exists. The strings come from the advisory package's
+// resolution helpers, so the resolved facts are never recomputed here, only
+// surfaced. Findings with no matched advisory or no source metadata are skipped.
+func stampProvenance(findings []*anstv1.Finding, advByID map[string]*advisory.Advisory) {
+	now := time.Now()
+	for _, f := range findings {
+		if f.GetAdvisory() == nil {
+			continue
+		}
+		adv, ok := advByID[f.GetAdvisory().GetId()]
+		if !ok || adv == nil || len(adv.SourceMeta) == 0 {
+			continue
+		}
+		prov := advisory.ProvenanceString(adv.SourceMeta)
+		if prov == "" {
+			continue
+		}
+		if f.Properties == nil {
+			f.Properties = map[string]string{}
+		}
+		f.Properties["provenance"] = prov
+		if conflict := advisory.SeverityConflictString(adv.SourceMeta); conflict != "" {
+			f.Properties["severity_conflict"] = conflict
+		}
+		if stale, _ := freshnessSLA.Evaluate(adv.SourceMeta, now); len(stale) > 0 {
+			f.Properties["stale_source"] = advisory.StaleSourceString(stale)
+		}
+	}
+}
+
 // renderFindings writes findings to stdout in the requested format.
 func renderFindings(format string, findings []*anstv1.Finding) error {
 	switch strings.ToLower(format) {
@@ -1641,6 +1876,105 @@ func renderFindings(format string, findings []*anstv1.Finding) error {
 	default:
 		return fmt.Errorf("unknown format %q: must be sarif|json|table", format)
 	}
+}
+
+// emitVEX builds a VEX document from the findings and their matched advisories
+// and writes it in the requested format(s). Findings with no matched advisory
+// (synthetic/crash markers) are skipped — they carry no vulnerability to attest
+// to. The document timestamp is injected once here so the formatters stay pure
+// and reproducible.
+//
+// scanIncomplete is the scan-level aggregate incompleteness signal. It is ORed
+// into every statement's per-finding Incomplete flag: some lanes (e.g. the JS
+// modelIncomplete path) mark only the scan incomplete without stamping each
+// finding, so a NOT_REACHABLE verdict proven over that partial dependency
+// closure must still degrade to under_investigation — never not_affected. This
+// is the cardinal-sin guard (a false-clean VEX statement on an incomplete graph).
+func emitVEX(flags scanFlags, findings []*anstv1.Finding, advByID map[string]*advisory.Advisory, scanIncomplete bool) error {
+	formatters, err := vex.Formatters(flags.vexFormat)
+	if err != nil {
+		return err
+	}
+	if len(formatters) == 0 {
+		return nil
+	}
+
+	inputs := make([]vex.StatementInput, 0, len(findings))
+	for _, f := range findings {
+		ref := f.GetAdvisory()
+		if ref == nil || ref.GetId() == "" {
+			continue
+		}
+		in := vex.StatementInput{
+			VulnID:       ref.GetId(),
+			Aliases:      append([]string(nil), ref.GetAliases()...),
+			PackageName:  f.GetModule(),
+			Reachability: vexReachability(f.GetConfidence()),
+			Incomplete:   f.GetIncomplete() || scanIncomplete,
+		}
+		if adv, ok := advByID[ref.GetId()]; ok && adv != nil {
+			in.Ecosystem = adv.Ecosystem
+			if adv.Module != "" {
+				in.PackageName = adv.Module
+			}
+			in.FixedVersion = lowestFixedVersion(adv)
+			if len(in.Aliases) == 0 {
+				in.Aliases = append([]string(nil), adv.Aliases...)
+			}
+		}
+		inputs = append(inputs, in)
+	}
+
+	doc := vex.BuildDocument(vexAssessmentTime(), inputs)
+	return vex.Write(formatters, doc, flags.vexOut, os.Stdout)
+}
+
+// vexAssessmentTime returns the timestamp stamped on the VEX document. The
+// timestamp feeds the openVEX id and CSAF tracking id hashes, so a wall-clock
+// value makes output non-reproducible across runs. When SOURCE_DATE_EPOCH is set
+// (the reproducible-builds convention, Unix seconds) it is honored verbatim,
+// yielding byte-identical VEX for the same inputs; otherwise the assessment time
+// is the current wall clock (the honest "when this was asserted" semantics).
+func vexAssessmentTime() time.Time {
+	if v := os.Getenv("SOURCE_DATE_EPOCH"); v != "" {
+		if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return time.Unix(secs, 0).UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+// vexReachability maps a wire Confidence to the VEX package's reachability enum.
+// CONFIDENCE_UNKNOWN (the zero value) maps to ReachabilityUnknown so an
+// undetermined finding is never asserted not_affected.
+func vexReachability(c anstv1.Confidence) vex.Reachability {
+	switch c {
+	case anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE:
+		return vex.ReachabilitySymbolReachable
+	case anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE:
+		return vex.ReachabilityPackageReachable
+	case anstv1.Confidence_CONFIDENCE_NOT_REACHABLE:
+		return vex.ReachabilityNotReachable
+	default:
+		return vex.ReachabilityUnknown
+	}
+}
+
+// lowestFixedVersion returns the lexicographically smallest non-empty Fixed
+// version across the advisory's ranges, for the VEX action statement. Returns ""
+// when no fixed version is recorded (the action statement degrades to a generic
+// mitigation message rather than inventing a version).
+func lowestFixedVersion(adv *advisory.Advisory) string {
+	lowest := ""
+	for _, r := range adv.VersionRanges {
+		if r.Fixed == "" {
+			continue
+		}
+		if lowest == "" || r.Fixed < lowest {
+			lowest = r.Fixed
+		}
+	}
+	return lowest
 }
 
 // loadPolicyFromFlags loads a Policy from a file or synthesises one from flags.
@@ -1679,7 +2013,7 @@ type npmDep struct {
 
 // listDepsOutput is the JSON shape emitted by the JS plugin's --list-deps mode.
 type listDepsOutput struct {
-	Deps       []npmDep         `json:"deps"`
+	Deps       []npmDep          `json:"deps"`
 	Incomplete []incompleteEntry `json:"incomplete"`
 	// DeclaredDepCount is the total number of declared runtime deps across all
 	// workspaces before resolution. The CLI uses this together with each entry's
@@ -1770,8 +2104,8 @@ type cargoDep struct {
 func sanitizedCargoEnv() []string {
 	// Variables to always strip (override vectors for toolchain hijacking).
 	strip := map[string]bool{
-		"CARGO_HOME":   true,
-		"RUSTUP_HOME":  true,
+		"CARGO_HOME":       true,
+		"RUSTUP_HOME":      true,
 		"RUSTUP_TOOLCHAIN": true, // we pin it explicitly below
 	}
 
@@ -2080,7 +2414,7 @@ func parseSourceFlag(flag string) (map[string]bool, error) {
 		}
 		canonical, ok := sourceAliases[token]
 		if !ok {
-			return nil, fmt.Errorf("unknown source %q: must be one of go-vuln-db, osv", token)
+			return nil, fmt.Errorf("unknown source %q: must be one of go-vuln-db, osv, ghsa, nvd, nvd-cpe, epss", token)
 		}
 		enabled[canonical] = true
 	}
@@ -2088,6 +2422,163 @@ func parseSourceFlag(flag string) (map[string]bool, error) {
 		return nil, fmt.Errorf("at least one source must be enabled; got %q", flag)
 	}
 	return enabled, nil
+}
+
+// snapshotStalenessThreshold returns the age past which a pinned Go vuln DB
+// snapshot is flagged stale. ANST_SNAPSHOT_STALENESS overrides
+// advisory.DefaultStalenessWarning with a Go duration string; an unset or
+// unparseable value uses the production default, so there is no behavior change
+// outside tests. It is a hermeticity seam: the E2E suite pins date-stamped corpus
+// snapshots whose age would otherwise drift past the default 7-day threshold over
+// calendar time, making the suite depend on wall-clock rather than its inputs.
+func snapshotStalenessThreshold() time.Duration {
+	if v := os.Getenv("ANST_SNAPSHOT_STALENESS"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return advisory.DefaultStalenessWarning
+}
+
+// buildGHSASource constructs the GHSA source for the given user cache root. The
+// offline OSV-format bundle under <cache>/anst-analyzer/ghsa is the breadth
+// floor; the live GraphQL layer is token-gated (GITHUB_TOKEN) and disabled in
+// offline mode so --offline never touches the network. ANST_GHSA_GRAPHQL_URL
+// overrides the endpoint (test seam). A missing bundle directory makes Query a
+// no-op (nil,nil), so attaching GHSA never converts "no advisory" into a failure.
+func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
+	dir := filepath.Join(userCacheDir, "anst-analyzer", "ghsa")
+	if offline {
+		// Offline: bundle floor only; never attempt the live GraphQL layer.
+		return advisory.NewGHSASource(dir, advisory.WithGHSAGraphQLURL(""))
+	}
+	if override := os.Getenv("ANST_GHSA_GRAPHQL_URL"); override != "" {
+		return advisory.NewGHSASource(dir, advisory.WithGHSAGraphQLURL(override))
+	}
+	return advisory.NewGHSASource(dir)
+}
+
+// buildNVDCPESource constructs the opt-in NVD CPE-breadth source for the given
+// user cache root. Online it uses the NVD API 2.0 endpoint (ANST_NVD_API_URL
+// override honored); offline it serves only the cached feed. A feed-load failure
+// surfaces as a query error (unknown ≠ safe), never an empty clean result.
+func buildNVDCPESource(userCacheDir string, offline bool) advisory.Source {
+	dir := filepath.Join(userCacheDir, "anst-analyzer", "nvd")
+	if offline {
+		return advisory.NewNVDCPESource(dir)
+	}
+	if override := os.Getenv("ANST_NVD_API_URL"); override != "" {
+		return advisory.NewNVDCPESource(dir, advisory.WithNVDBaseURL(override))
+	}
+	return advisory.NewNVDCPESource(dir, advisory.WithNVDBaseURL(nvdAPIDefaultURL))
+}
+
+// appendSecondarySources adds the GHSA source and the opt-in NVD-CPE breadth
+// source to named, honoring --source selection and --offline. Both self-guard:
+// an ecosystem they do not serve, or a missing bundle/cache (GHSA only), yields
+// (nil,nil) rather than a failure, so attaching them is coverage-monotonic — it
+// never removes an advisory the prior path surfaced and never turns "no advisory"
+// into incomplete. The opt-in NVD-CPE source DOES error on a missing feed, which
+// is the intended unknown ≠ safe behavior for an explicitly-requested source.
+func appendSecondarySources(named []advisory.NamedSource, selected map[string]bool, userCacheDir string, offline bool) []advisory.NamedSource {
+	if selected[advisory.SourceGHSA] {
+		named = append(named, advisory.NamedSource{
+			Name:  advisory.SourceGHSA,
+			S:     buildGHSASource(userCacheDir, offline),
+			Trust: trustGHSA,
+		})
+	}
+	if selected[advisory.SourceNVDCPE] {
+		named = append(named, advisory.NamedSource{
+			Name:  advisory.SourceNVDCPE,
+			S:     buildNVDCPESource(userCacheDir, offline),
+			Trust: trustNVDCPE,
+		})
+	}
+	return named
+}
+
+// buildEnrichmentChain assembles the post-merge enrichment chain in a fixed,
+// deterministic order: the local CWE normalizer, the CISA KEV catalog join, the
+// opt-in NVD CVE-detail join, then the opt-in EPSS score join. Enrichment is
+// prioritization metadata (KEV, EPSS, CWE weakness context, NVD CVE detail), NOT
+// vulnerability coverage.
+//
+// CWE and KEV are always on: CWE is purely local, and KEV is a single small
+// catalog. The NVD enricher (rate-limited to 5 req/30s anonymous) and the EPSS
+// enricher (heavy daily feeds) are opt-in via --source nvd / --source epss, so a
+// default scan never pays their latency. All network enrichers honor --offline
+// (cached floor only). Test seams: KEV honors ANST_KEV_URL, EPSS honors
+// ANST_EPSS_API_URL / ANST_EPSS_CSV_URL, and NVD honors ANST_NVD_API_URL; each
+// falls back to its production endpoint when the seam is unset and online.
+// A degraded enricher warns and is skipped (see runEnrichment) rather than
+// changing the exit code, so a missing cache or network outage never marks the
+// scan incomplete.
+//
+// The opt-in NVD *enricher* (CVE-keyed detail, structurally FP-safe) is distinct
+// from the lower-confidence NVD-CPE breadth *source* (appendSecondarySources),
+// which is gated separately behind --source nvd-cpe.
+func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string]bool) advisory.EnrichmentChain {
+	kev := &advisory.KEVEnricher{
+		CacheDir: filepath.Join(userCacheDir, "anst-analyzer", "kev"),
+		Offline:  offline,
+	}
+	if url := os.Getenv("ANST_KEV_URL"); url != "" {
+		kev.URL = url
+	}
+	chain := advisory.EnrichmentChain{
+		advisory.CWEEnricher{},
+		kev,
+	}
+
+	if selected[advisory.SourceNVD] {
+		nvdDir := filepath.Join(userCacheDir, "anst-analyzer", "nvd")
+		switch {
+		case offline:
+			chain = append(chain, advisory.NewNVDEnricher(nvdDir))
+		case os.Getenv("ANST_NVD_API_URL") != "":
+			chain = append(chain, advisory.NewNVDEnricher(nvdDir, advisory.WithNVDBaseURL(os.Getenv("ANST_NVD_API_URL"))))
+		default:
+			chain = append(chain, advisory.NewNVDEnricher(nvdDir, advisory.WithNVDBaseURL(nvdAPIDefaultURL)))
+		}
+	}
+
+	if selected[advisory.SourceEPSS] {
+		epss := &advisory.EPSSEnricher{
+			CacheDir: filepath.Join(userCacheDir, "anst-analyzer", "epss"),
+			Offline:  offline,
+		}
+		if api := os.Getenv("ANST_EPSS_API_URL"); api != "" {
+			epss.APIBaseURL = api
+		}
+		if csv := os.Getenv("ANST_EPSS_CSV_URL"); csv != "" {
+			epss.CSVURL = csv
+		}
+		chain = append(chain, epss)
+	}
+	return chain
+}
+
+// runEnrichment runs the post-merge enrichment chain over advs in place. A
+// failed enricher is warned per failure (keeping whatever enrichment succeeded)
+// and otherwise ignored: enrichment is prioritization metadata, not vulnerability
+// coverage, so a degraded enricher must NEVER mark the scan incomplete or change
+// the exit code. An empty chain or empty advisory slice is a silent no-op.
+func runEnrichment(ctx context.Context, chain advisory.EnrichmentChain, advs []advisory.Advisory, pkgDesc string) {
+	if len(chain) == 0 || len(advs) == 0 {
+		return
+	}
+	if err := chain.Enrich(ctx, advs); err != nil {
+		var enrIncomplete *advisory.EnrichmentIncompleteError
+		if errors.As(err, &enrIncomplete) {
+			for i, name := range enrIncomplete.FailedEnrichers {
+				fmt.Fprintf(os.Stderr, "warning: advisory enricher %q failed for %s: %v\n",
+					name, pkgDesc, enrIncomplete.Errors[i])
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: advisory enrichment failed for %s: %v\n", pkgDesc, err)
+		}
+	}
 }
 
 // osvCacheDirExists returns true when the per-ecosystem subdirectory inside
@@ -2355,7 +2846,7 @@ type listPythonDepsOutput struct {
 	// This covers: no lockfile present, no venv present (manifest-only mode),
 	// offline+unpinned (cannot resolve without network), or any parse error.
 	// When true, the caller MUST set incomplete=true on the scan.
-	Incomplete bool   `json:"incomplete"`
+	Incomplete bool `json:"incomplete"`
 	// IncompleteReason provides a human-readable explanation for the incomplete signal.
 	IncompleteReason string `json:"incompleteReason,omitempty"`
 }

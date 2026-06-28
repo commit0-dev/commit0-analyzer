@@ -52,39 +52,11 @@ func buildPluginBinary(t *testing.T) string {
 }
 
 // runScanBinary runs the anst-analyzer binary with the given args and captures
-// stdout/stderr. It returns (stdout, stderr, exitCode).
+// stdout/stderr. It returns (stdout, stderr, exitCode). It delegates to
+// runScanBinaryWithEnv so it inherits the hermetic KEV seam (no live CISA).
 func runScanBinary(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-
-	// Build the CLI binary fresh.
-	cliBin := filepath.Join(t.TempDir(), "anst-analyzer")
-	build := exec.Command("go", "build", "-o", cliBin,
-		"github.com/ducthinh993/anst-analyzer/cmd/anst")
-	build.Env = os.Environ()
-	out, err := build.CombinedOutput()
-	require.NoError(t, err, "build anst-analyzer CLI:\n%s", out)
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd := exec.CommandContext(context.Background(), cliBin, args...)
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-	cmd.Env = os.Environ()
-
-	runErr := cmd.Run()
-	stdout = stdoutBuf.String()
-	stderr = stderrBuf.String()
-
-	if runErr == nil {
-		exitCode = 0
-	} else {
-		var exitErr *exec.ExitError
-		if ok := isExitError(runErr, &exitErr); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
-		}
-	}
-	return stdout, stderr, exitCode
+	return runScanBinaryWithEnv(t, nil, args...)
 }
 
 func isExitError(err error, target **exec.ExitError) bool {
@@ -97,6 +69,11 @@ func isExitError(err error, target **exec.ExitError) bool {
 
 // runScanBinaryWithEnv is like runScanBinary but accepts extra env vars appended
 // to the process environment. Used to inject ANST_VULN_DB_URL for mock servers.
+//
+// KEV + CWE enrichment is always on, so every scan would otherwise reach the live
+// CISA KEV catalog. To keep the suite hermetic and fast, this points the
+// subprocess at a local server returning an empty KEV catalog via ANST_KEV_URL,
+// unless the test already supplied its own ANST_KEV_URL.
 func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 
@@ -108,11 +85,27 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 	out, err := build.CombinedOutput()
 	require.NoError(t, err, "build anst-analyzer CLI:\n%s", out)
 
+	env := append(os.Environ(), extraEnv...)
+	if !envHasKey(extraEnv, "ANST_KEV_URL") {
+		kevSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"vulnerabilities":[]}`))
+		}))
+		t.Cleanup(kevSrv.Close)
+		env = append(env, "ANST_KEV_URL="+kevSrv.URL)
+	}
+	// Date-stamped corpus snapshots would drift past the default 7-day staleness
+	// threshold over calendar time, dropping advisories and flaking the suite.
+	// Pin a very large threshold so scans depend on their inputs, not wall-clock,
+	// unless a test exercises staleness with its own value.
+	if !envHasKey(extraEnv, "ANST_SNAPSHOT_STALENESS") {
+		env = append(env, "ANST_SNAPSHOT_STALENESS=876000h")
+	}
+
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd := exec.CommandContext(context.Background(), cliBin, args...)
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
-	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Env = env
 
 	// When a test overrides HOME (to isolate the advisory cache), the scan's
 	// internal `go list`/`go build` would otherwise write Go telemetry counter
@@ -140,6 +133,19 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 		}
 	}
 	return stdout, stderr, exitCode
+}
+
+// envHasKey reports whether env contains an assignment for the given KEY (i.e. an
+// entry of the form "KEY=..."). Used so the hermetic KEV seam defers to a test
+// that supplies its own ANST_KEV_URL.
+func envHasKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // disableGoTelemetry writes an "off" Go telemetry mode file under home so that

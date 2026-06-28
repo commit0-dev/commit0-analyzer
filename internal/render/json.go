@@ -3,6 +3,7 @@ package render
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 
 	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
 )
@@ -32,6 +33,20 @@ type jsonPath struct {
 	Steps []jsonCallStep `json:"steps"`
 }
 
+// jsonRisk is the stable JSON representation of the fused risk-prioritization
+// signal. It mirrors the risk_* properties stamped by the risk-fusion pass so the
+// risk score is a first-class, typed field in JSON output (not only a string in
+// the properties map). Omitted entirely when a finding carries no risk signal.
+type jsonRisk struct {
+	Score     float64 `json:"score"`
+	Tier      string  `json:"tier,omitempty"`
+	Rationale string  `json:"rationale,omitempty"`
+	CVSS      string  `json:"cvss,omitempty"`
+	EPSS      string  `json:"epss,omitempty"`
+	KEV       string  `json:"kev,omitempty"`
+	CWE       string  `json:"cwe,omitempty"`
+}
+
 // jsonFinding is the stable JSON schema for a single finding.
 // Field order is fixed by struct tag order; deterministic key order is guaranteed
 // by encoding/json marshalling struct fields in declaration order.
@@ -40,10 +55,27 @@ type jsonFinding struct {
 	Module     string            `json:"module"`
 	Confidence string            `json:"confidence"`
 	Severity   string            `json:"severity"`
+	Risk       *jsonRisk         `json:"risk,omitempty"`
+	Provenance *jsonProvenance   `json:"provenance,omitempty"`
 	Path       *jsonPath         `json:"path,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 	Pillar     string            `json:"pillar,omitempty"`
 	Language   string            `json:"language,omitempty"`
+}
+
+// jsonProvenance is the stable JSON representation of the cross-source audit
+// trail stamped by the provenance pass. It mirrors the provenance/
+// severity_conflict/stale_source properties so the merge layer's evidence is a
+// first-class field, not only a string in the properties map. Omitted entirely
+// when a finding carries no provenance signal.
+type jsonProvenance struct {
+	// Summary is the per-source provenance string ("name SEVERITY vector"),
+	// NOT the source list. It is deliberately named "summary" rather than
+	// "sources" to avoid colliding with the finding's properties["sources"]
+	// (the comma-joined contributing-source list), which is a different value.
+	Summary          string `json:"summary"`
+	SeverityConflict string `json:"severity_conflict,omitempty"`
+	StaleSources     string `json:"stale_sources,omitempty"`
 }
 
 // ToJSON converts a slice of findings into a stable JSON byte slice.
@@ -114,7 +146,48 @@ func toJSONFinding(f *anstv1.Finding) jsonFinding {
 		for k, v := range props {
 			jf.Properties[k] = v
 		}
+		jf.Risk = riskFromProperties(props)
+		jf.Provenance = provenanceFromProperties(props)
 	}
 
 	return jf
+}
+
+// provenanceFromProperties extracts the cross-source audit trail from a finding's
+// properties into a typed jsonProvenance, or returns nil when no provenance
+// signal is present.
+func provenanceFromProperties(props map[string]string) *jsonProvenance {
+	prov := props["provenance"]
+	if prov == "" {
+		return nil
+	}
+	return &jsonProvenance{
+		Summary:          prov,
+		SeverityConflict: props["severity_conflict"],
+		StaleSources:     props["stale_source"],
+	}
+}
+
+// riskFromProperties extracts the fused risk signal from a finding's properties
+// into a typed jsonRisk, or returns nil when no risk score/tier is present.
+func riskFromProperties(props map[string]string) *jsonRisk {
+	score, hasScore := props["risk_score"]
+	tier := props["risk_tier"]
+	if !hasScore && tier == "" {
+		return nil
+	}
+	r := &jsonRisk{
+		Tier:      tier,
+		Rationale: props["risk_rationale"],
+		CVSS:      props["cvss"],
+		EPSS:      props["epss"],
+		KEV:       props["kev"],
+		CWE:       props["cwe"],
+	}
+	if hasScore {
+		if v, err := strconv.ParseFloat(score, 64); err == nil {
+			r.Score = v
+		}
+	}
+	return r
 }

@@ -1,0 +1,61 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-06-27T12:00:00Z",
+    "tools": [
+      {
+        "name": "anst-analyzer"
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "id": "CVE-2024-1000",
+      "analysis": {
+        "state": "exploitable",
+        "detail": "Update golang.org/x/net to v0.17.0 or later."
+      },
+      "affects": [
+        {
+          "ref": "pkg:golang/golang.org/x/net"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-2000",
+      "analysis": {
+        "state": "not_affected",
+        "justification": "code_not_reachable"
+      },
+      "affects": [
+        {
+          "ref": "pkg:npm/lodash"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-3000",
+      "analysis": {
+        "state": "in_triage"
+      },
+      "affects": [
+        {
+          "ref": "pkg:pypi/requests"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2024-4000",
+      "analysis": {
+        "state": "in_triage"
+      },
+      "affects": [
+        {
+          "ref": "pkg:maven/org.apache.logging.log4j/log4j-core"
+        }
+      ]
+    }
+  ]
+}

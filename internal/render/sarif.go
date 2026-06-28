@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 
 	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
 )
@@ -69,6 +70,15 @@ func findingToSARIFResult(f *anstv1.Finding) (sarifResult, error) {
 		RuleID:  f.GetAdvisory().GetId(),
 		Level:   severityToSARIFLevel(f.GetSeverity()),
 		Message: sarifMessage{Text: buildResultMessage(f)},
+	}
+
+	// SARIF rank carries the fused risk score (0–100), stamped by the risk-fusion
+	// pass into properties["risk_score"]. Absent on findings with no risk score so
+	// the field is omitted (rank is optional in SARIF; a missing rank ≠ rank 0).
+	if rs, ok := f.GetProperties()["risk_score"]; ok {
+		if v, err := strconv.ParseFloat(rs, 64); err == nil {
+			r.Rank = &v
+		}
 	}
 
 	// Populate result.properties with confidence, sources, and analyzer metadata.
@@ -205,6 +215,7 @@ type sarifToolComponent struct {
 type sarifResult struct {
 	RuleID       string                 `json:"ruleId"`
 	Level        string                 `json:"level"`
+	Rank         *float64               `json:"rank,omitempty"`
 	Message      sarifMessage           `json:"message"`
 	CodeFlows    []sarifCodeFlow        `json:"codeFlows,omitempty"`
 	Suppressions []sarifSuppression     `json:"suppressions,omitempty"`
