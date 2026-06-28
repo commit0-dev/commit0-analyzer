@@ -5,11 +5,11 @@ import "testing"
 func TestVEXForUnreachablePasses(t *testing.T) {
 	// Every COMPLETE, proven NOT_REACHABLE finding must appear in the VEX doc as
 	// not_affected — the empirical proof a reachability suppression flows through.
-	commit0Analyzer, err := ParseAnst(readFixture(t, "anst.json"))
+	commit0Analyzer, err := ParseCommit0(readFixture(t, "commit0.json"))
 	if err != nil {
 		t.Fatalf("parse commit0Analyzer: %v", err)
 	}
-	statuses, err := ParseAnstVEX(readFixture(t, "anst-openvex.json"))
+	statuses, err := ParseCommit0VEX(readFixture(t, "commit0-openvex.json"))
 	if err != nil {
 		t.Fatalf("parse vex: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestVEXForUnreachableFailsWhenStatusWrong(t *testing.T) {
 	// A proven NOT_REACHABLE finding whose VEX status is anything but not_affected
 	// is a hard failure: the suppression did not flow through to the VEX document.
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-1", Package: "p", Reachability: reachNotReachable},
+		{Tool: ToolCommit0, VulnID: "CVE-1", Package: "p", Reachability: reachNotReachable},
 	}
 	statuses := map[string]string{"CVE-1": "under_investigation"}
 	if ok, _ := VEXForUnreachable(commit0Analyzer, statuses); ok {
@@ -33,7 +33,7 @@ func TestVEXForUnreachableFailsWhenStatusWrong(t *testing.T) {
 
 func TestVEXForUnreachableFailsWhenAbsent(t *testing.T) {
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-1", Package: "p", Reachability: reachNotReachable},
+		{Tool: ToolCommit0, VulnID: "CVE-1", Package: "p", Reachability: reachNotReachable},
 	}
 	if ok, _ := VEXForUnreachable(commit0Analyzer, map[string]string{}); ok {
 		t.Error("a NOT_REACHABLE finding absent from the VEX doc must fail the check")
@@ -45,7 +45,7 @@ func TestVEXForUnreachableIgnoresIncompleteNotReachable(t *testing.T) {
 	// expected to be not_affected (commit0Analyzer maps it to under_investigation). It must
 	// not be cross-checked as if it were proven safe.
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-1", Package: "p", Reachability: reachNotReachable, Incomplete: true},
+		{Tool: ToolCommit0, VulnID: "CVE-1", Package: "p", Reachability: reachNotReachable, Incomplete: true},
 	}
 	ok, _ := VEXForUnreachable(commit0Analyzer, map[string]string{"CVE-1": "under_investigation"})
 	if !ok {
@@ -62,7 +62,7 @@ func TestVEXForUnreachableNoFindingsIsHonestPass(t *testing.T) {
 
 func TestKEVTopTierPasses(t *testing.T) {
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2021-44228", Package: "log4j-core", KEV: true, RiskTier: "critical"},
+		{Tool: ToolCommit0, VulnID: "CVE-2021-44228", Package: "log4j-core", KEV: true, RiskTier: "critical"},
 	}
 	if ok, detail := KEVTopTier(commit0Analyzer, "CVE-2021-44228"); !ok {
 		t.Errorf("KEVTopTier = false (%s); KEV-listed + critical should pass", detail)
@@ -71,7 +71,7 @@ func TestKEVTopTierPasses(t *testing.T) {
 
 func TestKEVTopTierMatchesByAlias(t *testing.T) {
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "GHSA-jfh8-c2jp-5v3q", Aliases: []string{"CVE-2021-44228"}, KEV: true, RiskTier: "critical"},
+		{Tool: ToolCommit0, VulnID: "GHSA-jfh8-c2jp-5v3q", Aliases: []string{"CVE-2021-44228"}, KEV: true, RiskTier: "critical"},
 	}
 	if ok, _ := KEVTopTier(commit0Analyzer, "CVE-2021-44228"); !ok {
 		t.Error("KEVTopTier must match by alias")
@@ -80,7 +80,7 @@ func TestKEVTopTierMatchesByAlias(t *testing.T) {
 
 func TestKEVTopTierFailsWithoutFlag(t *testing.T) {
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2021-44228", KEV: false, RiskTier: "critical"},
+		{Tool: ToolCommit0, VulnID: "CVE-2021-44228", KEV: false, RiskTier: "critical"},
 	}
 	if ok, _ := KEVTopTier(commit0Analyzer, "CVE-2021-44228"); ok {
 		t.Error("a KEV dependency without the KEV flag must fail")
@@ -89,7 +89,7 @@ func TestKEVTopTierFailsWithoutFlag(t *testing.T) {
 
 func TestKEVTopTierFailsWhenNotTopTier(t *testing.T) {
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2021-44228", KEV: true, RiskTier: "high"},
+		{Tool: ToolCommit0, VulnID: "CVE-2021-44228", KEV: true, RiskTier: "high"},
 	}
 	if ok, _ := KEVTopTier(commit0Analyzer, "CVE-2021-44228"); ok {
 		t.Error("a KEV dependency not in the top risk tier must fail")

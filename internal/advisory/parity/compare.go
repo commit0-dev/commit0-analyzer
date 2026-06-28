@@ -25,10 +25,10 @@ const (
 	// DeltaMiss: the comparator flagged it and commit0-analyzer has no record at all — a
 	// genuine false negative.
 	DeltaMiss DeltaKind = "miss"
-	// DeltaAnstUnique: commit0-analyzer reported it and the comparator did not — broader
+	// DeltaCommit0Unique: commit0-analyzer reported it and the comparator did not — broader
 	// coverage or a candidate false positive; flagged for human review, never
 	// auto-counted as a confirmed FP.
-	DeltaAnstUnique DeltaKind = "commit0-analyzer-unique"
+	DeltaCommit0Unique DeltaKind = "commit0-analyzer-unique"
 )
 
 // Delta is one classified relationship between commit0-analyzer and a comparator for a
@@ -47,7 +47,7 @@ type Delta struct {
 type ComparisonResult struct {
 	Comparator      string  `json:"comparator"`
 	Corpus          string  `json:"corpus"`
-	AnstCount       int     `json:"anst_count"`
+	Commit0Count       int     `json:"commit0_count"`
 	ComparatorCount int     `json:"comparator_count"`
 	Deltas          []Delta `json:"deltas"`
 }
@@ -60,18 +60,18 @@ func Compare(corpus, comparator string, commit0Analyzer, other []Finding) Compar
 	res := ComparisonResult{
 		Comparator:      comparator,
 		Corpus:          corpus,
-		AnstCount:       len(commit0Analyzer),
+		Commit0Count:       len(commit0Analyzer),
 		ComparatorCount: len(other),
 	}
 
 	// Track which commit0-analyzer findings were matched by some comparator finding so the
 	// remainder can be reported as commit0-analyzer-unique.
-	matchedAnst := make([]bool, len(commit0Analyzer))
+	matchedCommit0 := make([]bool, len(commit0Analyzer))
 
 	for _, c := range other {
-		kind, reason, anstIdx := classifyAgainstAnst(c, commit0Analyzer)
-		if anstIdx >= 0 {
-			matchedAnst[anstIdx] = true
+		kind, reason, commit0Idx := classifyAgainstCommit0(c, commit0Analyzer)
+		if commit0Idx >= 0 {
+			matchedCommit0[commit0Idx] = true
 		}
 		res.Deltas = append(res.Deltas, Delta{
 			Kind:       kind,
@@ -83,11 +83,11 @@ func Compare(corpus, comparator string, commit0Analyzer, other []Finding) Compar
 	}
 
 	for i, a := range commit0Analyzer {
-		if matchedAnst[i] {
+		if matchedCommit0[i] {
 			continue
 		}
 		res.Deltas = append(res.Deltas, Delta{
-			Kind:       DeltaAnstUnique,
+			Kind:       DeltaCommit0Unique,
 			VulnID:     a.VulnID,
 			Package:    a.Package,
 			Comparator: comparator,
@@ -99,13 +99,13 @@ func Compare(corpus, comparator string, commit0Analyzer, other []Finding) Compar
 	return res
 }
 
-// classifyAgainstAnst classifies one comparator finding against commit0-analyzer's full
+// classifyAgainstCommit0 classifies one comparator finding against commit0-analyzer's full
 // finding set. It returns the delta kind, a reason, and the index of the matching
 // commit0-analyzer finding (or -1 when none matched). The order of checks encodes the
 // cardinal rule: a comparator-only finding is a suppression ONLY when commit0-analyzer proved
 // NOT_REACHABLE; an undecided commit0-analyzer record is "surfaced", and no commit0-analyzer record is a
 // miss.
-func classifyAgainstAnst(c Finding, commit0Analyzer []Finding) (DeltaKind, string, int) {
+func classifyAgainstCommit0(c Finding, commit0Analyzer []Finding) (DeltaKind, string, int) {
 	for i, a := range commit0Analyzer {
 		if !sameVuln(a, c) {
 			continue
@@ -151,7 +151,7 @@ type Summary struct {
 	SuppressedSound int `json:"suppressed_sound"`
 	UnknownSurfaced int `json:"unknown_surfaced"`
 	FalseNegatives  int `json:"false_negatives"`
-	AnstUnique      int `json:"anst_unique"`
+	Commit0Unique      int `json:"commit0_unique"`
 }
 
 // Summarize counts each delta kind in a comparison result.
@@ -167,8 +167,8 @@ func Summarize(res ComparisonResult) Summary {
 			s.UnknownSurfaced++
 		case DeltaMiss:
 			s.FalseNegatives++
-		case DeltaAnstUnique:
-			s.AnstUnique++
+		case DeltaCommit0Unique:
+			s.Commit0Unique++
 		}
 	}
 	return s

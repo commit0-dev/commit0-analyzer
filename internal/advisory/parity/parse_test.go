@@ -15,10 +15,10 @@ func readFixture(t *testing.T, name string) []byte {
 	return data
 }
 
-func TestParseAnst(t *testing.T) {
-	fs, err := ParseAnst(readFixture(t, "anst.json"))
+func TestParseCommit0(t *testing.T) {
+	fs, err := ParseCommit0(readFixture(t, "commit0.json"))
 	if err != nil {
-		t.Fatalf("ParseAnst: %v", err)
+		t.Fatalf("ParseCommit0: %v", err)
 	}
 	if len(fs) != 3 {
 		t.Fatalf("want 3 findings, got %d", len(fs))
@@ -35,8 +35,8 @@ func TestParseAnst(t *testing.T) {
 	}
 	for i, want := range tests {
 		got := fs[i]
-		if got.Tool != ToolAnst {
-			t.Errorf("finding %d: tool = %q, want %q", i, got.Tool, ToolAnst)
+		if got.Tool != ToolCommit0 {
+			t.Errorf("finding %d: tool = %q, want %q", i, got.Tool, ToolCommit0)
 		}
 		if got.VulnID != want.id {
 			t.Errorf("finding %d: id = %q, want %q", i, got.VulnID, want.id)
@@ -53,19 +53,19 @@ func TestParseAnst(t *testing.T) {
 	}
 }
 
-func TestParseAnstUnknownConfidenceIsNotSafe(t *testing.T) {
+func TestParseCommit0UnknownConfidenceIsNotSafe(t *testing.T) {
 	// An unrecognized confidence string must never be treated as not-reachable.
 	if got := normalizeConfidence("CONFIDENCE_SOMETHING_NEW"); got != reachUnknown {
 		t.Fatalf("unknown confidence normalized to %q, want %q (unknown != safe)", got, reachUnknown)
 	}
 }
 
-// TestParseAnstIncompleteSignals pins the real incompleteness signal commit0-analyzer emits:
+// TestParseCommit0IncompleteSignals pins the real incompleteness signal commit0-analyzer emits:
 // confidence == CONFIDENCE_UNKNOWN AND/OR properties["synthetic"] == "true".
 // commit0-analyzer never emits a properties["incomplete"] key, so the harness must not depend
 // on one (depending on a phantom key would silently classify every finding as
 // complete and launder an incomplete NOT_REACHABLE into a sound suppression).
-func TestParseAnstIncompleteSignals(t *testing.T) {
+func TestParseCommit0IncompleteSignals(t *testing.T) {
 	cases := []struct {
 		name       string
 		json       string
@@ -99,9 +99,9 @@ func TestParseAnstIncompleteSignals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fs, err := ParseAnst([]byte(tc.json))
+			fs, err := ParseCommit0([]byte(tc.json))
 			if err != nil {
-				t.Fatalf("ParseAnst: %v", err)
+				t.Fatalf("ParseCommit0: %v", err)
 			}
 			if len(fs) != 1 {
 				t.Fatalf("want 1 finding, got %d", len(fs))
@@ -116,14 +116,14 @@ func TestParseAnstIncompleteSignals(t *testing.T) {
 	}
 }
 
-// TestParseAnstKEVAndTier verifies that the KEV flag and risk tier are read from
+// TestParseCommit0KEVAndTier verifies that the KEV flag and risk tier are read from
 // the real properties commit0-analyzer stamps (properties["kev"], properties["risk_tier"]),
 // so the harness can assert the KEV non-negotiable.
-func TestParseAnstKEVAndTier(t *testing.T) {
+func TestParseCommit0KEVAndTier(t *testing.T) {
 	const data = `[{"advisory":{"id":"CVE-2021-44228"},"module":"org.apache.logging.log4j:log4j-core","confidence":"CONFIDENCE_PACKAGE_REACHABLE","properties":{"kev":"true","risk_tier":"critical","risk_score":"99.0"}}]`
-	fs, err := ParseAnst([]byte(data))
+	fs, err := ParseCommit0([]byte(data))
 	if err != nil {
-		t.Fatalf("ParseAnst: %v", err)
+		t.Fatalf("ParseCommit0: %v", err)
 	}
 	if len(fs) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(fs))
@@ -136,10 +136,10 @@ func TestParseAnstKEVAndTier(t *testing.T) {
 	}
 }
 
-func TestParseAnstVEX(t *testing.T) {
-	statuses, err := ParseAnstVEX(readFixture(t, "anst-openvex.json"))
+func TestParseCommit0VEX(t *testing.T) {
+	statuses, err := ParseCommit0VEX(readFixture(t, "commit0-openvex.json"))
 	if err != nil {
-		t.Fatalf("ParseAnstVEX: %v", err)
+		t.Fatalf("ParseCommit0VEX: %v", err)
 	}
 	// Status is indexed by both the primary id and every alias (normalized).
 	if got := statuses["GO-2024-0002"]; got != "not_affected" {
@@ -156,9 +156,9 @@ func TestParseAnstVEX(t *testing.T) {
 	}
 }
 
-func TestParseAnstVEXRejectsGarbage(t *testing.T) {
-	if _, err := ParseAnstVEX([]byte("not json")); err == nil {
-		t.Error("ParseAnstVEX accepted garbage input")
+func TestParseCommit0VEXRejectsGarbage(t *testing.T) {
+	if _, err := ParseCommit0VEX([]byte("not json")); err == nil {
+		t.Error("ParseCommit0VEX accepted garbage input")
 	}
 }
 
@@ -236,7 +236,7 @@ func TestParsersRejectGarbage(t *testing.T) {
 		name string
 		p    func([]byte) ([]Finding, error)
 	}{
-		{"commit0-analyzer", ParseAnst},
+		{"commit0-analyzer", ParseCommit0},
 		{"osv-scanner", ParseOSVScanner},
 		{"grype", ParseGrype},
 		{"trivy", ParseTrivy},

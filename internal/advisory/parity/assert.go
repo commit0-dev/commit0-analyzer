@@ -17,7 +17,7 @@ const (
 // NOT_REACHABLE commit0-analyzer finding is recorded in the VEX document as not_affected — the
 // proof that a reachability suppression flows through to the VEX output rather
 // than being silently dropped. statuses maps a normalized vuln identifier to its
-// VEX status (from ParseAnstVEX).
+// VEX status (from ParseCommit0VEX).
 //
 // Incomplete NOT_REACHABLE verdicts are skipped: they are not sound suppressions
 // (commit0-analyzer maps them to under_investigation), so requiring not_affected for them

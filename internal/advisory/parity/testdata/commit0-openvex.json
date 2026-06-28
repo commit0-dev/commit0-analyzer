@@ -1,7 +1,7 @@
 {
   "@context": "https://openvex.dev/ns/v0.2.0",
-  "@id": "https://anst.dev/vex/test",
-  "author": "anst-analyzer",
+  "@id": "https://commit0.dev/vex/test",
+  "author": "commit0-analyzer",
   "timestamp": "2026-06-27T00:00:00Z",
   "version": 1,
   "statements": [

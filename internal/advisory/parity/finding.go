@@ -8,7 +8,7 @@ import (
 // Tool names recorded on findings and in the report. commit0-analyzer is the subject under
 // test; the rest are the external comparators it is measured against.
 const (
-	ToolAnst        = "commit0-analyzer"
+	ToolCommit0        = "commit0-analyzer"
 	ToolOSVScanner  = "osv-scanner"
 	ToolGrype       = "grype"
 	ToolTrivy       = "trivy"
@@ -138,7 +138,7 @@ func (f Finding) isReachable() bool {
 
 // isNotReachable reports whether an commit0-analyzer finding carries a NOT_REACHABLE
 // verdict. A NOT_REACHABLE verdict only counts as a sound suppression when the
-// analysis was also complete (see classifyAgainstAnst, which pairs this with
+// analysis was also complete (see classifyAgainstCommit0, which pairs this with
 // !Incomplete to mirror vex.MapStatus): an incomplete analysis cannot prove
 // unreachability, so it must not be laundered into a suppression.
 func (f Finding) isNotReachable() bool {

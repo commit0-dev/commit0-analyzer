@@ -15,9 +15,9 @@ import (
 // network or external binaries.
 func TestRunRequiresConfig(t *testing.T) {
 	if _, err := Run(context.Background(), RunOptions{}); err == nil {
-		t.Error("Run with no AnstBinary should error")
+		t.Error("Run with no Commit0Binary should error")
 	}
-	if _, err := Run(context.Background(), RunOptions{AnstBinary: "commit0-analyzer"}); err == nil {
+	if _, err := Run(context.Background(), RunOptions{Commit0Binary: "commit0-analyzer"}); err == nil {
 		t.Error("Run with no ResolvePath should error")
 	}
 }
@@ -54,7 +54,7 @@ func TestParityHarness(t *testing.T) {
 	checkoutDir := os.Getenv("COMMIT0_PARITY_CHECKOUT_DIR")
 
 	opts := RunOptions{
-		AnstBinary: bin,
+		Commit0Binary: bin,
 		Timeout:    10 * time.Minute,
 		// Narrow the ecosystems we have validated reachability lanes for; others
 		// auto-detect.

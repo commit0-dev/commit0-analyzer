@@ -138,7 +138,7 @@ func (r *Report) ToMarkdown() string {
 	for _, c := range r.Comparisons {
 		s := Summarize(c)
 		fmt.Fprintf(&b, "| %s | %s | %d | %d | %d | %d | %d |\n",
-			c.Corpus, c.Comparator, s.Shared, s.SuppressedSound, s.UnknownSurfaced, s.FalseNegatives, s.AnstUnique)
+			c.Corpus, c.Comparator, s.Shared, s.SuppressedSound, s.UnknownSurfaced, s.FalseNegatives, s.Commit0Unique)
 	}
 	b.WriteString("\n")
 

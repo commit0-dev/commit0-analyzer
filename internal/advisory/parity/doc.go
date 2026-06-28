@@ -22,7 +22,7 @@
 // A suppression counts as correct ONLY when commit0-analyzer carries the same advisory with
 // a NOT_REACHABLE verdict. Anything else a comparator found and commit0-analyzer did not is a
 // miss. Treating an unproven gap as a "correct suppression" would launder a false
-// negative into a feature, which this harness forbids ([classifyAgainstAnst]).
+// negative into a feature, which this harness forbids ([classifyAgainstCommit0]).
 //
 // # Hermetic split
 //

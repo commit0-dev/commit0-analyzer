@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ParseAnst parses commit0-analyzer's native `--format json` output into normalized
+// ParseCommit0 parses commit0-analyzer's native `--format json` output into normalized
 // findings. The schema is the stable jsonFinding array emitted by
 // internal/render.ToJSON: each entry carries an advisory {id, aliases}, module,
 // confidence, severity, an optional language, and a flat properties map. The
@@ -21,7 +21,7 @@ import (
 // "incomplete"/"ecosystem"/"version" property, so this parser must not depend on
 // any: doing so would read every finding as complete and let an incomplete
 // NOT_REACHABLE be laundered into a sound suppression.
-func ParseAnst(data []byte) ([]Finding, error) {
+func ParseCommit0(data []byte) ([]Finding, error) {
 	var raw []struct {
 		Advisory struct {
 			ID      string   `json:"id"`
@@ -39,7 +39,7 @@ func ParseAnst(data []byte) ([]Finding, error) {
 	for _, r := range raw {
 		reach := normalizeConfidence(r.Confidence)
 		out = append(out, Finding{
-			Tool:         ToolAnst,
+			Tool:         ToolCommit0,
 			VulnID:       r.Advisory.ID,
 			Aliases:      r.Advisory.Aliases,
 			Ecosystem:    r.Language,
@@ -53,13 +53,13 @@ func ParseAnst(data []byte) ([]Finding, error) {
 	return out, nil
 }
 
-// ParseAnstVEX parses commit0-analyzer's OpenVEX (`--vex openvex`) document into a map from
+// ParseCommit0VEX parses commit0-analyzer's OpenVEX (`--vex openvex`) document into a map from
 // normalized vulnerability identifier (the statement's name plus every alias) to
 // its VEX status string (e.g. "not_affected", "under_investigation", "affected").
 // Indexing aliases too lets the harness look a finding up by any of its ids. An
 // unparseable document is an error — never a silent empty map that could read as
 // "no statuses".
-func ParseAnstVEX(data []byte) (map[string]string, error) {
+func ParseCommit0VEX(data []byte) (map[string]string, error) {
 	var doc struct {
 		Statements []struct {
 			Vulnerability struct {

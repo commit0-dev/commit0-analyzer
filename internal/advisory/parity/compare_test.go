@@ -7,7 +7,7 @@ import "testing"
 func loadCompareInputs(t *testing.T) (commit0Analyzer, osv []Finding) {
 	t.Helper()
 	var err error
-	if commit0Analyzer, err = ParseAnst(readFixture(t, "anst.json")); err != nil {
+	if commit0Analyzer, err = ParseCommit0(readFixture(t, "commit0.json")); err != nil {
 		t.Fatalf("parse commit0-analyzer: %v", err)
 	}
 	if osv, err = ParseOSVScanner(readFixture(t, "osv-scanner.json")); err != nil {
@@ -30,8 +30,8 @@ func TestCompareClassifies(t *testing.T) {
 	if s.FalseNegatives != 1 {
 		t.Errorf("FalseNegatives = %d, want 1 (CVE-2024-9999 only-osv)", s.FalseNegatives)
 	}
-	if s.AnstUnique != 1 {
-		t.Errorf("AnstUnique = %d, want 1 (GO-2024-0003)", s.AnstUnique)
+	if s.Commit0Unique != 1 {
+		t.Errorf("Commit0Unique = %d, want 1 (GO-2024-0003)", s.Commit0Unique)
 	}
 	if s.UnknownSurfaced != 0 {
 		t.Errorf("UnknownSurfaced = %d, want 0", s.UnknownSurfaced)
@@ -63,7 +63,7 @@ func TestCompareSuppressionRequiresProvenNotReachable(t *testing.T) {
 	// An UNKNOWN/incomplete commit0-analyzer record must NOT be classified as a sound
 	// suppression — it is surfaced, not proven safe.
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2024-3333", Package: "p", Reachability: reachUnknown, Incomplete: true},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-3333", Package: "p", Reachability: reachUnknown, Incomplete: true},
 	}
 	other := []Finding{{Tool: ToolGrype, VulnID: "CVE-2024-3333", Package: "p"}}
 	res := Compare("c", ToolGrype, commit0Analyzer, other)
@@ -82,7 +82,7 @@ func TestCompareIncompleteNotReachableIsNotSuppression(t *testing.T) {
 	// under_investigation, never not_affected. The harness must be at least as
 	// conservative as the product's own VEX guard.
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2024-4444", Package: "p", Reachability: reachNotReachable, Incomplete: true},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-4444", Package: "p", Reachability: reachNotReachable, Incomplete: true},
 	}
 	other := []Finding{{Tool: ToolGrype, VulnID: "CVE-2024-4444", Package: "p"}}
 	res := Compare("c", ToolGrype, commit0Analyzer, other)
@@ -98,7 +98,7 @@ func TestCompareCompleteNotReachableIsSuppression(t *testing.T) {
 	// The complement: a COMPLETE, proven NOT_REACHABLE verdict IS a sound
 	// suppression — commit0-analyzer's differentiator, not a miss.
 	commit0Analyzer := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2024-5555", Package: "p", Reachability: reachNotReachable, Incomplete: false},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-5555", Package: "p", Reachability: reachNotReachable, Incomplete: false},
 	}
 	other := []Finding{{Tool: ToolGrype, VulnID: "CVE-2024-5555", Package: "p"}}
 	res := Compare("c", ToolGrype, commit0Analyzer, other)
