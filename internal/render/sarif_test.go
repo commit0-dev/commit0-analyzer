@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
-	"github.com/ducthinh993/anst-analyzer/internal/render"
+	"github.com/commit0-dev/commit0-analyzer/internal/render"
 )
 
 // updateGolden regenerates golden files when -update is passed.
@@ -65,28 +65,28 @@ func goldenWrite(t *testing.T, name string, data []byte) {
 
 // --- helpers to build test findings ---
 
-func symbolReachableFinding3Steps() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func symbolReachableFinding3Steps() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:      "GO-2024-0001",
 			Url:     "https://pkg.go.dev/vuln/GO-2024-0001",
 			Aliases: []string{"CVE-2024-12345"},
 		},
 		Module:     "golang.org/x/net",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
-		Path: &anstv1.ReachabilityPath{
-			Steps: []*anstv1.CallStep{
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
+		Path: &commit0v1.ReachabilityPath{
+			Steps: []*commit0v1.CallStep{
 				{
-					Location: &anstv1.Location{File: "cmd/main.go", Line: 42, Column: 5},
+					Location: &commit0v1.Location{File: "cmd/main.go", Line: 42, Column: 5},
 					Symbol:   "main.main",
 				},
 				{
-					Location: &anstv1.Location{File: "internal/client/client.go", Line: 17, Column: 3},
+					Location: &commit0v1.Location{File: "internal/client/client.go", Line: 17, Column: 3},
 					Symbol:   "internal/client.Client.Do",
 				},
 				{
-					Location: &anstv1.Location{File: "vendor/golang.org/x/net/http2/transport.go", Line: 99, Column: 12},
+					Location: &commit0v1.Location{File: "vendor/golang.org/x/net/http2/transport.go", Line: 99, Column: 12},
 					Symbol:   "golang.org/x/net/http2.(*Transport).RoundTrip",
 				},
 			},
@@ -102,15 +102,15 @@ func symbolReachableFinding3Steps() *anstv1.Finding {
 	}
 }
 
-func notReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func notReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GO-2024-0002",
 			Url: "https://pkg.go.dev/vuln/GO-2024-0002",
 		},
 		Module:     "github.com/example/lib",
-		Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_MEDIUM,
+		Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_MEDIUM,
 		Properties: map[string]string{
 			"goos":      "linux",
 			"algorithm": "vta",
@@ -118,15 +118,15 @@ func notReachableFinding() *anstv1.Finding {
 	}
 }
 
-func unknownFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func unknownFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GO-2024-0003",
 			Url: "https://pkg.go.dev/vuln/GO-2024-0003",
 		},
 		Module:     "github.com/example/reflection",
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{
 			"goos":      "linux",
 			"algorithm": "vta",
@@ -134,15 +134,15 @@ func unknownFinding() *anstv1.Finding {
 	}
 }
 
-func packageReachableFinding() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func packageReachableFinding() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  "GO-2024-0004",
 			Url: "https://pkg.go.dev/vuln/GO-2024-0004",
 		},
 		Module:     "github.com/example/pkg",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 		Properties: map[string]string{
 			"goos":      "linux",
 			"algorithm": "vta",
@@ -159,7 +159,7 @@ func TestSARIF_SymbolReachable_ThreeStepPath(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := symbolReachableFinding3Steps()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 
 	// Validate against the SARIF schema.
@@ -216,7 +216,7 @@ func TestSARIF_NotReachable_NotSilentlyDropped(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := notReachableFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -255,7 +255,7 @@ func TestSARIF_Unknown_AppearsAsNormalResult(t *testing.T) {
 	schema := compileSARIFSchema(t)
 	f := unknownFinding()
 
-	out, err := render.ToSARIF([]*anstv1.Finding{f})
+	out, err := render.ToSARIF([]*commit0v1.Finding{f})
 	require.NoError(t, err)
 	validateSARIF(t, schema, out)
 
@@ -285,7 +285,7 @@ func TestSARIF_Unknown_AppearsAsNormalResult(t *testing.T) {
 func TestSARIF_MixedDocument_SchemaValid(t *testing.T) {
 	schema := compileSARIFSchema(t)
 
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		symbolReachableFinding3Steps(),  // has path → codeFlows present
 		packageReachableFinding(),       // no path → codeFlows omitted
 		unknownFinding(),                // no path → codeFlows omitted
@@ -341,14 +341,14 @@ func TestSARIF_MixedDocument_SchemaValid(t *testing.T) {
 // CRITICAL/HIGH → error, MEDIUM → warning, LOW → note, UNSPECIFIED → none.
 func TestSARIF_SeverityMapping(t *testing.T) {
 	cases := []struct {
-		severity  anstv1.Severity
+		severity  commit0v1.Severity
 		wantLevel string
 	}{
-		{anstv1.Severity_SEVERITY_CRITICAL, "error"},
-		{anstv1.Severity_SEVERITY_HIGH, "error"},
-		{anstv1.Severity_SEVERITY_MEDIUM, "warning"},
-		{anstv1.Severity_SEVERITY_LOW, "note"},
-		{anstv1.Severity_SEVERITY_UNSPECIFIED, "none"},
+		{commit0v1.Severity_SEVERITY_CRITICAL, "error"},
+		{commit0v1.Severity_SEVERITY_HIGH, "error"},
+		{commit0v1.Severity_SEVERITY_MEDIUM, "warning"},
+		{commit0v1.Severity_SEVERITY_LOW, "note"},
+		{commit0v1.Severity_SEVERITY_UNSPECIFIED, "none"},
 	}
 
 	schema := compileSARIFSchema(t)
@@ -356,13 +356,13 @@ func TestSARIF_SeverityMapping(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.severity.String(), func(t *testing.T) {
-			f := &anstv1.Finding{
-				Advisory:   &anstv1.AdvisoryRef{Id: "GO-TEST-0001"},
+			f := &commit0v1.Finding{
+				Advisory:   &commit0v1.AdvisoryRef{Id: "GO-TEST-0001"},
 				Module:     "example.com/mod",
-				Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+				Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 				Severity:   tc.severity,
 			}
-			out, err := render.ToSARIF([]*anstv1.Finding{f})
+			out, err := render.ToSARIF([]*commit0v1.Finding{f})
 			require.NoError(t, err)
 			validateSARIF(t, schema, out)
 

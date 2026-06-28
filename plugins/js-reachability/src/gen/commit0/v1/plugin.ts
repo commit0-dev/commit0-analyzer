@@ -2,7 +2,7 @@
 // versions:
 //   protoc-gen-ts_proto  v2.11.8
 //   protoc               unknown
-// source: anst/v1/plugin.proto
+// source: commit0/v1/plugin.proto
 
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
@@ -22,7 +22,7 @@ import {
 } from "@grpc/grpc-js";
 
 /**
- * Package anst.v1 defines the versioned gRPC plugin contract for anst-analyzer.
+ * Package commit0.v1 defines the versioned gRPC plugin contract for commit0-analyzer.
  *
  * # Version and Compatibility Policy
  *
@@ -2080,7 +2080,7 @@ export const MetadataResponse: MessageFns<MetadataResponse> = {
 };
 
 /**
- * Analyzer is the gRPC service every anst-analyzer plugin must implement.
+ * Analyzer is the gRPC service every commit0-analyzer plugin must implement.
  *
  * Transport: subprocess + gRPC over stdio (hashicorp/go-plugin pattern).
  * The host launches the plugin as a child process and communicates over its
@@ -2100,7 +2100,7 @@ export const AnalyzerService = {
    * Called once per plugin startup as part of the handshake.
    */
   metadata: {
-    path: "/anst.v1.Analyzer/Metadata" as const,
+    path: "/commit0.v1.Analyzer/Metadata" as const,
     requestStream: false as const,
     responseStream: false as const,
     requestSerialize: (value: MetadataRequest): Buffer => Buffer.from(MetadataRequest.encode(value).finish()),
@@ -2117,7 +2117,7 @@ export const AnalyzerService = {
    * codes.InvalidArgument for bad input).
    */
   analyze: {
-    path: "/anst.v1.Analyzer/Analyze" as const,
+    path: "/commit0.v1.Analyzer/Analyze" as const,
     requestStream: false as const,
     responseStream: true as const,
     requestSerialize: (value: AnalyzeRequest): Buffer => Buffer.from(AnalyzeRequest.encode(value).finish()),
@@ -2176,7 +2176,7 @@ export interface AnalyzerClient extends Client {
   analyze(request: AnalyzeRequest, metadata?: Metadata, options?: Partial<CallOptions>): ClientReadableStream<Finding>;
 }
 
-export const AnalyzerClient = makeGenericClientConstructor(AnalyzerService, "anst.v1.Analyzer") as unknown as {
+export const AnalyzerClient = makeGenericClientConstructor(AnalyzerService, "commit0.v1.Analyzer") as unknown as {
   new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): AnalyzerClient;
   service: typeof AnalyzerService;
   serviceName: string;

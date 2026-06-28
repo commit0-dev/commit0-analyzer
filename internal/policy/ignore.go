@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // IgnoreEntry suppresses a specific finding from gate evaluation.
@@ -76,12 +76,12 @@ func (e IgnoreEntry) Validate() error {
 // ValidateAgainstFinding checks the additional constraint that ignoring a
 // SYMBOL_REACHABLE CRITICAL finding requires the ElevatedIgnore flag.
 // Call this after Validate() when you have a concrete finding to check against.
-func (e IgnoreEntry) ValidateAgainstFinding(f *anstv1.Finding) error {
+func (e IgnoreEntry) ValidateAgainstFinding(f *commit0v1.Finding) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	if f.GetConfidence() == anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE &&
-		f.GetSeverity() == anstv1.Severity_SEVERITY_CRITICAL {
+	if f.GetConfidence() == commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE &&
+		f.GetSeverity() == commit0v1.Severity_SEVERITY_CRITICAL {
 		if !e.ElevatedIgnore {
 			return fmt.Errorf(
 				"ignore entry for %q / %q: ignoring a SYMBOL_REACHABLE CRITICAL finding requires elevated-ignore: true (Red Team #15d)",
@@ -106,7 +106,7 @@ func (e IgnoreEntry) IsExpired() bool {
 // whether any step in the finding's ReachabilityPath carries that symbol.
 //
 // Matches does NOT check expiry; callers must call IsExpired separately.
-func (e IgnoreEntry) Matches(f *anstv1.Finding) bool {
+func (e IgnoreEntry) Matches(f *commit0v1.Finding) bool {
 	if f.GetAdvisory().GetId() != e.AdvisoryID {
 		return false
 	}
@@ -135,7 +135,7 @@ func (e IgnoreEntry) Matches(f *anstv1.Finding) bool {
 // SYMBOL_REACHABLE + CRITICAL and ElevatedIgnore is not set, the entry is treated
 // as inactive (fail-closed). A warning is printed to stderr so the user knows their
 // ignore was refused rather than silently accepted.
-func isActiveIgnore(e IgnoreEntry, f *anstv1.Finding) bool {
+func isActiveIgnore(e IgnoreEntry, f *commit0v1.Finding) bool {
 	if e.IsExpired() {
 		return false
 	}
@@ -147,7 +147,7 @@ func isActiveIgnore(e IgnoreEntry, f *anstv1.Finding) bool {
 	// invariant; treat a failed validation as "not active" (fail-closed).
 	if err := e.ValidateAgainstFinding(f); err != nil {
 		fmt.Fprintf(os.Stderr,
-			"anst-analyzer: ignore refused for %q / %q — %v (finding NOT suppressed)\n",
+			"commit0-analyzer: ignore refused for %q / %q — %v (finding NOT suppressed)\n",
 			e.AdvisoryID, e.Module, err)
 		return false
 	}

@@ -18,8 +18,8 @@ import (
 	"os"
 	"strings"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	engine "github.com/ducthinh993/anst-analyzer/plugins/go-reachability/internal/engine"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	engine "github.com/commit0-dev/commit0-analyzer/plugins/go-reachability/internal/engine"
 )
 
 func main() {
@@ -49,7 +49,7 @@ func run() error {
 	}
 
 	// Build advisory list.
-	var advisories []*anstv1.Advisory
+	var advisories []*commit0v1.Advisory
 	if *advJSON != "" {
 		data, err := os.ReadFile(*advJSON)
 		if err != nil {
@@ -59,13 +59,13 @@ func run() error {
 			return fmt.Errorf("parse advisories: %w", err)
 		}
 	} else if *advID != "" {
-		adv := &anstv1.Advisory{
+		adv := &commit0v1.Advisory{
 			Id:          *advID,
 			Module:      *advModule,
 			SymbolLevel: *advSym != "",
 		}
 		if *advPkg != "" && *advSym != "" {
-			adv.Symbols = []*anstv1.Symbol{{
+			adv.Symbols = []*commit0v1.Symbol{{
 				Package: *advPkg,
 				Name:    *advSym,
 			}}
@@ -74,9 +74,9 @@ func run() error {
 	}
 
 	// Build request.
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: *moduleRoot,
-		BuildConfig: &anstv1.BuildConfig{
+		BuildConfig: &commit0v1.BuildConfig{
 			Goos:   *goos,
 			Goarch: *goarch,
 		},

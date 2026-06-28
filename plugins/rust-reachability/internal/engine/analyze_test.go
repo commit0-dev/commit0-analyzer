@@ -3,9 +3,9 @@ package engine_test
 import (
 	"testing"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/cargo"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/engine"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/cargo"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/engine"
 )
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -26,16 +26,16 @@ func simpleManifest(normalCrates ...string) *cargo.Manifest {
 }
 
 // advisory builds a minimal Advisory proto for test use.
-func advisory(id, module string) *anstv1.Advisory {
-	return &anstv1.Advisory{
+func advisory(id, module string) *commit0v1.Advisory {
+	return &commit0v1.Advisory{
 		Id:     id,
 		Module: module,
 	}
 }
 
 // advisoryWithSymbols builds an Advisory that carries symbol-level data.
-func advisoryWithSymbols(id, module string, syms ...*anstv1.Symbol) *anstv1.Advisory {
-	return &anstv1.Advisory{
+func advisoryWithSymbols(id, module string, syms ...*commit0v1.Symbol) *commit0v1.Advisory {
+	return &commit0v1.Advisory{
 		Id:          id,
 		Module:      module,
 		SymbolLevel: true,
@@ -43,12 +43,12 @@ func advisoryWithSymbols(id, module string, syms ...*anstv1.Symbol) *anstv1.Advi
 	}
 }
 
-func sym(pkg, name string) *anstv1.Symbol {
-	return &anstv1.Symbol{Package: pkg, Name: name}
+func sym(pkg, name string) *commit0v1.Symbol {
+	return &commit0v1.Symbol{Package: pkg, Name: name}
 }
 
 // findingByAdvisoryID returns the first finding whose advisory ID matches.
-func findingByAdvisoryID(findings []*anstv1.Finding, id string) *anstv1.Finding {
+func findingByAdvisoryID(findings []*commit0v1.Finding, id string) *commit0v1.Finding {
 	for _, f := range findings {
 		if f.GetAdvisory().GetId() == id {
 			return f
@@ -65,14 +65,14 @@ func TestAnalyze_CrateAbsent(t *testing.T) {
 	m := simpleManifest("serde") // only serde; "time" is absent
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-001", "time")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-001", "time")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_NOT_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE {
 		t.Errorf("absent crate: want NOT_REACHABLE, got %v", f.Confidence)
 	}
 	// Incomplete must NOT be set for a clean graph proof.
@@ -86,14 +86,14 @@ func TestAnalyze_CratePresent(t *testing.T) {
 	m := simpleManifest("time")
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-001", "time")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-001", "time")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("present crate: want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 }
@@ -108,7 +108,7 @@ func TestAnalyze_ClosureUnknown_AllDegrade(t *testing.T) {
 		ClosureUnknown: true,
 		ClosureError:   "cargo metadata timed out",
 	}
-	advisories := []*anstv1.Advisory{
+	advisories := []*commit0v1.Advisory{
 		advisory("RUSTSEC-001", "time"),
 		advisory("RUSTSEC-002", "openssl"),
 	}
@@ -119,7 +119,7 @@ func TestAnalyze_ClosureUnknown_AllDegrade(t *testing.T) {
 		t.Fatalf("want 2 findings, got %d", len(findings))
 	}
 	for _, f := range findings {
-		if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+		if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 			t.Errorf("advisory %s: want UNKNOWN on ClosureUnknown, got %v",
 				f.GetAdvisory().GetId(), f.Confidence)
 		}
@@ -135,14 +135,14 @@ func TestAnalyze_ClosureUnknown_AllDegrade(t *testing.T) {
 func TestAnalyze_NilManifest_AllDegrade(t *testing.T) {
 	a := &engine.Analyzer{
 		Manifest:   nil,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-001", "time")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-001", "time")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("nil manifest: want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -166,14 +166,14 @@ func TestAnalyze_DevOnlyDep(t *testing.T) {
 	}
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-010", "dev-tools")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-010", "dev-tools")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("dev-only dep: want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 	if f.GetProperties()["dev_only"] != "true" {
@@ -197,14 +197,14 @@ func TestAnalyze_BothNormalAndDev(t *testing.T) {
 	}
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-020", "serde")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-020", "serde")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("both-normal-and-dev: want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 	if f.GetProperties()["dev_only"] == "true" {
@@ -223,13 +223,13 @@ func TestAnalyze_ProcMacroCrate_UNKNOWN(t *testing.T) {
 		sym("tokio::runtime", "spawn"), // tokio::runtime::spawn is a macro-generated fn
 	)
 	// isUnknown triggers because "tokio" is a known proc-macro crate.
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("proc-macro crate: want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -245,13 +245,13 @@ func TestAnalyze_ProcMacroSymbolDoubleUnderscore_UNKNOWN(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-031", "mylib",
 		sym("mylib", "__impl_MyTrait_for_Foo"),
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("double-underscore symbol: want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -269,13 +269,13 @@ func TestAnalyze_TraitMethodInSymbolName_UNKNOWN(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-040", "mylib",
 		sym("mylib", "Write::write_all"), // contains "::" → trait method
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("trait method in name: want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -291,13 +291,13 @@ func TestAnalyze_TraitObjectPackageUppercase_UNKNOWN(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-041", "std",
 		sym("std::io::Write", "write_all"), // package "Write" + method "write_all"
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("trait-object package: want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -324,13 +324,13 @@ func TestAnalyze_BuildRsDep_SymbolLevel_UNKNOWN(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-050", "cc",
 		sym("cc", "build"),
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("build.rs dep (symbol-level): want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -353,13 +353,13 @@ func TestAnalyze_BuildRsDep_PackageLevel_PACKAGE_REACHABLE(t *testing.T) {
 	}
 	// No SymbolLevel set — package-level advisory.
 	adv := advisory("RUSTSEC-051", "cc")
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("build.rs dep (package-level): want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 }
@@ -376,13 +376,13 @@ func TestAnalyze_SymbolHint_RecordedInProperties(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-060", "time",
 		sym("time", "at"),
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("symbol hint: want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 	hint := f.GetProperties()["symbol_hint"]
@@ -403,13 +403,13 @@ func TestAnalyze_SymbolHintNameOnly_NoPackage(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-061", "time",
 		sym("", "at"), // no package prefix
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("symbol hint (no package): want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 	hint := f.GetProperties()["symbol_hint"]
@@ -426,7 +426,7 @@ func TestAnalyze_FindingLanguageAndEcosystem(t *testing.T) {
 	m := simpleManifest("serde")
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-070", "serde")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-070", "serde")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
@@ -436,7 +436,7 @@ func TestAnalyze_FindingLanguageAndEcosystem(t *testing.T) {
 	if f.Language != "rust" {
 		t.Errorf("language: got %q, want %q", f.Language, "rust")
 	}
-	if f.Ecosystem != anstv1.Ecosystem_ECOSYSTEM_CRATES_IO {
+	if f.Ecosystem != commit0v1.Ecosystem_ECOSYSTEM_CRATES_IO {
 		t.Errorf("ecosystem: got %v, want ECOSYSTEM_CRATES_IO", f.Ecosystem)
 	}
 }
@@ -447,7 +447,7 @@ func TestAnalyze_FindingAdvisoryIDPreserved(t *testing.T) {
 	m := simpleManifest("serde")
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-2024-0099", "serde")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-2024-0099", "serde")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
@@ -473,7 +473,7 @@ func TestAnalyze_MultipleAdvisories_MixedResults(t *testing.T) {
 		},
 	}
 
-	advisories := []*anstv1.Advisory{
+	advisories := []*commit0v1.Advisory{
 		advisory("ADV-001", "serde"),   // present → PACKAGE_REACHABLE
 		advisory("ADV-002", "time"),    // present → PACKAGE_REACHABLE
 		advisory("ADV-003", "openssl"), // absent  → NOT_REACHABLE
@@ -488,11 +488,11 @@ func TestAnalyze_MultipleAdvisories_MixedResults(t *testing.T) {
 
 	cases := []struct {
 		id   string
-		want anstv1.Confidence
+		want commit0v1.Confidence
 	}{
-		{"ADV-001", anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE},
-		{"ADV-002", anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE},
-		{"ADV-003", anstv1.Confidence_CONFIDENCE_NOT_REACHABLE},
+		{"ADV-001", commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE},
+		{"ADV-002", commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE},
+		{"ADV-003", commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE},
 	}
 	for _, tc := range cases {
 		f := findingByAdvisoryID(findings, tc.id)
@@ -519,14 +519,14 @@ func TestAnalyze_UnknownAlwaysSurfaced(t *testing.T) {
 	}
 	a := &engine.Analyzer{
 		Manifest:   m,
-		Advisories: []*anstv1.Advisory{advisory("RUSTSEC-099", "time")},
+		Advisories: []*commit0v1.Advisory{advisory("RUSTSEC-099", "time")},
 	}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Fatalf("want UNKNOWN, got %v", f.Confidence)
 	}
 	if f.GetProperties()["reason"] == "" {
@@ -548,7 +548,7 @@ func TestAnalyze_NOT_REACHABLE_NeverOnPartialGraph(t *testing.T) {
 	}
 	a := &engine.Analyzer{
 		Manifest: m,
-		Advisories: []*anstv1.Advisory{
+		Advisories: []*commit0v1.Advisory{
 			advisory("RUSTSEC-100", "phantom-crate"),
 		},
 	}
@@ -557,10 +557,10 @@ func TestAnalyze_NOT_REACHABLE_NeverOnPartialGraph(t *testing.T) {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence == anstv1.Confidence_CONFIDENCE_NOT_REACHABLE {
+	if f.Confidence == commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE {
 		t.Error("partial graph: MUST NOT emit NOT_REACHABLE; want UNKNOWN")
 	}
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("partial graph: want UNKNOWN, got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -588,13 +588,13 @@ func TestAnalyze_SerdeDeriveSymbol_UNKNOWN(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-110", "serde_derive",
 		sym("serde_derive", "impl_serialize"),
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
 	}
 	f := findings[0]
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Errorf("serde_derive: want UNKNOWN (proc-macro crate), got %v", f.Confidence)
 	}
 	if !f.Incomplete {
@@ -615,7 +615,7 @@ func TestAnalyze_FreeFunctionSymbol_NoUnknown(t *testing.T) {
 	// lowercase → isTraitObjectSymbol returns true. This is a conservative
 	// heuristic (prefer UNKNOWN over false NOT_REACHABLE).
 	// Test documents the actual behavior: UNKNOWN due to uppercase package segment.
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
@@ -624,7 +624,7 @@ func TestAnalyze_FreeFunctionSymbol_NoUnknown(t *testing.T) {
 	// Document: uppercase package segment + lowercase name → UNKNOWN (conservative).
 	// This is intentional: we prefer UNKNOWN over a false PACKAGE_REACHABLE on an
 	// ambiguous trait-object-like pattern.
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_UNKNOWN {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 		t.Logf("NOTE: confidence=%v (UNKNOWN expected due to uppercase package segment heuristic)",
 			f.Confidence)
 	}
@@ -639,7 +639,7 @@ func TestAnalyze_PlainFreeFunction_NoUppercasePackage(t *testing.T) {
 	adv := advisoryWithSymbols("RUSTSEC-121", "time",
 		sym("time", "at"),
 	)
-	a := &engine.Analyzer{Manifest: m, Advisories: []*anstv1.Advisory{adv}}
+	a := &engine.Analyzer{Manifest: m, Advisories: []*commit0v1.Advisory{adv}}
 	findings := a.Analyze()
 	if len(findings) != 1 {
 		t.Fatalf("want 1 finding, got %d", len(findings))
@@ -647,7 +647,7 @@ func TestAnalyze_PlainFreeFunction_NoUppercasePackage(t *testing.T) {
 	f := findings[0]
 	// "time::at" — package last segment "time" (lowercase), name "at" (lowercase).
 	// Should be PACKAGE_REACHABLE: no proc-macro indicator, no trait method indicator.
-	if f.Confidence != anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
+	if f.Confidence != commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE {
 		t.Errorf("plain free function: want PACKAGE_REACHABLE, got %v", f.Confidence)
 	}
 }

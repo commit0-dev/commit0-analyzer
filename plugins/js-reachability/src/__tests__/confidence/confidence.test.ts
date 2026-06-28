@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { assignConfidence } from "../../confidence.js";
-import { Confidence } from "../../gen/anst/v1/plugin.js";
+import { Confidence } from "../../gen/commit0/v1/plugin.js";
 
 // ── parse/type/resolve error → UNKNOWN ───────────────────────────────────────
 

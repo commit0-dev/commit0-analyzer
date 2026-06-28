@@ -63,7 +63,7 @@ func TestManifest_DualArtifact_BothMatch(t *testing.T) {
 	mainContent := []byte("#!/bin/true\njs-plugin-main\n")
 	sidecarContent := []byte("\x7fELF napi-sidecar-content\n")
 
-	mainBin := writeTempFile(t, dir, "anst-js-reachability", mainContent)
+	mainBin := writeTempFile(t, dir, "commit0-js-reachability", mainContent)
 	sidecarPath := writeTempFile(t, dir, "parser.darwin-arm64.node", sidecarContent)
 
 	mainHash, err := SHA256OfFile(mainBin)
@@ -87,7 +87,7 @@ func TestManifest_DualArtifact_BothMatch(t *testing.T) {
 // binary hash is correct.
 func TestManifest_DualArtifact_TamperedSidecarRejected(t *testing.T) {
 	dir := t.TempDir()
-	mainBin := writeTempFile(t, dir, "anst-js-reachability", []byte("main-binary-content"))
+	mainBin := writeTempFile(t, dir, "commit0-js-reachability", []byte("main-binary-content"))
 	sidecarPath := writeTempFile(t, dir, "parser.darwin-arm64.node", []byte("original-sidecar"))
 
 	mainHash, err := SHA256OfFile(mainBin)
@@ -113,7 +113,7 @@ func TestManifest_DualArtifact_TamperedSidecarRejected(t *testing.T) {
 // primary binary is still caught even when the sidecar is intact.
 func TestManifest_DualArtifact_TamperedMainRejected(t *testing.T) {
 	dir := t.TempDir()
-	mainBin := writeTempFile(t, dir, "anst-js-reachability", []byte("original-main-content"))
+	mainBin := writeTempFile(t, dir, "commit0-js-reachability", []byte("original-main-content"))
 	sidecarPath := writeTempFile(t, dir, "parser.darwin-arm64.node", []byte("sidecar-content"))
 
 	mainHash, err := SHA256OfFile(mainBin)
@@ -139,7 +139,7 @@ func TestManifest_DualArtifact_TamperedMainRejected(t *testing.T) {
 // SHA256 on the primary skips all hash verification (including additional artifacts).
 func TestManifest_EmptySHA256_Skips(t *testing.T) {
 	dir := t.TempDir()
-	mainBin := writeTempFile(t, dir, "anst-js-reachability", []byte("any-content"))
+	mainBin := writeTempFile(t, dir, "commit0-js-reachability", []byte("any-content"))
 	sidecarPath := writeTempFile(t, dir, "parser.node", []byte("any-sidecar"))
 
 	m := &Manifest{

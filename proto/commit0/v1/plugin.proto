@@ -1,4 +1,4 @@
-// Package anst.v1 defines the versioned gRPC plugin contract for anst-analyzer.
+// Package commit0.v1 defines the versioned gRPC plugin contract for commit0-analyzer.
 //
 // # Version and Compatibility Policy
 //
@@ -34,9 +34,9 @@
 // findings arriving in any order.
 syntax = "proto3";
 
-package anst.v1;
+package commit0.v1;
 
-option go_package = "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1";
+option go_package = "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -330,7 +330,7 @@ message MetadataResponse {
 
 // ─── Analyzer Service ────────────────────────────────────────────────────────
 
-// Analyzer is the gRPC service every anst-analyzer plugin must implement.
+// Analyzer is the gRPC service every commit0-analyzer plugin must implement.
 //
 // Transport: subprocess + gRPC over stdio (hashicorp/go-plugin pattern).
 // The host launches the plugin as a child process and communicates over its

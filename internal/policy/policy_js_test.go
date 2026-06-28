@@ -5,22 +5,22 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
-	"github.com/ducthinh993/anst-analyzer/internal/policy"
+	"github.com/commit0-dev/commit0-analyzer/internal/policy"
 )
 
 // ── JS Finding helpers ────────────────────────────────────────────────────────
 
 // makeJSPackageReachable returns a PACKAGE_REACHABLE HIGH JS finding.
-func makeJSPackageReachable() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func makeJSPackageReachable() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id: "GHSA-h9rv-jmmf-4pgx",
 		},
 		Module:     "serialize-javascript",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{
 			"algorithm": "conservative-flow",
 			"language":  "js",
@@ -31,14 +31,14 @@ func makeJSPackageReachable() *anstv1.Finding {
 }
 
 // makeJSNotReachable returns a NOT_REACHABLE HIGH JS finding.
-func makeJSNotReachable() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func makeJSNotReachable() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id: "GHSA-lodash-not-imported",
 		},
 		Module:     "lodash",
-		Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{"language": "js"},
 		Language:   "js",
 		Pillar:     "sca",
@@ -46,14 +46,14 @@ func makeJSNotReachable() *anstv1.Finding {
 }
 
 // makeJSUnknown returns an UNKNOWN HIGH JS finding (dynamic-require path).
-func makeJSUnknown() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func makeJSUnknown() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id: "GHSA-dyn-require-001",
 		},
 		Module:     "some-package",
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{"language": "js"},
 		Language:   "js",
 		Pillar:     "sca",
@@ -62,14 +62,14 @@ func makeJSUnknown() *anstv1.Finding {
 
 // makeJSPhantomReachable returns a PACKAGE_REACHABLE CRITICAL JS finding for a
 // phantom (undeclared) dependency.
-func makeJSPhantomReachable() *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func makeJSPhantomReachable() *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id: "GHSA-phantom-dep-001",
 		},
 		Module:     "hoisted-phantom",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_CRITICAL,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_CRITICAL,
 		Properties: map[string]string{
 			"language": "js",
 			"phantom":  "true",
@@ -89,7 +89,7 @@ func TestPolicy_JS_PackageReachable_TripsGate(t *testing.T) {
 		ReachableOnly: false,
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{makeJSPackageReachable()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSPackageReachable()})
 	assert.Equal(t, policy.ExitGateFailure, code,
 		"PACKAGE_REACHABLE HIGH JS finding must trip the gate (exit 1)")
 }
@@ -102,7 +102,7 @@ func TestPolicy_JS_NotReachable_ReachableOnly_DoesNotTrip(t *testing.T) {
 		ReachableOnly: true,
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{makeJSNotReachable()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSNotReachable()})
 	assert.Equal(t, policy.ExitPass, code,
 		"NOT_REACHABLE JS finding must pass under reachable-only gate (exit 0)")
 }
@@ -116,7 +116,7 @@ func TestPolicy_JS_UNKNOWN_IsGateEligible(t *testing.T) {
 		ReachableOnly: true,
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{makeJSUnknown()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSUnknown()})
 	assert.Equal(t, policy.ExitGateFailure, code,
 		"UNKNOWN JS finding must be gate-eligible under reachable-only (unknown ≠ safe)")
 }
@@ -130,7 +130,7 @@ func TestPolicy_JS_UNKNOWN_IsGateEligible_WithoutReachableOnly(t *testing.T) {
 		ReachableOnly: false,
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{makeJSUnknown()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSUnknown()})
 	assert.Equal(t, policy.ExitGateFailure, code,
 		"UNKNOWN JS finding must gate with reachable-only=false")
 }
@@ -145,7 +145,7 @@ func TestPolicy_JS_PhantomReachable_Gates(t *testing.T) {
 		ReachableOnly: true,
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{makeJSPhantomReachable()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSPhantomReachable()})
 	assert.Equal(t, policy.ExitGateFailure, code,
 		"reachable phantom-dep CRITICAL JS finding must gate the build (exit 1)")
 }
@@ -160,17 +160,17 @@ func TestPolicy_JS_PhantomReachable_Gates_ReachableOnly(t *testing.T) {
 	}
 
 	// Use a HIGH severity phantom to match the "high" threshold.
-	phantomHigh := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: "GHSA-phantom-high-001"},
+	phantomHigh := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: "GHSA-phantom-high-001"},
 		Module:     "hoisted-phantom-high",
-		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{"language": "js", "phantom": "true"},
 		Language:   "js",
 		Pillar:     "sca",
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{phantomHigh})
+	code := p.Evaluate([]*commit0v1.Finding{phantomHigh})
 	assert.Equal(t, policy.ExitGateFailure, code,
 		"phantom PACKAGE_REACHABLE HIGH JS finding must gate under reachable-only (exit 1)")
 }
@@ -185,7 +185,7 @@ func TestPolicy_JS_IncompleteScan_ExitsThree(t *testing.T) {
 	}
 
 	// Even when there are zero findings, incomplete must exit 3.
-	code := p.EvaluateWithFlags([]*anstv1.Finding{}, policy.EvalFlags{Incomplete: true})
+	code := p.EvaluateWithFlags([]*commit0v1.Finding{}, policy.EvalFlags{Incomplete: true})
 	assert.Equal(t, policy.ExitOperationalError, code,
 		"incomplete JS scan must exit 3 (fail-closed), never 0")
 }
@@ -201,7 +201,7 @@ func TestPolicy_JS_IncompleteScan_WithFindings_ExitsThree(t *testing.T) {
 
 	// PACKAGE_REACHABLE HIGH would normally exit 1, but incomplete overrides to 3.
 	code := p.EvaluateWithFlags(
-		[]*anstv1.Finding{makeJSPackageReachable()},
+		[]*commit0v1.Finding{makeJSPackageReachable()},
 		policy.EvalFlags{Incomplete: true},
 	)
 	assert.Equal(t, policy.ExitOperationalError, code,
@@ -224,7 +224,7 @@ func TestPolicy_JS_BoundedIgnore_SuppressesJSFinding(t *testing.T) {
 		t.Fatalf("LoadPolicy: %v", err)
 	}
 
-	code := p.Evaluate([]*anstv1.Finding{makeJSPackageReachable()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSPackageReachable()})
 	assert.Equal(t, policy.ExitPass, code,
 		"bounded ignore matching advisory-id+module must suppress JS finding from gate")
 }
@@ -238,7 +238,7 @@ func TestPolicy_JS_SeverityThreshold_BelowThreshold_Passes(t *testing.T) {
 	}
 
 	// HIGH finding below critical threshold.
-	code := p.Evaluate([]*anstv1.Finding{makeJSPackageReachable()})
+	code := p.Evaluate([]*commit0v1.Finding{makeJSPackageReachable()})
 	assert.Equal(t, policy.ExitPass, code,
 		"HIGH JS finding below critical threshold must not trip the gate")
 }
@@ -250,14 +250,14 @@ func TestPolicy_JS_MixedFindings_ReachableOnlyGating(t *testing.T) {
 	// Only NOT_REACHABLE: must pass.
 	t.Run("only_not_reachable_passes", func(t *testing.T) {
 		p := &policy.Policy{FailOn: "high", ReachableOnly: true}
-		code := p.Evaluate([]*anstv1.Finding{makeJSNotReachable()})
+		code := p.Evaluate([]*commit0v1.Finding{makeJSNotReachable()})
 		assert.Equal(t, policy.ExitPass, code)
 	})
 
 	// NOT_REACHABLE + PACKAGE_REACHABLE: must gate (one eligible finding).
 	t.Run("not_reachable_and_package_reachable_gates", func(t *testing.T) {
 		p := &policy.Policy{FailOn: "high", ReachableOnly: true}
-		code := p.Evaluate([]*anstv1.Finding{
+		code := p.Evaluate([]*commit0v1.Finding{
 			makeJSNotReachable(),
 			makeJSPackageReachable(),
 		})
@@ -268,7 +268,7 @@ func TestPolicy_JS_MixedFindings_ReachableOnlyGating(t *testing.T) {
 	// NOT_REACHABLE + UNKNOWN: must gate (UNKNOWN is gate-eligible).
 	t.Run("not_reachable_and_unknown_gates", func(t *testing.T) {
 		p := &policy.Policy{FailOn: "high", ReachableOnly: true}
-		code := p.Evaluate([]*anstv1.Finding{
+		code := p.Evaluate([]*commit0v1.Finding{
 			makeJSNotReachable(),
 			makeJSUnknown(),
 		})

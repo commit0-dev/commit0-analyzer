@@ -218,7 +218,7 @@ func TestJSScan_ReachableVuln_MonorepoDogfood(t *testing.T) {
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -276,7 +276,7 @@ func TestJSScan_MonorepoDogfood_PerWorkspaceAttribution(t *testing.T) {
 	// SARIF suppresses NOT_REACHABLE findings per spec; JSON includes them all.
 	stdout, stderr, _ := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -363,7 +363,7 @@ func TestJSScan_MonorepoDogfood_DeterministicOutput(t *testing.T) {
 		disableGoTelemetry(cacheDir)
 		stdout, _, _ := runScanBinaryWithEnv(t,
 			[]string{
-				"ANST_OSV_DB_URL=" + srv.URL,
+				"COMMIT0_OSV_DB_URL=" + srv.URL,
 				"HOME=" + cacheDir,
 				"XDG_CACHE_HOME=" + cacheDir,
 			},
@@ -467,8 +467,8 @@ func TestScan_Polyglot_BothPlugins_MergedDeterministicOutput(t *testing.T) {
 		disableGoTelemetry(cacheDir)
 		stdout, stderr, code := runScanBinaryWithEnv(t,
 			[]string{
-				"ANST_VULN_DB_URL=" + goSrv.URL,
-				"ANST_OSV_DB_URL=" + osvSrv.URL,
+				"COMMIT0_VULN_DB_URL=" + goSrv.URL,
+				"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 				"HOME=" + cacheDir,
 				"XDG_CACHE_HOME=" + cacheDir,
 			},
@@ -574,7 +574,7 @@ func TestJSScan_PolicyGate_SARIF_ContainsFindings(t *testing.T) {
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},

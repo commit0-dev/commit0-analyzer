@@ -17,4 +17,4 @@ coverage/
 *.pem
 
 # src/gen/ is deliberately NOT listed here — generated stubs are committed
-# (parity with Go's committed pkg/contract/anstv1/*.pb.go stubs).
+# (parity with Go's committed pkg/contract/commit0v1/*.pb.go stubs).

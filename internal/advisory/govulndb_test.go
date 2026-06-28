@@ -866,7 +866,7 @@ func TestParseOSVRecord_SeverityParity(t *testing.T) {
 	}
 }
 
-// TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
+// TestToProto verifies that an internal Advisory converts cleanly to *commit0v1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")
 	adv, err := parseOSVRecord(data, EcosystemGo)

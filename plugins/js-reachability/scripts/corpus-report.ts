@@ -20,8 +20,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { analyze } from "../src/engine/analyze.js";
-import { Confidence } from "../src/gen/anst/v1/plugin.js";
-import type { Finding } from "../src/gen/anst/v1/plugin.js";
+import { Confidence } from "../src/gen/commit0-analyzer/v1/plugin.js";
+import type { Finding } from "../src/gen/commit0-analyzer/v1/plugin.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

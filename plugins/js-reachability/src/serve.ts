@@ -6,7 +6,7 @@
  *
  *   1. grpc.health.v1.Health   — go-plugin Ping() calls Health/Check with service="plugin";
  *                                must return SERVING or the connection fails.
- *   2. anst.v1.Analyzer        — the actual plugin contract (Metadata + Analyze).
+ *   2. commit0.v1.Analyzer        — the actual plugin contract (Metadata + Analyze).
  *   3. plugin.GRPCController   — Shutdown(); without it Kill() waits the 2-second grace period.
  *   4. plugin.GRPCStdio        — StreamStdio no-op; without it go-plugin logs Unimplemented.
  *
@@ -28,8 +28,8 @@ import {
   type MetadataRequest,
   type MetadataResponse,
   type AnalyzeRequest,
-} from "./gen/anst/v1/plugin.js";
-import type { Finding } from "./gen/anst/v1/plugin.js";
+} from "./gen/commit0/v1/plugin.js";
+import type { Finding } from "./gen/commit0/v1/plugin.js";
 import { analyze } from "./engine/analyze.js";
 
 // Proto file contents are embedded at compile time so the binary is fully
@@ -64,7 +64,7 @@ const analyzerImpl: AnalyzerServer = {
       name: PLUGIN_NAME,
       version: PLUGIN_VERSION,
       protocolVersion: PROTOCOL_VERSION,
-      description: "JS/TS SCA reachability analyzer for anst-analyzer",
+      description: "JS/TS SCA reachability analyzer for commit0-analyzer",
       supportedLanguages: ["js", "ts"],
     });
   },
@@ -126,7 +126,7 @@ function protoDir(): string {
   }
 
   // Compiled binary mode: write embedded proto content to a temp directory.
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "anst-proto-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "commit0-analyzer-proto-"));
 
   // Create the google/protobuf/ subdirectory for the empty.proto import.
   const googleProtobufDir = path.join(tmpDir, "google", "protobuf");
@@ -161,7 +161,7 @@ function loadProto(filename: string): grpc.GrpcObject {
  * Returns the server for chaining.
  */
 export function registerServices(server: grpc.Server): grpc.Server {
-  // 1. anst.v1.Analyzer (generated stubs used directly for type safety)
+  // 1. commit0.v1.Analyzer (generated stubs used directly for type safety)
   server.addService(AnalyzerService, analyzerImpl as unknown as grpc.UntypedServiceImplementation);
 
   // 2. grpc.health.v1.Health

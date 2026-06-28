@@ -9,16 +9,16 @@ import (
 func TestEnabled(t *testing.T) {
 	cases := map[string]bool{"1": true, "true": true, "YES": true, "0": false, "": false, "off": false}
 	for v, want := range cases {
-		t.Setenv("ANST_DEBUG", v)
-		t.Setenv("ANST_TELEMETRY", "")
+		t.Setenv("COMMIT0_DEBUG", v)
+		t.Setenv("COMMIT0_TELEMETRY", "")
 		if got := Enabled(); got != want {
-			t.Errorf("Enabled() with ANST_DEBUG=%q = %v, want %v", v, got, want)
+			t.Errorf("Enabled() with COMMIT0_DEBUG=%q = %v, want %v", v, got, want)
 		}
 	}
 }
 
 func TestSpan_WritesWhenEnabled(t *testing.T) {
-	t.Setenv("ANST_DEBUG", "1")
+	t.Setenv("COMMIT0_DEBUG", "1")
 	var buf bytes.Buffer
 	old := out
 	out = &buf
@@ -33,8 +33,8 @@ func TestSpan_WritesWhenEnabled(t *testing.T) {
 }
 
 func TestSpan_NoOpWhenDisabled(t *testing.T) {
-	t.Setenv("ANST_DEBUG", "")
-	t.Setenv("ANST_TELEMETRY", "")
+	t.Setenv("COMMIT0_DEBUG", "")
+	t.Setenv("COMMIT0_TELEMETRY", "")
 	var buf bytes.Buffer
 	old := out
 	out = &buf

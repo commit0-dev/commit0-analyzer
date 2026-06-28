@@ -1,6 +1,6 @@
 //go:build parity
 
-// This file is the live parity runner. It shells out to the built anst binary
+// This file is the live parity runner. It shells out to the built commit0-analyzer binary
 // and the external comparator binaries, so it is gated behind the `parity` build
 // tag to keep the default `go test` hermetic (no network, no external tools).
 //
@@ -25,12 +25,12 @@ import (
 
 // RunOptions configures a live parity run.
 type RunOptions struct {
-	// AnstBinary is the path to a pre-built anst binary under test.
-	AnstBinary string
+	// Commit0Binary is the path to a pre-built commit0-analyzer binary under test.
+	Commit0Binary string
 	// ResolvePath returns the local filesystem path for a corpus entry. The
 	// caller is responsible for checking out / locating each pinned repo.
 	ResolvePath func(CorpusEntry) (string, error)
-	// Source is the --source value passed to anst for the primary (full) scan
+	// Source is the --source value passed to commit0-analyzer for the primary (full) scan
 	// (default set when empty).
 	Source string
 	// BaselineSource is the 2-source baseline (Go-DB + OSV) used to measure the
@@ -39,8 +39,8 @@ type RunOptions struct {
 	// FullSource is the full source set the gain is measured against. Defaults to
 	// "go-vuln-db,osv,ghsa".
 	FullSource string
-	// Language optionally narrows anst to one ecosystem per corpus entry (keyed by
-	// CorpusEntry.Language). Empty means anst auto-detects.
+	// Language optionally narrows commit0-analyzer to one ecosystem per corpus entry (keyed by
+	// CorpusEntry.Language). Empty means commit0-analyzer auto-detects.
 	Language map[string]string
 	// Timeout bounds each external command.
 	Timeout time.Duration
@@ -48,11 +48,11 @@ type RunOptions struct {
 
 // Run executes the harness over the full corpus and returns a populated report.
 // It never claims parity for an absent comparator: missing binaries are recorded
-// in SkippedComparators. anst itself is required; an anst failure on an entry is
+// in SkippedComparators. commit0-analyzer itself is required; a commit0-analyzer failure on an entry is
 // surfaced as an assertion failure, never silently skipped.
 func Run(ctx context.Context, opts RunOptions) (*Report, error) {
-	if opts.AnstBinary == "" {
-		return nil, fmt.Errorf("parity: AnstBinary is required")
+	if opts.Commit0Binary == "" {
+		return nil, fmt.Errorf("parity: Commit0Binary is required")
 	}
 	if opts.ResolvePath == nil {
 		return nil, fmt.Errorf("parity: ResolvePath is required")
@@ -67,7 +67,7 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 		opts.FullSource = "go-vuln-db,osv,ghsa"
 	}
 
-	rep := &Report{GeneratedFrom: fmt.Sprintf("anst=%s corpus=%d baseline=%q full=%q", filepath.Base(opts.AnstBinary), len(Corpus()), opts.BaselineSource, opts.FullSource)}
+	rep := &Report{GeneratedFrom: fmt.Sprintf("commit0-analyzer=%s corpus=%d baseline=%q full=%q", filepath.Base(opts.Commit0Binary), len(Corpus()), opts.BaselineSource, opts.FullSource)}
 	skipped := map[string]string{}
 
 	for _, entry := range Corpus() {
@@ -83,19 +83,19 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 
 		lang := opts.Language[entry.Language]
 
-		anstOut, anstCode, err := runAnst(ctx, opts, path, opts.FullSource, lang, false)
+		commit0Out, commit0Code, err := runCommit0(ctx, opts, path, opts.FullSource, lang, false)
 		if err != nil {
 			rep.Assertions = append(rep.Assertions, Assertion{
-				Name:   "anst-scan/" + entry.Name,
+				Name:   "commit0-analyzer-scan/" + entry.Name,
 				Passed: false,
-				Detail: fmt.Sprintf("anst scan failed (exit %d): %v", anstCode, err),
+				Detail: fmt.Sprintf("commit0-analyzer scan failed (exit %d): %v", commit0Code, err),
 			})
 			continue
 		}
-		anstFindings, perr := ParseAnst(anstOut)
+		commit0Findings, perr := ParseCommit0(commit0Out)
 		if perr != nil {
 			rep.Assertions = append(rep.Assertions, Assertion{
-				Name:   "anst-parse/" + entry.Name,
+				Name:   "commit0-analyzer-parse/" + entry.Name,
 				Passed: false,
 				Detail: perr.Error(),
 			})
@@ -103,24 +103,24 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 		}
 
 		// Coverage gain: measure the full source set against the 2-source baseline.
-		baseOut, _, baseErr := runAnst(ctx, opts, path, opts.BaselineSource, lang, false)
+		baseOut, _, baseErr := runCommit0(ctx, opts, path, opts.BaselineSource, lang, false)
 		if baseErr == nil {
-			if baseFindings, bperr := ParseAnst(baseOut); bperr == nil {
+			if baseFindings, bperr := ParseCommit0(baseOut); bperr == nil {
 				rep.CoverageGains = append(rep.CoverageGains,
-					ComputeCoverageGain(entry.Name, opts.BaselineSource, opts.FullSource, baseFindings, anstFindings))
+					ComputeCoverageGain(entry.Name, opts.BaselineSource, opts.FullSource, baseFindings, commit0Findings))
 			}
 		}
 
 		// Determinism: a second identical run must be byte-identical.
-		anstOut2, _, _ := runAnst(ctx, opts, path, opts.FullSource, lang, false)
+		commit0Out2, _, _ := runCommit0(ctx, opts, path, opts.FullSource, lang, false)
 		rep.Assertions = append(rep.Assertions, Assertion{
 			Name:   "determinism/" + entry.Name,
-			Passed: Deterministic(anstOut, anstOut2),
+			Passed: Deterministic(commit0Out, commit0Out2),
 			Detail: "two identical runs byte-compared",
 		})
 
 		// Fail-closed: an injected source failure must never exit 0.
-		_, failCode, _ := runAnst(ctx, opts, path, opts.FullSource, lang, true)
+		_, failCode, _ := runCommit0(ctx, opts, path, opts.FullSource, lang, true)
 		rep.Assertions = append(rep.Assertions, Assertion{
 			Name:   "fail-closed/" + entry.Name,
 			Passed: FailClosed(failCode),
@@ -130,16 +130,16 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 		// VEX flow: every COMPLETE, proven NOT_REACHABLE finding must surface as a
 		// not_affected VEX status — the empirical "known-unreachable CVE ⇒ VEX
 		// not_affected" non-negotiable.
-		vexOut, vexErr := runAnstVEX(ctx, opts, path, opts.FullSource, lang)
+		vexOut, vexErr := runCommit0VEX(ctx, opts, path, opts.FullSource, lang)
 		switch {
 		case vexErr != nil:
 			rep.Assertions = append(rep.Assertions, Assertion{
 				Name:   "vex-not-affected/" + entry.Name,
 				Passed: false,
-				Detail: "anst --vex run failed: " + vexErr.Error(),
+				Detail: "commit0-analyzer --vex run failed: " + vexErr.Error(),
 			})
 		default:
-			statuses, perr := ParseAnstVEX(vexOut)
+			statuses, perr := ParseCommit0VEX(vexOut)
 			if perr != nil {
 				rep.Assertions = append(rep.Assertions, Assertion{
 					Name:   "vex-not-affected/" + entry.Name,
@@ -147,7 +147,7 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 					Detail: perr.Error(),
 				})
 			} else {
-				ok, detail := VEXForUnreachable(anstFindings, statuses)
+				ok, detail := VEXForUnreachable(commit0Findings, statuses)
 				rep.Assertions = append(rep.Assertions, Assertion{
 					Name:   "vex-not-affected/" + entry.Name,
 					Passed: ok,
@@ -160,7 +160,7 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 		// carry the KEV flag and the top fused-risk band — the empirical "known-KEV
 		// dependency ⇒ KEV flag + top risk tier" non-negotiable.
 		if entry.KnownKEVID != "" {
-			ok, detail := KEVTopTier(anstFindings, entry.KnownKEVID)
+			ok, detail := KEVTopTier(commit0Findings, entry.KnownKEVID)
 			rep.Assertions = append(rep.Assertions, Assertion{
 				Name:   "kev-flag-top-tier/" + entry.Name,
 				Passed: ok,
@@ -182,7 +182,7 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 				// A comparator that is present but fails to run (incompatible CLI
 				// version, timeout, no targets) is recorded as a skip, NOT a
 				// soundness failure: parity against it simply was not measured. The
-				// non-negotiable assertions are reserved for anst's own invariants.
+				// non-negotiable assertions are reserved for commit0-analyzer's own invariants.
 				skipped[compName] = "could not run on " + entry.Name + ": " + rerr.Error()
 				continue
 			}
@@ -191,7 +191,7 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 				skipped[compName] = "output from " + entry.Name + " did not parse (version mismatch?): " + perr.Error()
 				continue
 			}
-			rep.Comparisons = append(rep.Comparisons, Compare(entry.Name, compName, anstFindings, others))
+			rep.Comparisons = append(rep.Comparisons, Compare(entry.Name, compName, commit0Findings, others))
 		}
 	}
 
@@ -202,12 +202,12 @@ func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 	return rep, nil
 }
 
-// runAnst runs the anst binary in JSON mode and returns its stdout + exit code.
+// runCommit0 runs the commit0-analyzer binary in JSON mode and returns its stdout + exit code.
 // The sources string selects the advisory --source set; language, when non-empty,
-// narrows anst to one ecosystem. When injectFailure is set, it points the OSV
+// narrows commit0-analyzer to one ecosystem. When injectFailure is set, it points the OSV
 // source at an unreachable endpoint and forces an update, so a source-fetch
 // failure is provoked deterministically.
-func runAnst(ctx context.Context, opts RunOptions, path, sources, language string, injectFailure bool) ([]byte, int, error) {
+func runCommit0(ctx context.Context, opts RunOptions, path, sources, language string, injectFailure bool) ([]byte, int, error) {
 	cctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 	args := []string{"scan", path, "--format", "json"}
@@ -217,15 +217,15 @@ func runAnst(ctx context.Context, opts RunOptions, path, sources, language strin
 	if language != "" {
 		args = append(args, "--language", language)
 	}
-	cmd := exec.CommandContext(cctx, opts.AnstBinary, args...)
+	cmd := exec.CommandContext(cctx, opts.Commit0Binary, args...)
 	cmd.Env = os.Environ()
 	if injectFailure {
 		// An unroutable URL + forced update makes the source fetch fail; the scan
 		// must then be incomplete (exit 3), never a silent clean exit 0.
 		cmd.Args = append(cmd.Args, "--update")
 		cmd.Env = append(cmd.Env,
-			"ANST_OSV_DB_URL=http://127.0.0.1:1/dead",
-			"ANST_VULN_DB_URL=http://127.0.0.1:1/dead",
+			"COMMIT0_OSV_DB_URL=http://127.0.0.1:1/dead",
+			"COMMIT0_VULN_DB_URL=http://127.0.0.1:1/dead",
 		)
 	}
 	var stdout bytes.Buffer
@@ -235,21 +235,21 @@ func runAnst(ctx context.Context, opts RunOptions, path, sources, language strin
 	code := exitCode(err)
 	// Exit 1/3 are expected policy outcomes, not invocation errors.
 	if err != nil && code == -1 {
-		return stdout.Bytes(), code, fmt.Errorf("run anst: %w", err)
+		return stdout.Bytes(), code, fmt.Errorf("run commit0-analyzer: %w", err)
 	}
 	return stdout.Bytes(), code, nil
 }
 
-// runAnstVEX runs the anst binary and captures its OpenVEX document. The VEX
+// runCommit0VEX runs the commit0-analyzer binary and captures its OpenVEX document. The VEX
 // output is written to a temp file (--vex-out) so it is never interleaved with the
 // JSON stdout, then read back. The full source set and the same ecosystem
 // narrowing as the primary scan are used so the VEX statuses correspond to the
 // findings cross-checked by VEXForUnreachable.
-func runAnstVEX(ctx context.Context, opts RunOptions, path, sources, language string) ([]byte, error) {
+func runCommit0VEX(ctx context.Context, opts RunOptions, path, sources, language string) ([]byte, error) {
 	cctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	tmp, err := os.CreateTemp("", "anst-vex-*.openvex.json")
+	tmp, err := os.CreateTemp("", "commit0-analyzer-vex-*.openvex.json")
 	if err != nil {
 		return nil, fmt.Errorf("create vex temp file: %w", err)
 	}
@@ -264,14 +264,14 @@ func runAnstVEX(ctx context.Context, opts RunOptions, path, sources, language st
 	if language != "" {
 		args = append(args, "--language", language)
 	}
-	cmd := exec.CommandContext(cctx, opts.AnstBinary, args...)
+	cmd := exec.CommandContext(cctx, opts.Commit0Binary, args...)
 	cmd.Env = os.Environ()
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	// Exit 1/3 are expected policy outcomes (findings / incomplete), not failures:
 	// the VEX document is still written. Only a non-process failure is fatal here.
 	if rerr := cmd.Run(); rerr != nil && exitCode(rerr) == -1 {
-		return nil, fmt.Errorf("run anst --vex: %w", rerr)
+		return nil, fmt.Errorf("run commit0-analyzer --vex: %w", rerr)
 	}
 	data, err := os.ReadFile(tmpName)
 	if err != nil {

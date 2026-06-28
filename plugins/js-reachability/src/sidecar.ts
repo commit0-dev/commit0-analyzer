@@ -7,7 +7,7 @@
  * The two-file distribution ships the oxc addon alongside the binary:
  *
  *   dist/
- *     anst-js-reachability          (the compiled binary)
+ *     commit0-js-reachability          (the compiled binary)
  *     oxc-binding/
  *       parser.<platform>-<arch>.node
  *

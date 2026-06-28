@@ -12,8 +12,8 @@
 
 import { buildCallGraph } from "../cg/build.js";
 import { resolveAdvisoryConfidence } from "./resolve-advisory.js";
-import type { ReachabilityPath } from "../gen/anst/v1/plugin.js";
-import { Confidence } from "../gen/anst/v1/plugin.js";
+import type { ReachabilityPath } from "../gen/commit0/v1/plugin.js";
+import { Confidence } from "../gen/commit0/v1/plugin.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

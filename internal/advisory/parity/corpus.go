@@ -21,12 +21,12 @@ type CorpusEntry struct {
 	Note string
 	// KnownKEVID, when set, is a vulnerability identifier (CVE/GHSA) this entry is
 	// known to contain that is listed in CISA's KEV catalog. The harness asserts
-	// the corresponding anst finding carries the KEV flag and the top risk tier
+	// the corresponding commit0-analyzer finding carries the KEV flag and the top risk tier
 	// (empirical non-negotiable). Empty means the entry has no KEV oracle.
 	KnownKEVID string
 }
 
-// Comparator is one external tool the harness measures anst against, pinned to a
+// Comparator is one external tool the harness measures commit0-analyzer against, pinned to a
 // version for reproducibility. JSONArgs produces machine-readable output on
 // stdout; the runner appends the scan target.
 type Comparator struct {
@@ -44,9 +44,9 @@ type Comparator struct {
 func Corpus() []CorpusEntry {
 	return []CorpusEntry{
 		{
-			Name:        "anst-analyzer",
+			Name:        "commit0-analyzer",
 			Language:    "go",
-			Repo:        "github.com/ducthinh993/anst-analyzer",
+			Repo:        "github.com/commit0-dev/commit0-analyzer",
 			Ref:         "faa7ed3a5e4527eb6a075741a7b744fb13c3191a",
 			Comparators: []string{ToolOSVScanner, ToolGovulncheck, ToolGrype, ToolTrivy},
 			Note:        "self-scan; Go reachability suppression vs govulncheck symbol parity",

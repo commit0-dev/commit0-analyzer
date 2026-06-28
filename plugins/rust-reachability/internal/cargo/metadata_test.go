@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/cargo"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/cargo"
 )
 
 // ─── ParseMetadataJSON ───────────────────────────────────────────────────────

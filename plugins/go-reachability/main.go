@@ -4,23 +4,23 @@ import (
 	"context"
 	"fmt"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	anstplugin "github.com/ducthinh993/anst-analyzer/pkg/plugin"
-	engine "github.com/ducthinh993/anst-analyzer/plugins/go-reachability/internal/engine"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	engine "github.com/commit0-dev/commit0-analyzer/plugins/go-reachability/internal/engine"
 )
 
-// grpcServer implements anstv1.AnalyzerServer by delegating to the engine.
+// grpcServer implements commit0v1.AnalyzerServer by delegating to the engine.
 type grpcServer struct {
-	anstv1.UnimplementedAnalyzerServer
+	commit0v1.UnimplementedAnalyzerServer
 	builder engine.GraphBuilder // nil → DefaultGraphBuilder (VTA)
 }
 
 // Metadata returns plugin identity and protocol version for the host handshake.
 func (s *grpcServer) Metadata(
 	_ context.Context,
-	_ *anstv1.MetadataRequest,
-) (*anstv1.MetadataResponse, error) {
-	return &anstv1.MetadataResponse{
+	_ *commit0v1.MetadataRequest,
+) (*commit0v1.MetadataResponse, error) {
+	return &commit0v1.MetadataResponse{
 		Name:               "go-reachability",
 		Version:            "0.1.0",
 		ProtocolVersion:    "0.1",
@@ -31,8 +31,8 @@ func (s *grpcServer) Metadata(
 
 // Analyze runs the reachability engine and streams findings to the host.
 func (s *grpcServer) Analyze(
-	req *anstv1.AnalyzeRequest,
-	stream anstv1.Analyzer_AnalyzeServer,
+	req *commit0v1.AnalyzeRequest,
+	stream commit0v1.Analyzer_AnalyzeServer,
 ) error {
 	findings, err := engine.Analyze(stream.Context(), req, s.builder)
 	if err != nil {
@@ -51,5 +51,5 @@ func (s *grpcServer) Analyze(
 // the go-plugin managed gRPC transport (stdio mux). This replaces the raw TCP
 // listener from Phase 4 so the host can drive the plugin through pkg/plugin.Serve.
 func main() {
-	anstplugin.Serve(&grpcServer{builder: nil})
+	commit0plugin.Serve(&grpcServer{builder: nil})
 }

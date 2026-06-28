@@ -31,8 +31,8 @@ describe("telemetry – disabled (no env var)", () => {
   let telemetry: typeof import("../telemetry.js");
 
   beforeEach(async () => {
-    delete process.env.ANST_DEBUG;
-    delete process.env.ANST_TELEMETRY;
+    delete process.env.COMMIT0_DEBUG;
+    delete process.env.COMMIT0_TELEMETRY;
     telemetry = await import(TELEMETRY);
     telemetry.reset();
   });
@@ -54,18 +54,18 @@ describe("telemetry – disabled (no env var)", () => {
   });
 });
 
-describe("telemetry – enabled via ANST_DEBUG=1", () => {
+describe("telemetry – enabled via COMMIT0_DEBUG=1", () => {
   let telemetry: typeof import("../telemetry.js");
 
   beforeEach(async () => {
-    process.env.ANST_DEBUG = "1";
-    delete process.env.ANST_TELEMETRY;
+    process.env.COMMIT0_DEBUG = "1";
+    delete process.env.COMMIT0_TELEMETRY;
     telemetry = await import(TELEMETRY);
     telemetry.reset();
   });
 
   afterEach(() => {
-    delete process.env.ANST_DEBUG;
+    delete process.env.COMMIT0_DEBUG;
     telemetry.reset();
   });
 

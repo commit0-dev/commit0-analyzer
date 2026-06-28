@@ -15,8 +15,8 @@
  *   - PACKAGE_REACHABLE requires symbolLevel==false and packageImported==true.
  */
 
-import { Confidence } from "./gen/anst/v1/plugin.js";
-import type { CallStep, ReachabilityPath } from "./gen/anst/v1/plugin.js";
+import { Confidence } from "./gen/commit0/v1/plugin.js";
+import type { CallStep, ReachabilityPath } from "./gen/commit0/v1/plugin.js";
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 

@@ -26,7 +26,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
 )
 
 // FileContent carries the post-fix content of a single source file.

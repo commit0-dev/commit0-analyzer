@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/internal/host"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/host"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // TestJSPlugin_CrashIsolation_SyntheticUnknown verifies that when the JS plugin
@@ -41,7 +41,7 @@ func TestJSPlugin_CrashIsolation_SyntheticUnknown(t *testing.T) {
 	}), "registry must accept testplugin manifest")
 
 	ctx := context.Background()
-	results, runErr := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, runErr := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 
@@ -79,7 +79,7 @@ func TestJSPlugin_CrashIsolation_WithRealBinary_TamperedLaunch(t *testing.T) {
 		t.Skip("cannot locate js-reachability dist directory; skipping")
 	}
 
-	mainBin := filepath.Join(distDir, "anst-js-reachability")
+	mainBin := filepath.Join(distDir, "commit0-js-reachability")
 	if _, err := os.Stat(mainBin); err != nil {
 		t.Skipf("js-reachability binary not built (run 'make build-js-plugin'): %v", err)
 	}
@@ -87,7 +87,7 @@ func TestJSPlugin_CrashIsolation_WithRealBinary_TamperedLaunch(t *testing.T) {
 	// Copy the real binary to a temp dir so we can corrupt it without affecting
 	// the real dist.
 	tmpDir := t.TempDir()
-	corruptBin := filepath.Join(tmpDir, "anst-js-reachability-corrupt")
+	corruptBin := filepath.Join(tmpDir, "commit0-js-reachability-corrupt")
 	data, err := os.ReadFile(mainBin)
 	require.NoError(t, err, "read real JS binary")
 	require.NotEmpty(t, data, "JS binary must not be empty")
@@ -109,7 +109,7 @@ func TestJSPlugin_CrashIsolation_WithRealBinary_TamperedLaunch(t *testing.T) {
 	require.NoError(t, reg.Add(m))
 
 	ctx := context.Background()
-	results, runErr := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, runErr := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 
@@ -163,7 +163,7 @@ func TestJSPlugin_CrashIsolation_PartialFindings_ViaTestPlugin(t *testing.T) {
 	}))
 
 	ctx := context.Background()
-	results, runErr := host.Run(ctx, reg, &anstv1.AnalyzeRequest{}, host.RunOptions{
+	results, runErr := host.Run(ctx, reg, &commit0v1.AnalyzeRequest{}, host.RunOptions{
 		LaunchOpts: host.LaunchOptions{SkipHashCheck: true},
 	})
 

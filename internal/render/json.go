@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strconv"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // jsonAdvisory is the stable JSON representation of an advisory reference.
@@ -85,9 +85,9 @@ type jsonProvenance struct {
 //   - Map keys inside Properties are emitted in sorted order by encoding/json.
 //   - All fields use fixed struct tag names; the schema is stable across versions.
 //   - nil input produces a valid empty JSON array ("[]").
-func ToJSON(findings []*anstv1.Finding) ([]byte, error) {
+func ToJSON(findings []*commit0v1.Finding) ([]byte, error) {
 	// Sort by advisory ID for deterministic output.
-	sorted := make([]*anstv1.Finding, len(findings))
+	sorted := make([]*commit0v1.Finding, len(findings))
 	copy(sorted, findings)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].GetAdvisory().GetId() < sorted[j].GetAdvisory().GetId()
@@ -104,7 +104,7 @@ func ToJSON(findings []*anstv1.Finding) ([]byte, error) {
 }
 
 // toJSONFinding converts a single proto Finding to the stable jsonFinding schema.
-func toJSONFinding(f *anstv1.Finding) jsonFinding {
+func toJSONFinding(f *commit0v1.Finding) jsonFinding {
 	adv := jsonAdvisory{}
 	if a := f.GetAdvisory(); a != nil {
 		adv.ID = a.GetId()

@@ -1,16 +1,16 @@
-// Package main implements the Go reachability analyzer plugin for anst-analyzer.
+// Package main implements the Go reachability analyzer plugin for commit0-analyzer.
 //
-// This plugin satisfies the [anstv1.AnalyzerServer] gRPC interface and is
+// This plugin satisfies the [commit0v1.AnalyzerServer] gRPC interface and is
 // launched as a child process by the plugin host (internal/host).
 //
 // Responsibilities:
-//   - Accept an [anstv1.AnalyzeRequest] containing a module root, entry points,
+//   - Accept an [commit0v1.AnalyzeRequest] containing a module root, entry points,
 //     build config, and pre-resolved advisories.
 //   - Build a call graph using go/packages + go/ssa + go/callgraph/vta (VTA on
 //     an initial CHA/RTA base graph), chosen for interface-dispatch precision.
 //   - For each advisory, walk the call graph from the configured entry points to
 //     determine reachability of vulnerable symbols.
-//   - Stream [anstv1.Finding] messages back, each with the appropriate
+//   - Stream [commit0v1.Finding] messages back, each with the appropriate
 //     Confidence tier (SYMBOL_REACHABLE > PACKAGE_REACHABLE > NOT_REACHABLE >
 //     UNKNOWN) and, where SYMBOL_REACHABLE, a populated ReachabilityPath.
 //

@@ -8,20 +8,20 @@ import (
 	"strings"
 )
 
-// ParseAnst parses anst-analyzer's native `--format json` output into normalized
+// ParseCommit0 parses commit0-analyzer's native `--format json` output into normalized
 // findings. The schema is the stable jsonFinding array emitted by
 // internal/render.ToJSON: each entry carries an advisory {id, aliases}, module,
 // confidence, severity, an optional language, and a flat properties map. The
 // confidence string is the proto enum (e.g. "CONFIDENCE_NOT_REACHABLE") which is
 // normalized to a reach* verdict.
 //
-// Incompleteness uses the REAL signal anst emits — confidence ==
+// Incompleteness uses the REAL signal commit0-analyzer emits — confidence ==
 // CONFIDENCE_UNKNOWN and/or properties["synthetic"] == "true" (the crashed/
-// timed-out plugin marker stamped by internal/host). anst never emits an
+// timed-out plugin marker stamped by internal/host). commit0-analyzer never emits an
 // "incomplete"/"ecosystem"/"version" property, so this parser must not depend on
 // any: doing so would read every finding as complete and let an incomplete
 // NOT_REACHABLE be laundered into a sound suppression.
-func ParseAnst(data []byte) ([]Finding, error) {
+func ParseCommit0(data []byte) ([]Finding, error) {
 	var raw []struct {
 		Advisory struct {
 			ID      string   `json:"id"`
@@ -33,13 +33,13 @@ func ParseAnst(data []byte) ([]Finding, error) {
 		Properties map[string]string `json:"properties"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse anst json: %w", err)
+		return nil, fmt.Errorf("parse commit0-analyzer json: %w", err)
 	}
 	out := make([]Finding, 0, len(raw))
 	for _, r := range raw {
 		reach := normalizeConfidence(r.Confidence)
 		out = append(out, Finding{
-			Tool:         ToolAnst,
+			Tool:         ToolCommit0,
 			VulnID:       r.Advisory.ID,
 			Aliases:      r.Advisory.Aliases,
 			Ecosystem:    r.Language,
@@ -53,13 +53,13 @@ func ParseAnst(data []byte) ([]Finding, error) {
 	return out, nil
 }
 
-// ParseAnstVEX parses anst's OpenVEX (`--vex openvex`) document into a map from
+// ParseCommit0VEX parses commit0-analyzer's OpenVEX (`--vex openvex`) document into a map from
 // normalized vulnerability identifier (the statement's name plus every alias) to
 // its VEX status string (e.g. "not_affected", "under_investigation", "affected").
 // Indexing aliases too lets the harness look a finding up by any of its ids. An
 // unparseable document is an error — never a silent empty map that could read as
 // "no statuses".
-func ParseAnstVEX(data []byte) (map[string]string, error) {
+func ParseCommit0VEX(data []byte) (map[string]string, error) {
 	var doc struct {
 		Statements []struct {
 			Vulnerability struct {
@@ -70,7 +70,7 @@ func ParseAnstVEX(data []byte) (map[string]string, error) {
 		} `json:"statements"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse anst openvex json: %w", err)
+		return nil, fmt.Errorf("parse commit0-analyzer openvex json: %w", err)
 	}
 	out := make(map[string]string, len(doc.Statements))
 	for _, s := range doc.Statements {
@@ -84,7 +84,7 @@ func ParseAnstVEX(data []byte) (map[string]string, error) {
 	return out, nil
 }
 
-// normalizeConfidence maps an anst proto Confidence enum string to a reach*
+// normalizeConfidence maps a commit0-analyzer proto Confidence enum string to a reach*
 // verdict. An unrecognized value maps to reachUnknown (unknown ≠ safe): it is
 // never treated as not-reachable, so it can never be mistaken for a sound
 // suppression in the comparison.

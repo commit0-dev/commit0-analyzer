@@ -8,7 +8,7 @@ type CycloneDXFormatter struct{}
 func (CycloneDXFormatter) Name() string { return "cyclonedx" }
 
 // FileName returns the conventional filename for multi-format output.
-func (CycloneDXFormatter) FileName() string { return "anst.cyclonedx.vex.json" }
+func (CycloneDXFormatter) FileName() string { return "commit0.cyclonedx.vex.json" }
 
 type cdxDoc struct {
 	BOMFormat       string    `json:"bomFormat"`
@@ -44,7 +44,7 @@ type cdxAffect struct {
 }
 
 // Format renders the document. One CycloneDX vulnerability is emitted per
-// statement (anst keys statements per (vuln, product), which CycloneDX models as
+// statement (commit0-analyzer keys statements per (vuln, product), which CycloneDX models as
 // a vulnerability with an affects[] ref). Statements are already sorted upstream.
 func (f CycloneDXFormatter) Format(d *Document) ([]byte, error) {
 	out := cdxDoc{

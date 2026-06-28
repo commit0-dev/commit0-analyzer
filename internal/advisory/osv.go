@@ -620,7 +620,7 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 			}
 		}
 
-		// When there are no SEMVER/ECOSYSTEM ranges anst can compare, fall back to
+		// When there are no SEMVER/ECOSYSTEM ranges commit0-analyzer can compare, fall back to
 		// the OSV affected[].versions enumeration as the authoritative affected set:
 		//   (a) No ranges of any kind → versions-only entry (e.g. MAL-2026-2144).
 		//   (b) GIT-only ranges → the commit-hash bounds cannot be compared with
@@ -632,7 +632,7 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 		if len(adv.VersionRanges) == 0 && len(aff.Versions) > 0 {
 			adv.Versions = append([]string(nil), aff.Versions...)
 		}
-		// UndecidableRanges records that the entry had a non-version (GIT) range anst
+		// UndecidableRanges records that the entry had a non-version (GIT) range commit0-analyzer
 		// cannot evaluate AND no versions[] enumeration to fall back on. Such an entry
 		// stays Undecidable (UNKNOWN) — unknown != safe, we must not drop it. A truly
 		// empty entry (no ranges and no versions at all) does NOT set this and is

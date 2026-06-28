@@ -26,8 +26,8 @@ import (
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/ssa"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	"github.com/ducthinh993/anst-analyzer/plugins/go-reachability/internal/engine"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	"github.com/commit0-dev/commit0-analyzer/plugins/go-reachability/internal/engine"
 )
 
 // TestAnalyze_DegradesOnCallGraphPanic asserts that when the call-graph builder
@@ -38,9 +38,9 @@ import (
 // NOT_REACHABLE and never a process crash.
 func TestAnalyze_DegradesOnCallGraphPanic(t *testing.T) {
 	modRoot := fixtureDir(t, "direct-call") // imports vulnlib
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 	panicBuilder := func(*ssa.Program, []*ssa.Function) (*callgraph.Graph, string, error) {
 		panic("ForEachElement called on type containing *types.TypeParam")
@@ -51,7 +51,7 @@ func TestAnalyze_DegradesOnCallGraphPanic(t *testing.T) {
 	require.NotEmpty(t, findings)
 
 	f := findingForAdvisory(t, findings, "TEST-VULN-001")
-	assert.Equal(t, anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, f.GetConfidence(),
+	assert.Equal(t, commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE, f.GetConfidence(),
 		"an imported vulnerable package must be PACKAGE_REACHABLE under degrade, never NOT_REACHABLE")
 	assert.Equal(t, "degraded-import-level", f.GetProperties()["algorithm"])
 }
@@ -71,12 +71,12 @@ func fixtureDir(t *testing.T, name string) string {
 }
 
 // vulnAdvisory builds a symbol-level advisory targeting VulnerableFunc in vulnlib.
-func vulnAdvisory(symbolName string) *anstv1.Advisory {
-	return &anstv1.Advisory{
+func vulnAdvisory(symbolName string) *commit0v1.Advisory {
+	return &commit0v1.Advisory{
 		Id:          "TEST-VULN-001",
 		Module:      "example.com/vulnlib",
 		SymbolLevel: true,
-		Symbols: []*anstv1.Symbol{
+		Symbols: []*commit0v1.Symbol{
 			{
 				Package: "example.com/vulnlib",
 				Name:    symbolName,
@@ -87,7 +87,7 @@ func vulnAdvisory(symbolName string) *anstv1.Advisory {
 
 // findingForAdvisory returns the first finding matching the advisory ID.
 // Fails the test if no such finding is present.
-func findingForAdvisory(t *testing.T, findings []*anstv1.Finding, advID string) *anstv1.Finding {
+func findingForAdvisory(t *testing.T, findings []*commit0v1.Finding, advID string) *commit0v1.Finding {
 	t.Helper()
 	for _, f := range findings {
 		if f.GetAdvisory().GetId() == advID {
@@ -99,7 +99,7 @@ func findingForAdvisory(t *testing.T, findings []*anstv1.Finding, advID string) 
 }
 
 // pathSymbols extracts the ordered symbol strings from a ReachabilityPath.
-func pathSymbols(path *anstv1.ReachabilityPath) []string {
+func pathSymbols(path *commit0v1.ReachabilityPath) []string {
 	if path == nil {
 		return nil
 	}
@@ -117,9 +117,9 @@ func pathSymbols(path *anstv1.ReachabilityPath) []string {
 // and last step is VulnerableFunc.
 func TestDirectCall_G1(t *testing.T) {
 	modRoot := fixtureDir(t, "direct-call")
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 
 	findings, err := engine.Analyze(context.Background(), req, nil)
@@ -128,7 +128,7 @@ func TestDirectCall_G1(t *testing.T) {
 
 	f := findingForAdvisory(t, findings, "TEST-VULN-001")
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 		f.GetConfidence(),
 		"direct-call fixture must be SYMBOL_REACHABLE",
 	)
@@ -163,9 +163,9 @@ func TestDirectCall_G1(t *testing.T) {
 // calls VulnerableFunc produces CONFIDENCE_NOT_REACHABLE with no path.
 func TestNoCall_NotReachable(t *testing.T) {
 	modRoot := fixtureDir(t, "no-call")
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 
 	findings, err := engine.Analyze(context.Background(), req, nil)
@@ -174,7 +174,7 @@ func TestNoCall_NotReachable(t *testing.T) {
 
 	f := findingForAdvisory(t, findings, "TEST-VULN-001")
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 		f.GetConfidence(),
 		"no-call fixture must be NOT_REACHABLE",
 	)
@@ -187,9 +187,9 @@ func TestNoCall_NotReachable(t *testing.T) {
 // produces SYMBOL_REACHABLE with steps in that exact order.
 func TestTransitive_OrderedPath(t *testing.T) {
 	modRoot := fixtureDir(t, "transitive")
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 
 	findings, err := engine.Analyze(context.Background(), req, nil)
@@ -198,7 +198,7 @@ func TestTransitive_OrderedPath(t *testing.T) {
 
 	f := findingForAdvisory(t, findings, "TEST-VULN-001")
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 		f.GetConfidence(),
 		"transitive fixture must be SYMBOL_REACHABLE",
 	)
@@ -269,9 +269,9 @@ func TestIfaceDispatch_SymbolReachable(t *testing.T) {
 
 	// The method symbol on VulnDoer that calls VulnerableFunc is "VulnDoer.Do".
 	// resolve.go Case 2 handles "TypeName.MethodName" (value receiver).
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 
 	findings, err := engine.Analyze(context.Background(), req, nil)
@@ -282,7 +282,7 @@ func TestIfaceDispatch_SymbolReachable(t *testing.T) {
 	// Red-team invariant: interface dispatch via in-program allocation must not
 	// produce UNKNOWN when VTA is the default builder.
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 		f.GetConfidence(),
 		"VTA must resolve VulnDoer.Do()→VulnerableFunc; UNKNOWN would mean a VTA regression; got: %s",
 		f.GetConfidence(),
@@ -306,9 +306,9 @@ func TestIfaceDispatch_SymbolReachable(t *testing.T) {
 //       to UNKNOWN rather than NOT_REACHABLE.
 func TestReflectCall_Unknown(t *testing.T) {
 	modRoot := fixtureDir(t, "reflect-call")
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 
 	findings, err := engine.Analyze(context.Background(), req, nil)
@@ -317,7 +317,7 @@ func TestReflectCall_Unknown(t *testing.T) {
 
 	f := findingForAdvisory(t, findings, "TEST-VULN-001")
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		f.GetConfidence(),
 		"reflect-call fixture must be UNKNOWN (reflection fallback, not a resolution failure); got: %s",
 		f.GetConfidence(),
@@ -343,28 +343,28 @@ func TestPkgLevel_PackageReachable(t *testing.T) {
 	modRoot := fixtureDir(t, "pkg-level")
 
 	// Case A: SymbolLevel=false, package IS imported → PACKAGE_REACHABLE.
-	pkgAdvisory := &anstv1.Advisory{
+	pkgAdvisory := &commit0v1.Advisory{
 		Id:          "TEST-PKG-001",
 		Module:      "example.com/vulnlib",
 		SymbolLevel: false,
-		Symbols: []*anstv1.Symbol{
+		Symbols: []*commit0v1.Symbol{
 			{Package: "example.com/vulnlib", Name: "VulnerableFunc"},
 		},
 	}
 
 	// Case B: SymbolLevel=false, module is NOT imported → NOT_REACHABLE.
-	unimportedAdvisory := &anstv1.Advisory{
+	unimportedAdvisory := &commit0v1.Advisory{
 		Id:          "TEST-PKG-002",
 		Module:      "example.com/not-imported-at-all",
 		SymbolLevel: false,
-		Symbols: []*anstv1.Symbol{
+		Symbols: []*commit0v1.Symbol{
 			{Package: "example.com/not-imported-at-all", Name: "SomeFunc"},
 		},
 	}
 
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{pkgAdvisory, unimportedAdvisory},
+		Advisories: []*commit0v1.Advisory{pkgAdvisory, unimportedAdvisory},
 	}
 
 	findings, err := engine.Analyze(context.Background(), req, nil)
@@ -374,7 +374,7 @@ func TestPkgLevel_PackageReachable(t *testing.T) {
 	// Case A assertion.
 	fa := findingForAdvisory(t, findings, "TEST-PKG-001")
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
 		fa.GetConfidence(),
 		"imported package with SymbolLevel=false must be PACKAGE_REACHABLE",
 	)
@@ -383,7 +383,7 @@ func TestPkgLevel_PackageReachable(t *testing.T) {
 	// Case B assertion.
 	fb := findingForAdvisory(t, findings, "TEST-PKG-002")
 	assert.Equal(t,
-		anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 		fb.GetConfidence(),
 		"unimported module with SymbolLevel=false must be NOT_REACHABLE",
 	)
@@ -404,9 +404,9 @@ func TestPkgLevel_PackageReachable(t *testing.T) {
 // not the incidental serialization order of metadata properties.
 func TestDeterminism(t *testing.T) {
 	modRoot := fixtureDir(t, "determinism")
-	req := &anstv1.AnalyzeRequest{
+	req := &commit0v1.AnalyzeRequest{
 		ModuleRoot: modRoot,
-		Advisories: []*anstv1.Advisory{vulnAdvisory("VulnerableFunc")},
+		Advisories: []*commit0v1.Advisory{vulnAdvisory("VulnerableFunc")},
 	}
 
 	const runs = 20
@@ -420,7 +420,7 @@ func TestDeterminism(t *testing.T) {
 	// exercised when there IS a reachable path.
 	fRef := findingForAdvisory(t, ref, "TEST-VULN-001")
 	require.Equal(t,
-		anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 		fRef.GetConfidence(),
 		"determinism fixture must be SYMBOL_REACHABLE to exercise the BFS tie-break",
 	)
@@ -482,7 +482,7 @@ func TestDeterminism(t *testing.T) {
 func TestNoPathOnNonSymbolReachable(t *testing.T) {
 	cases := []struct {
 		fixture string
-		adv     *anstv1.Advisory
+		adv     *commit0v1.Advisory
 	}{
 		{
 			fixture: "no-call",
@@ -494,11 +494,11 @@ func TestNoPathOnNonSymbolReachable(t *testing.T) {
 		},
 		{
 			fixture: "pkg-level",
-			adv: &anstv1.Advisory{
+			adv: &commit0v1.Advisory{
 				Id:          "TEST-INVARIANT-PKG",
 				Module:      "example.com/vulnlib",
 				SymbolLevel: false,
-				Symbols: []*anstv1.Symbol{
+				Symbols: []*commit0v1.Symbol{
 					{Package: "example.com/vulnlib", Name: "VulnerableFunc"},
 				},
 			},
@@ -509,14 +509,14 @@ func TestNoPathOnNonSymbolReachable(t *testing.T) {
 		tc := tc
 		t.Run(fmt.Sprintf("fixture=%s", tc.fixture), func(t *testing.T) {
 			modRoot := fixtureDir(t, tc.fixture)
-			req := &anstv1.AnalyzeRequest{
+			req := &commit0v1.AnalyzeRequest{
 				ModuleRoot: modRoot,
-				Advisories: []*anstv1.Advisory{tc.adv},
+				Advisories: []*commit0v1.Advisory{tc.adv},
 			}
 			findings, err := engine.Analyze(context.Background(), req, nil)
 			require.NoError(t, err)
 			for _, f := range findings {
-				if f.GetConfidence() != anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE {
+				if f.GetConfidence() != commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE {
 					assert.Nil(t, f.GetPath(),
 						"fixture %s: finding confidence=%s must have nil Path",
 						tc.fixture, f.GetConfidence())

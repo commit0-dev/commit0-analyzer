@@ -8,10 +8,10 @@ import (
 
 func sampleReport(t *testing.T) *Report {
 	t.Helper()
-	anst, osv := loadCompareInputs(t)
+	commit0Analyzer, osv := loadCompareInputs(t)
 	return &Report{
 		GeneratedFrom: "test",
-		Comparisons:   []ComparisonResult{Compare("go-fixture", ToolOSVScanner, anst, osv)},
+		Comparisons:   []ComparisonResult{Compare("go-fixture", ToolOSVScanner, commit0Analyzer, osv)},
 		Assertions: []Assertion{
 			{Name: "determinism/go-fixture", Passed: true, Detail: "byte-identical"},
 			{Name: "fail-closed/go-fixture", Passed: true, Detail: "exit 3"},
@@ -53,16 +53,16 @@ func TestReportMarkdownContainsSummaryAndMiss(t *testing.T) {
 
 func TestComputeCoverageGain(t *testing.T) {
 	baseline := []Finding{
-		{Tool: ToolAnst, VulnID: "CVE-2024-1", Package: "p"},
-		{Tool: ToolAnst, VulnID: "GHSA-aaaa", Aliases: []string{"CVE-2024-2"}, Package: "q"},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-1", Package: "p"},
+		{Tool: ToolCommit0, VulnID: "GHSA-aaaa", Aliases: []string{"CVE-2024-2"}, Package: "q"},
 	}
 	full := []Finding{
 		// Same vuln as baseline #1 — not new.
-		{Tool: ToolAnst, VulnID: "CVE-2024-1", Package: "p"},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-1", Package: "p"},
 		// Same vuln as baseline #2 by alias intersection — not new.
-		{Tool: ToolAnst, VulnID: "CVE-2024-2", Package: "q"},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-2", Package: "q"},
 		// Genuinely new advisory the baseline did not carry.
-		{Tool: ToolAnst, VulnID: "CVE-2024-9", Package: "r"},
+		{Tool: ToolCommit0, VulnID: "CVE-2024-9", Package: "r"},
 	}
 	g := ComputeCoverageGain("c", "go-vuln-db,osv", "go-vuln-db,osv,ghsa", baseline, full)
 	if g.NewFindings != 1 {
@@ -80,8 +80,8 @@ func TestComputeCoverageGainZeroWhenAggregated(t *testing.T) {
 	// When the full set's extra source is already aggregated by the baseline
 	// (every full finding matches a baseline finding), the measured gain is 0 —
 	// a legitimate, reportable result, not an error.
-	baseline := []Finding{{Tool: ToolAnst, VulnID: "CVE-1", Package: "p"}}
-	full := []Finding{{Tool: ToolAnst, VulnID: "CVE-1", Package: "p"}}
+	baseline := []Finding{{Tool: ToolCommit0, VulnID: "CVE-1", Package: "p"}}
+	full := []Finding{{Tool: ToolCommit0, VulnID: "CVE-1", Package: "p"}}
 	g := ComputeCoverageGain("c", "go-vuln-db,osv", "go-vuln-db,osv,ghsa", baseline, full)
 	if g.NewFindings != 0 || len(g.NewIDs) != 0 {
 		t.Fatalf("expected zero gain, got %d %v", g.NewFindings, g.NewIDs)

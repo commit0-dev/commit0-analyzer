@@ -1,4 +1,4 @@
-// Package anst.v1 defines the versioned gRPC plugin contract for anst-analyzer.
+// Package commit0.v1 defines the versioned gRPC plugin contract for commit0-analyzer.
 //
 // # Version and Compatibility Policy
 //
@@ -37,9 +37,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: anst/v1/plugin.proto
+// source: commit0/v1/plugin.proto
 
-package anstv1
+package commit0v1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -109,11 +109,11 @@ func (x Ecosystem) String() string {
 }
 
 func (Ecosystem) Descriptor() protoreflect.EnumDescriptor {
-	return file_anst_v1_plugin_proto_enumTypes[0].Descriptor()
+	return file_commit0_v1_plugin_proto_enumTypes[0].Descriptor()
 }
 
 func (Ecosystem) Type() protoreflect.EnumType {
-	return &file_anst_v1_plugin_proto_enumTypes[0]
+	return &file_commit0_v1_plugin_proto_enumTypes[0]
 }
 
 func (x Ecosystem) Number() protoreflect.EnumNumber {
@@ -122,7 +122,7 @@ func (x Ecosystem) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Ecosystem.Descriptor instead.
 func (Ecosystem) EnumDescriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{0}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{0}
 }
 
 // Confidence describes how certain the analyzer is that a vulnerable symbol or
@@ -183,11 +183,11 @@ func (x Confidence) String() string {
 }
 
 func (Confidence) Descriptor() protoreflect.EnumDescriptor {
-	return file_anst_v1_plugin_proto_enumTypes[1].Descriptor()
+	return file_commit0_v1_plugin_proto_enumTypes[1].Descriptor()
 }
 
 func (Confidence) Type() protoreflect.EnumType {
-	return &file_anst_v1_plugin_proto_enumTypes[1]
+	return &file_commit0_v1_plugin_proto_enumTypes[1]
 }
 
 func (x Confidence) Number() protoreflect.EnumNumber {
@@ -196,7 +196,7 @@ func (x Confidence) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Confidence.Descriptor instead.
 func (Confidence) EnumDescriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{1}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{1}
 }
 
 // Severity classifies the impact of a vulnerability.
@@ -240,11 +240,11 @@ func (x Severity) String() string {
 }
 
 func (Severity) Descriptor() protoreflect.EnumDescriptor {
-	return file_anst_v1_plugin_proto_enumTypes[2].Descriptor()
+	return file_commit0_v1_plugin_proto_enumTypes[2].Descriptor()
 }
 
 func (Severity) Type() protoreflect.EnumType {
-	return &file_anst_v1_plugin_proto_enumTypes[2]
+	return &file_commit0_v1_plugin_proto_enumTypes[2]
 }
 
 func (x Severity) Number() protoreflect.EnumNumber {
@@ -253,7 +253,7 @@ func (x Severity) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Severity.Descriptor instead.
 func (Severity) EnumDescriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{2}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{2}
 }
 
 // Location identifies a source position.
@@ -270,7 +270,7 @@ type Location struct {
 
 func (x *Location) Reset() {
 	*x = Location{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[0]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -282,7 +282,7 @@ func (x *Location) String() string {
 func (*Location) ProtoMessage() {}
 
 func (x *Location) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[0]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -295,7 +295,7 @@ func (x *Location) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Location.ProtoReflect.Descriptor instead.
 func (*Location) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{0}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Location) GetFile() string {
@@ -332,7 +332,7 @@ type CallStep struct {
 
 func (x *CallStep) Reset() {
 	*x = CallStep{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[1]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +344,7 @@ func (x *CallStep) String() string {
 func (*CallStep) ProtoMessage() {}
 
 func (x *CallStep) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[1]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +357,7 @@ func (x *CallStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallStep.ProtoReflect.Descriptor instead.
 func (*CallStep) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{1}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CallStep) GetLocation() *Location {
@@ -388,7 +388,7 @@ type ReachabilityPath struct {
 
 func (x *ReachabilityPath) Reset() {
 	*x = ReachabilityPath{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[2]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -400,7 +400,7 @@ func (x *ReachabilityPath) String() string {
 func (*ReachabilityPath) ProtoMessage() {}
 
 func (x *ReachabilityPath) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[2]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -413,7 +413,7 @@ func (x *ReachabilityPath) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReachabilityPath.ProtoReflect.Descriptor instead.
 func (*ReachabilityPath) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{2}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ReachabilityPath) GetSteps() []*CallStep {
@@ -439,7 +439,7 @@ type AdvisoryRef struct {
 
 func (x *AdvisoryRef) Reset() {
 	*x = AdvisoryRef{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[3]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -451,7 +451,7 @@ func (x *AdvisoryRef) String() string {
 func (*AdvisoryRef) ProtoMessage() {}
 
 func (x *AdvisoryRef) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[3]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -464,7 +464,7 @@ func (x *AdvisoryRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdvisoryRef.ProtoReflect.Descriptor instead.
 func (*AdvisoryRef) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{3}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AdvisoryRef) GetId() string {
@@ -505,9 +505,9 @@ type Finding struct {
 	Module string `protobuf:"bytes,2,opt,name=module,proto3" json:"module,omitempty"`
 	// confidence is the analyzer's certainty about reachability.
 	// The zero value is CONFIDENCE_UNKNOWN (conservative default).
-	Confidence Confidence `protobuf:"varint,3,opt,name=confidence,proto3,enum=anst.v1.Confidence" json:"confidence,omitempty"`
+	Confidence Confidence `protobuf:"varint,3,opt,name=confidence,proto3,enum=commit0.v1.Confidence" json:"confidence,omitempty"`
 	// severity is the vulnerability's impact classification.
-	Severity Severity `protobuf:"varint,4,opt,name=severity,proto3,enum=anst.v1.Severity" json:"severity,omitempty"`
+	Severity Severity `protobuf:"varint,4,opt,name=severity,proto3,enum=commit0.v1.Severity" json:"severity,omitempty"`
 	// path is the concrete call chain, if available.
 	// MUST be nil/omitted when confidence < CONFIDENCE_SYMBOL_REACHABLE,
 	// and MUST be populated when confidence == CONFIDENCE_SYMBOL_REACHABLE.
@@ -529,7 +529,7 @@ type Finding struct {
 	// Optional; Go/JS plugins that predate this field may leave it at the
 	// zero value (ECOSYSTEM_UNKNOWN). New plugins SHOULD set this so findings
 	// can be grouped and filtered per ecosystem without parsing the language string.
-	Ecosystem Ecosystem `protobuf:"varint,9,opt,name=ecosystem,proto3,enum=anst.v1.Ecosystem" json:"ecosystem,omitempty"`
+	Ecosystem Ecosystem `protobuf:"varint,9,opt,name=ecosystem,proto3,enum=commit0.v1.Ecosystem" json:"ecosystem,omitempty"`
 	// incomplete signals that the analysis producing this finding was partial:
 	// the plugin could not fully resolve the dependency graph or call graph, so
 	// additional vulnerable paths may exist that were not checked. When true,
@@ -542,7 +542,7 @@ type Finding struct {
 
 func (x *Finding) Reset() {
 	*x = Finding{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[4]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -554,7 +554,7 @@ func (x *Finding) String() string {
 func (*Finding) ProtoMessage() {}
 
 func (x *Finding) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[4]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +567,7 @@ func (x *Finding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Finding.ProtoReflect.Descriptor instead.
 func (*Finding) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{4}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Finding) GetAdvisory() *AdvisoryRef {
@@ -653,7 +653,7 @@ type Symbol struct {
 
 func (x *Symbol) Reset() {
 	*x = Symbol{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[5]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -665,7 +665,7 @@ func (x *Symbol) String() string {
 func (*Symbol) ProtoMessage() {}
 
 func (x *Symbol) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[5]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -678,7 +678,7 @@ func (x *Symbol) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Symbol.ProtoReflect.Descriptor instead.
 func (*Symbol) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{5}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Symbol) GetPackage() string {
@@ -718,14 +718,14 @@ type Advisory struct {
 	// Optional; Go/JS advisories may omit this field (pre-dates the multi-language
 	// extension). New plugins SHOULD set this so the host can route version
 	// comparison to the correct per-ecosystem comparator.
-	Ecosystem     Ecosystem `protobuf:"varint,7,opt,name=ecosystem,proto3,enum=anst.v1.Ecosystem" json:"ecosystem,omitempty"`
+	Ecosystem     Ecosystem `protobuf:"varint,7,opt,name=ecosystem,proto3,enum=commit0.v1.Ecosystem" json:"ecosystem,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Advisory) Reset() {
 	*x = Advisory{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[6]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -737,7 +737,7 @@ func (x *Advisory) String() string {
 func (*Advisory) ProtoMessage() {}
 
 func (x *Advisory) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[6]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -750,7 +750,7 @@ func (x *Advisory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Advisory.ProtoReflect.Descriptor instead.
 func (*Advisory) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{6}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Advisory) GetId() string {
@@ -819,7 +819,7 @@ type BuildConfig struct {
 
 func (x *BuildConfig) Reset() {
 	*x = BuildConfig{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[7]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -831,7 +831,7 @@ func (x *BuildConfig) String() string {
 func (*BuildConfig) ProtoMessage() {}
 
 func (x *BuildConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[7]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -844,7 +844,7 @@ func (x *BuildConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuildConfig.ProtoReflect.Descriptor instead.
 func (*BuildConfig) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{7}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BuildConfig) GetGoos() string {
@@ -875,7 +875,7 @@ func (x *BuildConfig) GetTags() []string {
 type EcosystemBuildConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ecosystem identifies which ecosystem this build config applies to.
-	Ecosystem Ecosystem `protobuf:"varint,1,opt,name=ecosystem,proto3,enum=anst.v1.Ecosystem" json:"ecosystem,omitempty"`
+	Ecosystem Ecosystem `protobuf:"varint,1,opt,name=ecosystem,proto3,enum=commit0.v1.Ecosystem" json:"ecosystem,omitempty"`
 	// target_triple is the ecosystem-specific build target descriptor.
 	// Rust: Cargo target triple (e.g. "x86_64-unknown-linux-gnu").
 	// Python: platform tag (e.g. "linux_x86_64").
@@ -898,7 +898,7 @@ type EcosystemBuildConfig struct {
 
 func (x *EcosystemBuildConfig) Reset() {
 	*x = EcosystemBuildConfig{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[8]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -910,7 +910,7 @@ func (x *EcosystemBuildConfig) String() string {
 func (*EcosystemBuildConfig) ProtoMessage() {}
 
 func (x *EcosystemBuildConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[8]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -923,7 +923,7 @@ func (x *EcosystemBuildConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EcosystemBuildConfig.ProtoReflect.Descriptor instead.
 func (*EcosystemBuildConfig) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{8}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *EcosystemBuildConfig) GetEcosystem() Ecosystem {
@@ -986,7 +986,7 @@ type AnalyzeRequest struct {
 
 func (x *AnalyzeRequest) Reset() {
 	*x = AnalyzeRequest{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[9]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -998,7 +998,7 @@ func (x *AnalyzeRequest) String() string {
 func (*AnalyzeRequest) ProtoMessage() {}
 
 func (x *AnalyzeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[9]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1011,7 +1011,7 @@ func (x *AnalyzeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnalyzeRequest.ProtoReflect.Descriptor instead.
 func (*AnalyzeRequest) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{9}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AnalyzeRequest) GetModuleRoot() string {
@@ -1060,7 +1060,7 @@ type MetadataRequest struct {
 
 func (x *MetadataRequest) Reset() {
 	*x = MetadataRequest{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[10]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1072,7 +1072,7 @@ func (x *MetadataRequest) String() string {
 func (*MetadataRequest) ProtoMessage() {}
 
 func (x *MetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[10]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1085,7 +1085,7 @@ func (x *MetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetadataRequest.ProtoReflect.Descriptor instead.
 func (*MetadataRequest) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{10}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *MetadataRequest) GetHostVersion() string {
@@ -1115,7 +1115,7 @@ type MetadataResponse struct {
 
 func (x *MetadataResponse) Reset() {
 	*x = MetadataResponse{}
-	mi := &file_anst_v1_plugin_proto_msgTypes[11]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1127,7 +1127,7 @@ func (x *MetadataResponse) String() string {
 func (*MetadataResponse) ProtoMessage() {}
 
 func (x *MetadataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_anst_v1_plugin_proto_msgTypes[11]
+	mi := &file_commit0_v1_plugin_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1140,7 +1140,7 @@ func (x *MetadataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetadataResponse.ProtoReflect.Descriptor instead.
 func (*MetadataResponse) Descriptor() ([]byte, []int) {
-	return file_anst_v1_plugin_proto_rawDescGZIP(), []int{11}
+	return file_commit0_v1_plugin_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MetadataResponse) GetName() string {
@@ -1178,38 +1178,39 @@ func (x *MetadataResponse) GetSupportedLanguages() []string {
 	return nil
 }
 
-var File_anst_v1_plugin_proto protoreflect.FileDescriptor
+var File_commit0_v1_plugin_proto protoreflect.FileDescriptor
 
-const file_anst_v1_plugin_proto_rawDesc = "" +
+const file_commit0_v1_plugin_proto_rawDesc = "" +
 	"\n" +
-	"\x14anst/v1/plugin.proto\x12\aanst.v1\"J\n" +
+	"\x17commit0/v1/plugin.proto\x12\n" +
+	"commit0.v1\"J\n" +
 	"\bLocation\x12\x12\n" +
 	"\x04file\x18\x01 \x01(\tR\x04file\x12\x12\n" +
 	"\x04line\x18\x02 \x01(\x05R\x04line\x12\x16\n" +
-	"\x06column\x18\x03 \x01(\x05R\x06column\"Q\n" +
-	"\bCallStep\x12-\n" +
-	"\blocation\x18\x01 \x01(\v2\x11.anst.v1.LocationR\blocation\x12\x16\n" +
-	"\x06symbol\x18\x02 \x01(\tR\x06symbol\";\n" +
-	"\x10ReachabilityPath\x12'\n" +
-	"\x05steps\x18\x01 \x03(\v2\x11.anst.v1.CallStepR\x05steps\"I\n" +
+	"\x06column\x18\x03 \x01(\x05R\x06column\"T\n" +
+	"\bCallStep\x120\n" +
+	"\blocation\x18\x01 \x01(\v2\x14.commit0.v1.LocationR\blocation\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\">\n" +
+	"\x10ReachabilityPath\x12*\n" +
+	"\x05steps\x18\x01 \x03(\v2\x14.commit0.v1.CallStepR\x05steps\"I\n" +
 	"\vAdvisoryRef\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03url\x18\x02 \x01(\tR\x03url\x12\x18\n" +
-	"\aaliases\x18\x03 \x03(\tR\aaliases\"\xed\x03\n" +
-	"\aFinding\x120\n" +
-	"\badvisory\x18\x01 \x01(\v2\x14.anst.v1.AdvisoryRefR\badvisory\x12\x16\n" +
-	"\x06module\x18\x02 \x01(\tR\x06module\x123\n" +
+	"\aaliases\x18\x03 \x03(\tR\aaliases\"\xff\x03\n" +
+	"\aFinding\x123\n" +
+	"\badvisory\x18\x01 \x01(\v2\x17.commit0.v1.AdvisoryRefR\badvisory\x12\x16\n" +
+	"\x06module\x18\x02 \x01(\tR\x06module\x126\n" +
 	"\n" +
-	"confidence\x18\x03 \x01(\x0e2\x13.anst.v1.ConfidenceR\n" +
-	"confidence\x12-\n" +
-	"\bseverity\x18\x04 \x01(\x0e2\x11.anst.v1.SeverityR\bseverity\x12-\n" +
-	"\x04path\x18\x05 \x01(\v2\x19.anst.v1.ReachabilityPathR\x04path\x12@\n" +
+	"confidence\x18\x03 \x01(\x0e2\x16.commit0.v1.ConfidenceR\n" +
+	"confidence\x120\n" +
+	"\bseverity\x18\x04 \x01(\x0e2\x14.commit0.v1.SeverityR\bseverity\x120\n" +
+	"\x04path\x18\x05 \x01(\v2\x1c.commit0.v1.ReachabilityPathR\x04path\x12C\n" +
 	"\n" +
-	"properties\x18\x06 \x03(\v2 .anst.v1.Finding.PropertiesEntryR\n" +
+	"properties\x18\x06 \x03(\v2#.commit0.v1.Finding.PropertiesEntryR\n" +
 	"properties\x12\x16\n" +
 	"\x06pillar\x18\a \x01(\tR\x06pillar\x12\x1a\n" +
-	"\blanguage\x18\b \x01(\tR\blanguage\x120\n" +
-	"\tecosystem\x18\t \x01(\x0e2\x12.anst.v1.EcosystemR\tecosystem\x12\x1e\n" +
+	"\blanguage\x18\b \x01(\tR\blanguage\x123\n" +
+	"\tecosystem\x18\t \x01(\x0e2\x15.commit0.v1.EcosystemR\tecosystem\x12\x1e\n" +
 	"\n" +
 	"incomplete\x18\n" +
 	" \x01(\bR\n" +
@@ -1219,37 +1220,37 @@ const file_anst_v1_plugin_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"6\n" +
 	"\x06Symbol\x12\x18\n" +
 	"\apackage\x18\x01 \x01(\tR\apackage\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xf1\x01\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xf7\x01\n" +
 	"\bAdvisory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06module\x18\x02 \x01(\tR\x06module\x12#\n" +
-	"\rversion_range\x18\x03 \x01(\tR\fversionRange\x12)\n" +
-	"\asymbols\x18\x04 \x03(\v2\x0f.anst.v1.SymbolR\asymbols\x12!\n" +
+	"\rversion_range\x18\x03 \x01(\tR\fversionRange\x12,\n" +
+	"\asymbols\x18\x04 \x03(\v2\x12.commit0.v1.SymbolR\asymbols\x12!\n" +
 	"\fsymbol_level\x18\x05 \x01(\bR\vsymbolLevel\x12\x18\n" +
-	"\asources\x18\x06 \x03(\tR\asources\x120\n" +
-	"\tecosystem\x18\a \x01(\x0e2\x12.anst.v1.EcosystemR\tecosystem\"M\n" +
+	"\asources\x18\x06 \x03(\tR\asources\x123\n" +
+	"\tecosystem\x18\a \x01(\x0e2\x15.commit0.v1.EcosystemR\tecosystem\"M\n" +
 	"\vBuildConfig\x12\x12\n" +
 	"\x04goos\x18\x01 \x01(\tR\x04goos\x12\x16\n" +
 	"\x06goarch\x18\x02 \x01(\tR\x06goarch\x12\x12\n" +
-	"\x04tags\x18\x03 \x03(\tR\x04tags\"\xb7\x02\n" +
-	"\x14EcosystemBuildConfig\x120\n" +
-	"\tecosystem\x18\x01 \x01(\x0e2\x12.anst.v1.EcosystemR\tecosystem\x12#\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\"\xbd\x02\n" +
+	"\x14EcosystemBuildConfig\x123\n" +
+	"\tecosystem\x18\x01 \x01(\x0e2\x15.commit0.v1.EcosystemR\tecosystem\x12#\n" +
 	"\rtarget_triple\x18\x02 \x01(\tR\ftargetTriple\x12\x1a\n" +
 	"\bfeatures\x18\x03 \x03(\tR\bfeatures\x12%\n" +
-	"\x0epython_version\x18\x04 \x01(\tR\rpythonVersion\x12H\n" +
-	"\textra_env\x18\x05 \x03(\v2+.anst.v1.EcosystemBuildConfig.ExtraEnvEntryR\bextraEnv\x1a;\n" +
+	"\x0epython_version\x18\x04 \x01(\tR\rpythonVersion\x12K\n" +
+	"\textra_env\x18\x05 \x03(\v2..commit0.v1.EcosystemBuildConfig.ExtraEnvEntryR\bextraEnv\x1a;\n" +
 	"\rExtraEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x94\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9d\x02\n" +
 	"\x0eAnalyzeRequest\x12\x1f\n" +
 	"\vmodule_root\x18\x01 \x01(\tR\n" +
 	"moduleRoot\x12 \n" +
-	"\ventrypoints\x18\x02 \x03(\tR\ventrypoints\x127\n" +
-	"\fbuild_config\x18\x03 \x01(\v2\x14.anst.v1.BuildConfigR\vbuildConfig\x121\n" +
+	"\ventrypoints\x18\x02 \x03(\tR\ventrypoints\x12:\n" +
+	"\fbuild_config\x18\x03 \x01(\v2\x17.commit0.v1.BuildConfigR\vbuildConfig\x124\n" +
 	"\n" +
-	"advisories\x18\x04 \x03(\v2\x11.anst.v1.AdvisoryR\n" +
-	"advisories\x12S\n" +
-	"\x16ecosystem_build_config\x18\x05 \x01(\v2\x1d.anst.v1.EcosystemBuildConfigR\x14ecosystemBuildConfig\"4\n" +
+	"advisories\x18\x04 \x03(\v2\x14.commit0.v1.AdvisoryR\n" +
+	"advisories\x12V\n" +
+	"\x16ecosystem_build_config\x18\x05 \x01(\v2 .commit0.v1.EcosystemBuildConfigR\x14ecosystemBuildConfig\"4\n" +
 	"\x0fMetadataRequest\x12!\n" +
 	"\fhost_version\x18\x01 \x01(\tR\vhostVersion\"\xbe\x01\n" +
 	"\x10MetadataResponse\x12\x12\n" +
@@ -1276,64 +1277,64 @@ const file_anst_v1_plugin_proto_rawDesc = "" +
 	"\fSEVERITY_LOW\x10\x01\x12\x13\n" +
 	"\x0fSEVERITY_MEDIUM\x10\x02\x12\x11\n" +
 	"\rSEVERITY_HIGH\x10\x03\x12\x15\n" +
-	"\x11SEVERITY_CRITICAL\x10\x042\x83\x01\n" +
-	"\bAnalyzer\x12?\n" +
-	"\bMetadata\x12\x18.anst.v1.MetadataRequest\x1a\x19.anst.v1.MetadataResponse\x126\n" +
-	"\aAnalyze\x12\x17.anst.v1.AnalyzeRequest\x1a\x10.anst.v1.Finding0\x01B:Z8github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1b\x06proto3"
+	"\x11SEVERITY_CRITICAL\x10\x042\x8f\x01\n" +
+	"\bAnalyzer\x12E\n" +
+	"\bMetadata\x12\x1b.commit0.v1.MetadataRequest\x1a\x1c.commit0.v1.MetadataResponse\x12<\n" +
+	"\aAnalyze\x12\x1a.commit0.v1.AnalyzeRequest\x1a\x13.commit0.v1.Finding0\x01B@Z>github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1b\x06proto3"
 
 var (
-	file_anst_v1_plugin_proto_rawDescOnce sync.Once
-	file_anst_v1_plugin_proto_rawDescData []byte
+	file_commit0_v1_plugin_proto_rawDescOnce sync.Once
+	file_commit0_v1_plugin_proto_rawDescData []byte
 )
 
-func file_anst_v1_plugin_proto_rawDescGZIP() []byte {
-	file_anst_v1_plugin_proto_rawDescOnce.Do(func() {
-		file_anst_v1_plugin_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_anst_v1_plugin_proto_rawDesc), len(file_anst_v1_plugin_proto_rawDesc)))
+func file_commit0_v1_plugin_proto_rawDescGZIP() []byte {
+	file_commit0_v1_plugin_proto_rawDescOnce.Do(func() {
+		file_commit0_v1_plugin_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_commit0_v1_plugin_proto_rawDesc), len(file_commit0_v1_plugin_proto_rawDesc)))
 	})
-	return file_anst_v1_plugin_proto_rawDescData
+	return file_commit0_v1_plugin_proto_rawDescData
 }
 
-var file_anst_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_anst_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
-var file_anst_v1_plugin_proto_goTypes = []any{
-	(Ecosystem)(0),               // 0: anst.v1.Ecosystem
-	(Confidence)(0),              // 1: anst.v1.Confidence
-	(Severity)(0),                // 2: anst.v1.Severity
-	(*Location)(nil),             // 3: anst.v1.Location
-	(*CallStep)(nil),             // 4: anst.v1.CallStep
-	(*ReachabilityPath)(nil),     // 5: anst.v1.ReachabilityPath
-	(*AdvisoryRef)(nil),          // 6: anst.v1.AdvisoryRef
-	(*Finding)(nil),              // 7: anst.v1.Finding
-	(*Symbol)(nil),               // 8: anst.v1.Symbol
-	(*Advisory)(nil),             // 9: anst.v1.Advisory
-	(*BuildConfig)(nil),          // 10: anst.v1.BuildConfig
-	(*EcosystemBuildConfig)(nil), // 11: anst.v1.EcosystemBuildConfig
-	(*AnalyzeRequest)(nil),       // 12: anst.v1.AnalyzeRequest
-	(*MetadataRequest)(nil),      // 13: anst.v1.MetadataRequest
-	(*MetadataResponse)(nil),     // 14: anst.v1.MetadataResponse
-	nil,                          // 15: anst.v1.Finding.PropertiesEntry
-	nil,                          // 16: anst.v1.EcosystemBuildConfig.ExtraEnvEntry
+var file_commit0_v1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_commit0_v1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_commit0_v1_plugin_proto_goTypes = []any{
+	(Ecosystem)(0),               // 0: commit0.v1.Ecosystem
+	(Confidence)(0),              // 1: commit0.v1.Confidence
+	(Severity)(0),                // 2: commit0.v1.Severity
+	(*Location)(nil),             // 3: commit0.v1.Location
+	(*CallStep)(nil),             // 4: commit0.v1.CallStep
+	(*ReachabilityPath)(nil),     // 5: commit0.v1.ReachabilityPath
+	(*AdvisoryRef)(nil),          // 6: commit0.v1.AdvisoryRef
+	(*Finding)(nil),              // 7: commit0.v1.Finding
+	(*Symbol)(nil),               // 8: commit0.v1.Symbol
+	(*Advisory)(nil),             // 9: commit0.v1.Advisory
+	(*BuildConfig)(nil),          // 10: commit0.v1.BuildConfig
+	(*EcosystemBuildConfig)(nil), // 11: commit0.v1.EcosystemBuildConfig
+	(*AnalyzeRequest)(nil),       // 12: commit0.v1.AnalyzeRequest
+	(*MetadataRequest)(nil),      // 13: commit0.v1.MetadataRequest
+	(*MetadataResponse)(nil),     // 14: commit0.v1.MetadataResponse
+	nil,                          // 15: commit0.v1.Finding.PropertiesEntry
+	nil,                          // 16: commit0.v1.EcosystemBuildConfig.ExtraEnvEntry
 }
-var file_anst_v1_plugin_proto_depIdxs = []int32{
-	3,  // 0: anst.v1.CallStep.location:type_name -> anst.v1.Location
-	4,  // 1: anst.v1.ReachabilityPath.steps:type_name -> anst.v1.CallStep
-	6,  // 2: anst.v1.Finding.advisory:type_name -> anst.v1.AdvisoryRef
-	1,  // 3: anst.v1.Finding.confidence:type_name -> anst.v1.Confidence
-	2,  // 4: anst.v1.Finding.severity:type_name -> anst.v1.Severity
-	5,  // 5: anst.v1.Finding.path:type_name -> anst.v1.ReachabilityPath
-	15, // 6: anst.v1.Finding.properties:type_name -> anst.v1.Finding.PropertiesEntry
-	0,  // 7: anst.v1.Finding.ecosystem:type_name -> anst.v1.Ecosystem
-	8,  // 8: anst.v1.Advisory.symbols:type_name -> anst.v1.Symbol
-	0,  // 9: anst.v1.Advisory.ecosystem:type_name -> anst.v1.Ecosystem
-	0,  // 10: anst.v1.EcosystemBuildConfig.ecosystem:type_name -> anst.v1.Ecosystem
-	16, // 11: anst.v1.EcosystemBuildConfig.extra_env:type_name -> anst.v1.EcosystemBuildConfig.ExtraEnvEntry
-	10, // 12: anst.v1.AnalyzeRequest.build_config:type_name -> anst.v1.BuildConfig
-	9,  // 13: anst.v1.AnalyzeRequest.advisories:type_name -> anst.v1.Advisory
-	11, // 14: anst.v1.AnalyzeRequest.ecosystem_build_config:type_name -> anst.v1.EcosystemBuildConfig
-	13, // 15: anst.v1.Analyzer.Metadata:input_type -> anst.v1.MetadataRequest
-	12, // 16: anst.v1.Analyzer.Analyze:input_type -> anst.v1.AnalyzeRequest
-	14, // 17: anst.v1.Analyzer.Metadata:output_type -> anst.v1.MetadataResponse
-	7,  // 18: anst.v1.Analyzer.Analyze:output_type -> anst.v1.Finding
+var file_commit0_v1_plugin_proto_depIdxs = []int32{
+	3,  // 0: commit0.v1.CallStep.location:type_name -> commit0.v1.Location
+	4,  // 1: commit0.v1.ReachabilityPath.steps:type_name -> commit0.v1.CallStep
+	6,  // 2: commit0.v1.Finding.advisory:type_name -> commit0.v1.AdvisoryRef
+	1,  // 3: commit0.v1.Finding.confidence:type_name -> commit0.v1.Confidence
+	2,  // 4: commit0.v1.Finding.severity:type_name -> commit0.v1.Severity
+	5,  // 5: commit0.v1.Finding.path:type_name -> commit0.v1.ReachabilityPath
+	15, // 6: commit0.v1.Finding.properties:type_name -> commit0.v1.Finding.PropertiesEntry
+	0,  // 7: commit0.v1.Finding.ecosystem:type_name -> commit0.v1.Ecosystem
+	8,  // 8: commit0.v1.Advisory.symbols:type_name -> commit0.v1.Symbol
+	0,  // 9: commit0.v1.Advisory.ecosystem:type_name -> commit0.v1.Ecosystem
+	0,  // 10: commit0.v1.EcosystemBuildConfig.ecosystem:type_name -> commit0.v1.Ecosystem
+	16, // 11: commit0.v1.EcosystemBuildConfig.extra_env:type_name -> commit0.v1.EcosystemBuildConfig.ExtraEnvEntry
+	10, // 12: commit0.v1.AnalyzeRequest.build_config:type_name -> commit0.v1.BuildConfig
+	9,  // 13: commit0.v1.AnalyzeRequest.advisories:type_name -> commit0.v1.Advisory
+	11, // 14: commit0.v1.AnalyzeRequest.ecosystem_build_config:type_name -> commit0.v1.EcosystemBuildConfig
+	13, // 15: commit0.v1.Analyzer.Metadata:input_type -> commit0.v1.MetadataRequest
+	12, // 16: commit0.v1.Analyzer.Analyze:input_type -> commit0.v1.AnalyzeRequest
+	14, // 17: commit0.v1.Analyzer.Metadata:output_type -> commit0.v1.MetadataResponse
+	7,  // 18: commit0.v1.Analyzer.Analyze:output_type -> commit0.v1.Finding
 	17, // [17:19] is the sub-list for method output_type
 	15, // [15:17] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
@@ -1341,27 +1342,27 @@ var file_anst_v1_plugin_proto_depIdxs = []int32{
 	0,  // [0:15] is the sub-list for field type_name
 }
 
-func init() { file_anst_v1_plugin_proto_init() }
-func file_anst_v1_plugin_proto_init() {
-	if File_anst_v1_plugin_proto != nil {
+func init() { file_commit0_v1_plugin_proto_init() }
+func file_commit0_v1_plugin_proto_init() {
+	if File_commit0_v1_plugin_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_anst_v1_plugin_proto_rawDesc), len(file_anst_v1_plugin_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_commit0_v1_plugin_proto_rawDesc), len(file_commit0_v1_plugin_proto_rawDesc)),
 			NumEnums:      3,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_anst_v1_plugin_proto_goTypes,
-		DependencyIndexes: file_anst_v1_plugin_proto_depIdxs,
-		EnumInfos:         file_anst_v1_plugin_proto_enumTypes,
-		MessageInfos:      file_anst_v1_plugin_proto_msgTypes,
+		GoTypes:           file_commit0_v1_plugin_proto_goTypes,
+		DependencyIndexes: file_commit0_v1_plugin_proto_depIdxs,
+		EnumInfos:         file_commit0_v1_plugin_proto_enumTypes,
+		MessageInfos:      file_commit0_v1_plugin_proto_msgTypes,
 	}.Build()
-	File_anst_v1_plugin_proto = out.File
-	file_anst_v1_plugin_proto_goTypes = nil
-	file_anst_v1_plugin_proto_depIdxs = nil
+	File_commit0_v1_plugin_proto = out.File
+	file_commit0_v1_plugin_proto_goTypes = nil
+	file_commit0_v1_plugin_proto_depIdxs = nil
 }

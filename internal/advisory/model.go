@@ -3,7 +3,7 @@ package advisory
 import (
 	"strings"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // SourceGoVulnDB is the source attribution tag for the Go vulnerability database.
@@ -200,7 +200,7 @@ type Advisory struct {
 	Versions []string
 
 	// UndecidableRanges is true when the OSV affected entry carried a non-version
-	// (GIT-commit) range anst cannot compare AND no versions[] enumeration to fall
+	// (GIT-commit) range commit0-analyzer cannot compare AND no versions[] enumeration to fall
 	// back on. AffectsVersionV returns VersionUndecidable in that case so the
 	// advisory is forwarded as an UNKNOWN finding rather than silently dropped
 	// (unknown != safe). It distinguishes a GIT-range-only entry (undecidable) from
@@ -355,11 +355,11 @@ func (a *Advisory) AffectsVersion(version string) bool {
 	return false
 }
 
-// ToProto converts the internal Advisory into the wire *anstv1.Advisory type
+// ToProto converts the internal Advisory into the wire *commit0v1.Advisory type
 // ready to embed in an AnalyzeRequest. Provenance fields are NOT included here;
 // callers stamp them into Finding.properties separately.
-func (a *Advisory) ToProto() *anstv1.Advisory {
-	proto := &anstv1.Advisory{
+func (a *Advisory) ToProto() *commit0v1.Advisory {
+	proto := &commit0v1.Advisory{
 		Id:          a.ID,
 		Module:      a.Module,
 		SymbolLevel: a.SymbolLevel,
@@ -374,7 +374,7 @@ func (a *Advisory) ToProto() *anstv1.Advisory {
 
 	// Convert symbols.
 	for _, s := range a.Symbols {
-		proto.Symbols = append(proto.Symbols, &anstv1.Symbol{
+		proto.Symbols = append(proto.Symbols, &commit0v1.Symbol{
 			Package: s.Package,
 			Name:    s.Name,
 		})

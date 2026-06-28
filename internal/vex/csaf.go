@@ -8,7 +8,7 @@ import (
 )
 
 // CSAFFormatter renders a Document as a CSAF 2.0 "csaf_vex" document. CSAF groups
-// assertions per vulnerability with product_status arrays, so multiple anst
+// assertions per vulnerability with product_status arrays, so multiple commit0-analyzer
 // statements about the same vulnerability collapse into one CSAF vulnerability.
 type CSAFFormatter struct{}
 
@@ -16,7 +16,7 @@ type CSAFFormatter struct{}
 func (CSAFFormatter) Name() string { return "csaf" }
 
 // FileName returns the conventional filename for multi-format output.
-func (CSAFFormatter) FileName() string { return "anst.csaf.json" }
+func (CSAFFormatter) FileName() string { return "commit0.csaf.json" }
 
 type csafDoc struct {
 	Document        csafMeta    `json:"document"`
@@ -113,11 +113,11 @@ func (f CSAFFormatter) Format(d *Document) ([]byte, error) {
 		Document: csafMeta{
 			Category:    "csaf_vex",
 			CSAFVersion: "2.0",
-			Title:       "anst reachability VEX",
+			Title:       "commit0 reachability VEX",
 			Publisher: csafPublisher{
 				Category:  "vendor",
 				Name:      authorOf(d),
-				Namespace: "https://github.com/ducthinh993/anst-analyzer",
+				Namespace: "https://github.com/commit0-dev/commit0-analyzer",
 			},
 			Tracking: csafTracking{
 				ID:                 csafTrackingID(d),
@@ -152,7 +152,7 @@ func (f CSAFFormatter) Format(d *Document) ([]byte, error) {
 		if isCVE(vid) {
 			v.CVE = vid
 		} else {
-			v.IDs = []csafID{{SystemName: "anst advisory id", Text: vid}}
+			v.IDs = []csafID{{SystemName: "commit0 advisory id", Text: vid}}
 		}
 		var notAffectedFlagged []string
 		for _, s := range stmts {
@@ -200,7 +200,7 @@ func csafTrackingID(d *Document) string {
 	b, _ := json.Marshal(d.Statements)
 	h.Write(b)
 	h.Write([]byte(rfc3339(d.Timestamp)))
-	return "anst-vex-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return "commit0-vex-" + hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // isCVE reports whether id is a CVE identifier.

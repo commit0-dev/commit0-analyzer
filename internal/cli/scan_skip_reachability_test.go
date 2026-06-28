@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	"github.com/ducthinh993/anst-analyzer/internal/vex"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/vex"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // TestPackageLevelFinding verifies the shape of the findings emitted by the
@@ -23,7 +23,7 @@ func TestPackageLevelFinding(t *testing.T) {
 
 	f := packageLevelFinding(adv, "github.com/example/pkg", "go")
 
-	assert.Equal(t, anstv1.Confidence_CONFIDENCE_UNKNOWN, f.GetConfidence(),
+	assert.Equal(t, commit0v1.Confidence_CONFIDENCE_UNKNOWN, f.GetConfidence(),
 		"skip-reachability findings must be UNKNOWN, never NOT_REACHABLE")
 	assert.Equal(t, "github.com/example/pkg", f.GetModule())
 	assert.Equal(t, "go", f.GetLanguage())
@@ -45,5 +45,5 @@ func TestPackageLevelFinding_undecidableMirrorsIncomplete(t *testing.T) {
 	adv := &advisory.Advisory{ID: "OSV-1", Incomplete: true}
 	f := packageLevelFinding(adv, "left-pad", "js")
 	assert.True(t, f.GetIncomplete())
-	assert.Equal(t, anstv1.Confidence_CONFIDENCE_UNKNOWN, f.GetConfidence())
+	assert.Equal(t, commit0v1.Confidence_CONFIDENCE_UNKNOWN, f.GetConfidence())
 }

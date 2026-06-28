@@ -1,7 +1,7 @@
 /**
  * Lightweight, env-gated performance telemetry for the reachability plugin.
  *
- * Enabled only when ANST_DEBUG or ANST_TELEMETRY is set to a truthy value;
+ * Enabled only when COMMIT0_DEBUG or COMMIT0_TELEMETRY is set to a truthy value;
  * otherwise every entry point is a cheap no-op (a single boolean check) so it
  * costs nothing on normal scans.
  *
@@ -22,8 +22,8 @@
 const TRUTHY = new Set(["1", "true", "yes", "on"]);
 
 function readEnabled(): boolean {
-  const a = process.env.ANST_DEBUG;
-  const b = process.env.ANST_TELEMETRY;
+  const a = process.env.COMMIT0_DEBUG;
+  const b = process.env.COMMIT0_TELEMETRY;
   return (
     (a !== undefined && TRUTHY.has(a.toLowerCase())) ||
     (b !== undefined && TRUTHY.has(b.toLowerCase()))

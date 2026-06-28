@@ -18,7 +18,7 @@ type OpenVEXFormatter struct{}
 func (OpenVEXFormatter) Name() string { return "openvex" }
 
 // FileName returns the conventional filename for multi-format output.
-func (OpenVEXFormatter) FileName() string { return "anst.openvex.json" }
+func (OpenVEXFormatter) FileName() string { return "commit0.openvex.json" }
 
 type openVEXDoc struct {
 	Context    string             `json:"@context"`
@@ -83,7 +83,7 @@ func openVEXID(doc openVEXDoc) string {
 	stripped.ID = ""
 	b, _ := json.Marshal(stripped)
 	h.Write(b)
-	return "https://openvex.dev/docs/anst-" + hex.EncodeToString(h.Sum(nil))[:16]
+	return "https://openvex.dev/docs/commit0-" + hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // rfc3339 formats a time in UTC RFC3339, or "" for the zero time.

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/internal/corpus"
+	"github.com/commit0-dev/commit0-analyzer/internal/corpus"
 )
 
 // corpusTestDir returns the absolute path to testdata/corpus/.
@@ -226,7 +226,7 @@ func TestHarness_BaselineRoundtrip(t *testing.T) {
 // on the pinned test snapshot.
 func TestHarness_SnapshotDigestReadable(t *testing.T) {
 	snap := snapshotDir(t)
-	_, err := os.Stat(filepath.Join(snap, "anst-snapshot-manifest.json"))
+	_, err := os.Stat(filepath.Join(snap, "commit0-analyzer-snapshot-manifest.json"))
 	require.NoError(t, err, "snapshot manifest must exist")
 
 	// Run a minimal corpus with no cases to exercise the snapshot probe path.

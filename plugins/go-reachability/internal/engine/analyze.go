@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"strings"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 	"golang.org/x/tools/go/callgraph"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -19,7 +19,7 @@ import (
 //
 // The builder parameter is pluggable so callers (tests, runner) can select the
 // call-graph algorithm. Pass nil to use DefaultGraphBuilder (VTA on CHA base).
-func Analyze(ctx context.Context, req *anstv1.AnalyzeRequest, builder GraphBuilder) (result []*anstv1.Finding, retErr error) {
+func Analyze(ctx context.Context, req *commit0v1.AnalyzeRequest, builder GraphBuilder) (result []*commit0v1.Finding, retErr error) {
 	if builder == nil {
 		builder = DefaultGraphBuilder
 	}
@@ -109,7 +109,7 @@ func Analyze(ctx context.Context, req *anstv1.AnalyzeRequest, builder GraphBuild
 		baseProps["tags"] = strings.Join(tags, ",")
 	}
 
-	var findings []*anstv1.Finding
+	var findings []*commit0v1.Finding
 	for _, adv := range req.GetAdvisories() {
 		findings = append(findings,
 			analyzeAdvisory(prog, fset, cg, roots, reflectPresent, illTypedMods, adv, baseProps)...,
@@ -126,19 +126,19 @@ func analyzeAdvisory(
 	roots []*ssa.Function,
 	reflectPresent bool,
 	illTypedMods map[string]string,
-	adv *anstv1.Advisory,
+	adv *commit0v1.Advisory,
 	baseProps map[string]string,
-) []*anstv1.Finding {
-	advRef := &anstv1.AdvisoryRef{Id: adv.GetId()}
+) []*commit0v1.Finding {
+	advRef := &commit0v1.AdvisoryRef{Id: adv.GetId()}
 	props := copyProps(baseProps)
 
 	// Build error for this advisory's module → UNKNOWN (Red Team Crit #4).
 	if buildErr, bad := illTypedMods[adv.GetModule()]; bad {
 		props["build_error"] = buildErr
-		return []*anstv1.Finding{{
+		return []*commit0v1.Finding{{
 			Advisory:   advRef,
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Properties: props,
 		}}
 	}
@@ -156,11 +156,11 @@ func analyzeAdvisory(
 		} else {
 			pkgImported = isModuleImported(prog, adv.GetModule())
 		}
-		conf := anstv1.Confidence_CONFIDENCE_NOT_REACHABLE
+		conf := commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE
 		if pkgImported {
-			conf = anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+			conf = commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
 		}
-		return []*anstv1.Finding{{
+		return []*commit0v1.Finding{{
 			Advisory:   advRef,
 			Module:     adv.GetModule(),
 			Confidence: conf,
@@ -169,7 +169,7 @@ func analyzeAdvisory(
 	}
 
 	// Symbol-level advisory: one finding per symbol.
-	var findings []*anstv1.Finding
+	var findings []*commit0v1.Finding
 	for _, sym := range adv.GetSymbols() {
 		rr := ResolveSymbol(prog, sym)
 
@@ -194,13 +194,13 @@ func analyzeAdvisory(
 		}
 
 		conf, callPath := AssignConfidence(inp)
-		f := &anstv1.Finding{
+		f := &commit0v1.Finding{
 			Advisory:   advRef,
 			Module:     adv.GetModule(),
 			Confidence: conf,
 			Properties: symProps,
 		}
-		if conf == anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE && len(callPath) > 0 {
+		if conf == commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE && len(callPath) > 0 {
 			f.Path = stepsToProto(callPath, fset)
 		}
 		findings = append(findings, f)
@@ -209,7 +209,7 @@ func analyzeAdvisory(
 }
 
 // allUnknown returns one UNKNOWN finding per advisory when analysis fails globally.
-func allUnknown(req *anstv1.AnalyzeRequest, goos, goarch string, tags []string, algorithm, reason string) []*anstv1.Finding {
+func allUnknown(req *commit0v1.AnalyzeRequest, goos, goarch string, tags []string, algorithm, reason string) []*commit0v1.Finding {
 	props := map[string]string{
 		"goos":      goos,
 		"goarch":    goarch,
@@ -219,12 +219,12 @@ func allUnknown(req *anstv1.AnalyzeRequest, goos, goarch string, tags []string, 
 	if len(tags) > 0 {
 		props["tags"] = strings.Join(tags, ",")
 	}
-	var findings []*anstv1.Finding
+	var findings []*commit0v1.Finding
 	for _, adv := range req.GetAdvisories() {
-		findings = append(findings, &anstv1.Finding{
-			Advisory:   &anstv1.AdvisoryRef{Id: adv.GetId()},
+		findings = append(findings, &commit0v1.Finding{
+			Advisory:   &commit0v1.AdvisoryRef{Id: adv.GetId()},
 			Module:     adv.GetModule(),
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 			Properties: copyProps(props),
 		})
 	}
@@ -238,7 +238,7 @@ func allUnknown(req *anstv1.AnalyzeRequest, goos, goarch string, tags []string, 
 // import closure is genuinely unreachable (NOT_REACHABLE); an imported one is
 // PACKAGE_REACHABLE (the call graph that would refine it to symbol level is
 // unavailable). The "degraded-import-level" algorithm marks the trade-off.
-func degradedAnalysis(req *anstv1.AnalyzeRequest, pkgs []*packages.Package, goos, goarch string, tags []string, reason string) []*anstv1.Finding {
+func degradedAnalysis(req *commit0v1.AnalyzeRequest, pkgs []*packages.Package, goos, goarch string, tags []string, reason string) []*commit0v1.Finding {
 	imported := loadedPackagePaths(pkgs)
 	props := map[string]string{
 		"goos":            goos,
@@ -249,14 +249,14 @@ func degradedAnalysis(req *anstv1.AnalyzeRequest, pkgs []*packages.Package, goos
 	if len(tags) > 0 {
 		props["tags"] = strings.Join(tags, ",")
 	}
-	var findings []*anstv1.Finding
+	var findings []*commit0v1.Finding
 	for _, adv := range req.GetAdvisories() {
-		conf := anstv1.Confidence_CONFIDENCE_NOT_REACHABLE
+		conf := commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE
 		if advisoryPackageImported(imported, adv) {
-			conf = anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+			conf = commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
 		}
-		findings = append(findings, &anstv1.Finding{
-			Advisory:   &anstv1.AdvisoryRef{Id: adv.GetId()},
+		findings = append(findings, &commit0v1.Finding{
+			Advisory:   &commit0v1.AdvisoryRef{Id: adv.GetId()},
 			Module:     adv.GetModule(),
 			Confidence: conf,
 			Properties: copyProps(props),
@@ -281,7 +281,7 @@ func loadedPackagePaths(pkgs []*packages.Package) map[string]struct{} {
 
 // advisoryPackageImported reports whether the advisory's vulnerable package(s)
 // or module appear in the loaded import closure.
-func advisoryPackageImported(imported map[string]struct{}, adv *anstv1.Advisory) bool {
+func advisoryPackageImported(imported map[string]struct{}, adv *commit0v1.Advisory) bool {
 	for _, sym := range adv.GetSymbols() {
 		if pathImported(imported, sym.GetPackage()) {
 			return true
@@ -349,18 +349,18 @@ func isModuleImported(prog *ssa.Program, modulePath string) bool {
 
 // stepsToProto converts the internal PathStep slice to the proto ReachabilityPath.
 // The call-site location points to where the call happens (the edge Site).
-func stepsToProto(steps []PathStep, fset *token.FileSet) *anstv1.ReachabilityPath {
+func stepsToProto(steps []PathStep, fset *token.FileSet) *commit0v1.ReachabilityPath {
 	if len(steps) == 0 {
 		return nil
 	}
-	proto := &anstv1.ReachabilityPath{}
+	proto := &commit0v1.ReachabilityPath{}
 	for _, s := range steps {
-		cs := &anstv1.CallStep{Symbol: FullyQualifiedName(s.Fn)}
+		cs := &commit0v1.CallStep{Symbol: FullyQualifiedName(s.Fn)}
 		if s.Edge != nil && s.Edge.Site != nil {
 			pos := s.Edge.Site.Pos()
 			if pos != token.NoPos {
 				p := fset.Position(pos)
-				cs.Location = &anstv1.Location{
+				cs.Location = &commit0v1.Location{
 					File:   p.Filename,
 					Line:   int32(p.Line),
 					Column: int32(p.Column),
@@ -369,7 +369,7 @@ func stepsToProto(steps []PathStep, fset *token.FileSet) *anstv1.ReachabilityPat
 		} else if s.Fn != nil && s.Fn.Pos().IsValid() {
 			// Root step: use the function's declaration position.
 			p := fset.Position(s.Fn.Pos())
-			cs.Location = &anstv1.Location{
+			cs.Location = &commit0v1.Location{
 				File:   p.Filename,
 				Line:   int32(p.Line),
 				Column: int32(p.Column),

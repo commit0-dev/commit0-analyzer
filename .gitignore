@@ -102,3 +102,4 @@ testdata/acceptance/
 
 # plugin-local agent memory (not source)
 plugins/js-reachability/.claude/
+/main

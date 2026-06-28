@@ -4,7 +4,7 @@ import (
 	"go/types"
 	"strings"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -25,7 +25,7 @@ type ResolveResult struct {
 // If the package is present but the named symbol does not resolve to an
 // *ssa.Function, the result has Unknown=true. This satisfies Red Team Crit #12b:
 // unresolved symbol → UNKNOWN, never drop.
-func ResolveSymbol(prog *ssa.Program, sym *anstv1.Symbol) ResolveResult {
+func ResolveSymbol(prog *ssa.Program, sym *commit0v1.Symbol) ResolveResult {
 	pkgPath := sym.GetPackage()
 	symName := sym.GetName()
 

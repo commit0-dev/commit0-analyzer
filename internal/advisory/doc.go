@@ -1,4 +1,4 @@
-// Package advisory resolves vulnerability advisories for the anst-analyzer scan target.
+// Package advisory resolves vulnerability advisories for the commit0-analyzer scan target.
 //
 // # MVP Scope: Go Vulnerability Database Only
 //
@@ -25,7 +25,7 @@
 //   - Warn loudly — via [StalenessWarningError] — when the snapshot is older
 //     than a configurable threshold. The warning is surfaced, never silently
 //     swallowed, because unknown ≠ safe at the data boundary.
-//   - Convert internal [Advisory] values to *anstv1.Advisory for embedding in
+//   - Convert internal [Advisory] values to *commit0v1.Advisory for embedding in
 //     an AnalyzeRequest; provenance fields (digest, age) go into finding
 //     properties, not the wire Advisory.
 //

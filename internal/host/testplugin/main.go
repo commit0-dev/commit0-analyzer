@@ -1,4 +1,4 @@
-// Command testplugin is a fake anst-analyzer plugin used exclusively by tests
+// Command testplugin is a fake commit0-analyzer plugin used exclusively by tests
 // in internal/host. It is built by TestMain and exercised via the host.Launch /
 // host.Run APIs.
 //
@@ -27,29 +27,29 @@ import (
 	"strconv"
 	"time"
 
-	anstplugin "github.com/ducthinh993/anst-analyzer/pkg/plugin"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 func main() {
-	anstplugin.Serve(&fakeAnalyzer{})
+	commit0plugin.Serve(&fakeAnalyzer{})
 }
 
-// fakeAnalyzer implements anstv1.AnalyzerServer using env-var-driven modes.
+// fakeAnalyzer implements commit0v1.AnalyzerServer using env-var-driven modes.
 type fakeAnalyzer struct {
-	anstv1.UnimplementedAnalyzerServer
+	commit0v1.UnimplementedAnalyzerServer
 }
 
 func (f *fakeAnalyzer) Metadata(
 	_ context.Context,
-	_ *anstv1.MetadataRequest,
-) (*anstv1.MetadataResponse, error) {
+	_ *commit0v1.MetadataRequest,
+) (*commit0v1.MetadataResponse, error) {
 	mode := os.Getenv("TESTPLUGIN_MODE")
 
 	switch mode {
 	case "incompatible":
 		// Advertise a major version the host cannot accept.
-		return &anstv1.MetadataResponse{
+		return &commit0v1.MetadataResponse{
 			Name:               "testplugin",
 			Version:            "0.0.0",
 			ProtocolVersion:    "99.0",
@@ -59,7 +59,7 @@ func (f *fakeAnalyzer) Metadata(
 
 	case "empty":
 		// Return an empty Name — triggers the self-test sentinel rejection.
-		return &anstv1.MetadataResponse{
+		return &commit0v1.MetadataResponse{
 			Name:            "",
 			ProtocolVersion: "0.1",
 		}, nil
@@ -72,7 +72,7 @@ func (f *fakeAnalyzer) Metadata(
 			// The self-test only checks Name, so this should still pass Launch.
 			proto = "0.0"
 		}
-		return &anstv1.MetadataResponse{
+		return &commit0v1.MetadataResponse{
 			Name:    "testplugin",
 			Version: "0.0.0",
 			// Embed the process PID so tests can assert the child is gone after Kill.
@@ -85,8 +85,8 @@ func (f *fakeAnalyzer) Metadata(
 }
 
 func (f *fakeAnalyzer) Analyze(
-	req *anstv1.AnalyzeRequest,
-	stream anstv1.Analyzer_AnalyzeServer,
+	req *commit0v1.AnalyzeRequest,
+	stream commit0v1.Analyzer_AnalyzeServer,
 ) error {
 	mode := os.Getenv("TESTPLUGIN_MODE")
 
@@ -131,15 +131,15 @@ func (f *fakeAnalyzer) Analyze(
 
 // cannedFinding returns a deterministic Finding for index i.
 // Tests assert on the specific advisory ID to verify deterministic aggregation.
-func cannedFinding(i int) *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory: &anstv1.AdvisoryRef{
+func cannedFinding(i int) *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory: &commit0v1.AdvisoryRef{
 			Id:  fmt.Sprintf("GO-TEST-%04d", i),
 			Url: "https://example.com/vuln",
 		},
 		Module:     "example.com/testmod",
-		Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
-		Severity:   anstv1.Severity_SEVERITY_HIGH,
+		Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+		Severity:   commit0v1.Severity_SEVERITY_HIGH,
 		Properties: map[string]string{
 			"pid":   strconv.Itoa(os.Getpid()),
 			"index": strconv.Itoa(i),

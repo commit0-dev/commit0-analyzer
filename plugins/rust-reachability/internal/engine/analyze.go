@@ -32,8 +32,8 @@ import (
 	"fmt"
 	"strings"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/cargo"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/cargo"
 )
 
 // Analyzer coordinates per-advisory reachability analysis for a single Rust
@@ -46,7 +46,7 @@ type Analyzer struct {
 
 	// Advisories is the slice of advisories to analyze. The host is responsible
 	// for pre-filtering these to the crates.io ecosystem before passing them.
-	Advisories []*anstv1.Advisory
+	Advisories []*commit0v1.Advisory
 }
 
 // Analyze runs per-advisory reachability and returns one Finding per advisory.
@@ -54,8 +54,8 @@ type Analyzer struct {
 // When the Manifest is nil or ClosureUnknown all findings are UNKNOWN with
 // Incomplete=true (partiality invariant: never a false NOT_REACHABLE from an
 // incomplete graph).
-func (a *Analyzer) Analyze() []*anstv1.Finding {
-	findings := make([]*anstv1.Finding, 0, len(a.Advisories))
+func (a *Analyzer) Analyze() []*commit0v1.Finding {
+	findings := make([]*commit0v1.Finding, 0, len(a.Advisories))
 
 	// Closed-closure unknown: degrade ALL advisories.
 	if a.Manifest == nil || a.Manifest.ClosureUnknown {
@@ -80,12 +80,12 @@ func (a *Analyzer) Analyze() []*anstv1.Finding {
 //  4. Dev-only gate: tag if only-dev.
 //  5. Symbol hint: record properties["symbol_hint"] when advisory has symbols.
 //  6. Emit PACKAGE_REACHABLE.
-func (a *Analyzer) analyzeAdvisory(adv *anstv1.Advisory) *anstv1.Finding {
-	f := &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: adv.GetId()},
+func (a *Analyzer) analyzeAdvisory(adv *commit0v1.Advisory) *commit0v1.Finding {
+	f := &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: adv.GetId()},
 		Module:     adv.GetModule(),
 		Language:   "rust",
-		Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_CRATES_IO,
+		Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_CRATES_IO,
 		Properties: make(map[string]string),
 	}
 
@@ -93,7 +93,7 @@ func (a *Analyzer) analyzeAdvisory(adv *anstv1.Advisory) *anstv1.Finding {
 	// NOT_REACHABLE is ONLY allowed here — crate wholly absent from the graph.
 	pkg, exists := a.Manifest.Packages[adv.GetModule()]
 	if !exists {
-		f.Confidence = anstv1.Confidence_CONFIDENCE_NOT_REACHABLE
+		f.Confidence = commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE
 		f.Properties["reason"] = "crate absent from resolved Cargo closure"
 		return f
 	}
@@ -102,7 +102,7 @@ func (a *Analyzer) analyzeAdvisory(adv *anstv1.Advisory) *anstv1.Finding {
 	// These must be checked BEFORE assigning PACKAGE_REACHABLE — any undecidable
 	// path becomes UNKNOWN (never falls through to NOT_REACHABLE).
 	if reason, unknown := a.isUnknown(adv, pkg); unknown {
-		f.Confidence = anstv1.Confidence_CONFIDENCE_UNKNOWN
+		f.Confidence = commit0v1.Confidence_CONFIDENCE_UNKNOWN
 		f.Incomplete = true
 		f.Properties["reason"] = reason
 		return f
@@ -122,7 +122,7 @@ func (a *Analyzer) analyzeAdvisory(adv *anstv1.Advisory) *anstv1.Finding {
 	}
 
 	// Step 5: PACKAGE_REACHABLE — crate is present and no undecidable condition.
-	f.Confidence = anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+	f.Confidence = commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
 	return f
 }
 
@@ -156,7 +156,7 @@ func (a *Analyzer) analyzeAdvisory(adv *anstv1.Advisory) *anstv1.Finding {
 // False-safe contract: when uncertain, this function returns (reason, true)
 // (UNKNOWN), NEVER (_, false) (which would let the caller emit PACKAGE_REACHABLE
 // for an ambiguous case).
-func (a *Analyzer) isUnknown(adv *anstv1.Advisory, pkg *cargo.Package) (reason string, unknown bool) {
+func (a *Analyzer) isUnknown(adv *commit0v1.Advisory, pkg *cargo.Package) (reason string, unknown bool) {
 	// Condition 1: Macro-generated symbols.
 	// If the advisory carries symbol-level data, inspect each symbol for
 	// proc-macro / macro_rules! indicators.
@@ -290,7 +290,7 @@ func isTraitObjectSymbol(pkg, name string) bool {
 
 // symbolHint returns the first advisory symbol as a "package::name" string
 // for recording in the finding properties. Returns empty string if no symbols.
-func (a *Analyzer) symbolHint(syms []*anstv1.Symbol) string {
+func (a *Analyzer) symbolHint(syms []*commit0v1.Symbol) string {
 	if len(syms) == 0 {
 		return ""
 	}
@@ -307,13 +307,13 @@ func (a *Analyzer) symbolHint(syms []*anstv1.Symbol) string {
 // unknownFinding constructs a UNKNOWN+Incomplete finding for the given advisory
 // with the supplied reason. Used for closure-unavailable degradation and any
 // other partial-graph sentinel.
-func (a *Analyzer) unknownFinding(adv *anstv1.Advisory, reason string) *anstv1.Finding {
-	return &anstv1.Finding{
-		Advisory:   &anstv1.AdvisoryRef{Id: adv.GetId()},
+func (a *Analyzer) unknownFinding(adv *commit0v1.Advisory, reason string) *commit0v1.Finding {
+	return &commit0v1.Finding{
+		Advisory:   &commit0v1.AdvisoryRef{Id: adv.GetId()},
 		Module:     adv.GetModule(),
 		Language:   "rust",
-		Ecosystem:  anstv1.Ecosystem_ECOSYSTEM_CRATES_IO,
-		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		Ecosystem:  commit0v1.Ecosystem_ECOSYSTEM_CRATES_IO,
+		Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		Incomplete: true,
 		Properties: map[string]string{
 			"reason": reason,

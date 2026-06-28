@@ -1,4 +1,4 @@
-// Package policy implements the policy-as-code gate for anst-analyzer.
+// Package policy implements the policy-as-code gate for commit0-analyzer.
 //
 // # Exit Code Contract
 //

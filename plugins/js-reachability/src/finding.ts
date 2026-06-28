@@ -11,12 +11,12 @@
  *   - Findings sorted by stable key: advisory.id + module for determinism.
  */
 
-import { Confidence, Ecosystem, Severity } from "./gen/anst/v1/plugin.js";
+import { Confidence, Ecosystem, Severity } from "./gen/commit0/v1/plugin.js";
 import type {
   Finding,
   Advisory,
   ReachabilityPath,
-} from "./gen/anst/v1/plugin.js";
+} from "./gen/commit0/v1/plugin.js";
 import type { QueryAdvisory } from "./reach/query.js";
 
 // ── Public API ────────────────────────────────────────────────────────────────

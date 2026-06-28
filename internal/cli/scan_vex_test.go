@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 // TestEmitVEX_StatusMappingAndCardinalSin drives the scan-side VEX wiring end to
@@ -16,33 +16,33 @@ import (
 // and an incomplete NOT_REACHABLE finding are under_investigation, never
 // not_affected.
 func TestEmitVEX_StatusMappingAndCardinalSin(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "CVE-2024-0001", Aliases: []string{"GHSA-xxxx"}},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "CVE-2024-0001", Aliases: []string{"GHSA-xxxx"}},
 			Module:     "golang.org/x/net",
-			Confidence: anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE,
 		},
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "CVE-2024-0002"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "CVE-2024-0002"},
 			Module:     "github.com/foo/bar",
-			Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 		},
 		{
-			Advisory:   &anstv1.AdvisoryRef{Id: "CVE-2024-0003"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "CVE-2024-0003"},
 			Module:     "github.com/baz/qux",
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		},
 		{
 			// Incomplete NOT_REACHABLE: must NOT become not_affected.
-			Advisory:   &anstv1.AdvisoryRef{Id: "CVE-2024-0004"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "CVE-2024-0004"},
 			Module:     "github.com/partial/dep",
-			Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			Incomplete: true,
 		},
 		{
 			// Synthetic/no-advisory marker: skipped entirely.
-			Advisory:   &anstv1.AdvisoryRef{},
-			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Advisory:   &commit0v1.AdvisoryRef{},
+			Confidence: commit0v1.Confidence_CONFIDENCE_UNKNOWN,
 		},
 	}
 	advByID := map[string]*advisory.Advisory{
@@ -105,13 +105,13 @@ func TestEmitVEX_StatusMappingAndCardinalSin(t *testing.T) {
 // over an incomplete graph, so it must map to under_investigation, never
 // not_affected — the cardinal-sin guard.
 func TestEmitVEX_ScanLevelIncompleteGuard(t *testing.T) {
-	findings := []*anstv1.Finding{
+	findings := []*commit0v1.Finding{
 		{
 			// NOT_REACHABLE with per-finding Incomplete=false: only the scan
 			// aggregate flags the partial closure.
-			Advisory:   &anstv1.AdvisoryRef{Id: "CVE-2024-1000"},
+			Advisory:   &commit0v1.AdvisoryRef{Id: "CVE-2024-1000"},
 			Module:     "github.com/partial/closure",
-			Confidence: anstv1.Confidence_CONFIDENCE_NOT_REACHABLE,
+			Confidence: commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE,
 			Incomplete: false,
 		},
 	}

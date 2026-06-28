@@ -4,9 +4,9 @@ import (
 	"context"
 	"sort"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/ghfetch"
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/symbolextract"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/ghfetch"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/symbolextract"
 )
 
 // Resolver orchestrates symbol resolution for a single scan: it checks the

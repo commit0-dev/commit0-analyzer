@@ -1,10 +1,10 @@
 // Package corpus provides the reachability corpus harness and precision/recall
-// metrics for anst-analyzer. It runs the analyzer over labeled fixture modules,
+// metrics for commit0-analyzer. It runs the analyzer over labeled fixture modules,
 // computes TP/FP/FN counts, and optionally compares against a recorded govulncheck
 // baseline (never a live run — the baseline is pinned to avoid drift).
 package corpus
 
-import anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
+import commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 
 // Label is the expected reachability result for a corpus case.
 type Label int
@@ -49,7 +49,7 @@ type CaseResult struct {
 	// Expected is the labeled expected outcome.
 	Expected Label
 	// Got is the confidence the engine produced.
-	Got anstv1.Confidence
+	Got commit0v1.Confidence
 	// Outcome is the evaluation result.
 	Outcome Outcome
 }
@@ -106,14 +106,14 @@ func (m *Metrics) FPSuppressionRate() float64 {
 
 // Evaluate computes the Outcome for a single case and updates m.
 // expected is the label, got is the confidence the engine produced.
-func (m *Metrics) Evaluate(caseName, advisoryID string, expected Label, got anstv1.Confidence) CaseResult {
+func (m *Metrics) Evaluate(caseName, advisoryID string, expected Label, got commit0v1.Confidence) CaseResult {
 	var outcome Outcome
 	switch expected {
 	case LabelReachable:
 		if isReachable(got) {
 			outcome = OutcomeTP
 			m.TP++
-		} else if got == anstv1.Confidence_CONFIDENCE_UNKNOWN {
+		} else if got == commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 			// UNKNOWN is conservative — not a false negative (could still be reachable).
 			// We do not count it as FN; it sits outside the precision/recall pair.
 			outcome = OutcomeUnknown
@@ -124,7 +124,7 @@ func (m *Metrics) Evaluate(caseName, advisoryID string, expected Label, got anst
 			m.FN++
 		}
 	case LabelNotReachable:
-		if got == anstv1.Confidence_CONFIDENCE_NOT_REACHABLE {
+		if got == commit0v1.Confidence_CONFIDENCE_NOT_REACHABLE {
 			outcome = OutcomeTN
 			m.TN++
 		} else if isReachable(got) {
@@ -136,7 +136,7 @@ func (m *Metrics) Evaluate(caseName, advisoryID string, expected Label, got anst
 			m.UnknownCorrect++
 		}
 	case LabelUnknown:
-		if got == anstv1.Confidence_CONFIDENCE_UNKNOWN {
+		if got == commit0v1.Confidence_CONFIDENCE_UNKNOWN {
 			outcome = OutcomeUnknown
 			m.UnknownCorrect++
 		} else {
@@ -159,7 +159,7 @@ func (m *Metrics) Evaluate(caseName, advisoryID string, expected Label, got anst
 }
 
 // isReachable reports whether a confidence level indicates the symbol/package is reachable.
-func isReachable(c anstv1.Confidence) bool {
-	return c == anstv1.Confidence_CONFIDENCE_SYMBOL_REACHABLE ||
-		c == anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
+func isReachable(c commit0v1.Confidence) bool {
+	return c == commit0v1.Confidence_CONFIDENCE_SYMBOL_REACHABLE ||
+		c == commit0v1.Confidence_CONFIDENCE_PACKAGE_REACHABLE
 }

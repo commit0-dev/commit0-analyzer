@@ -16,9 +16,9 @@ import (
 	"fmt"
 	"os"
 
-	anstv1 "github.com/ducthinh993/anst-analyzer/pkg/contract/anstv1"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/cargo"
-	"github.com/ducthinh993/anst-analyzer/plugins/rust-reachability/internal/engine"
+	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/cargo"
+	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/engine"
 )
 
 func main() {
@@ -44,7 +44,7 @@ func run() error {
 	}
 
 	// Build advisory list.
-	var advisories []*anstv1.Advisory
+	var advisories []*commit0v1.Advisory
 	if *advJSON != "" {
 		data, err := os.ReadFile(*advJSON)
 		if err != nil {
@@ -54,14 +54,14 @@ func run() error {
 			return fmt.Errorf("parse advisories: %w", err)
 		}
 	} else if *advID != "" {
-		adv := &anstv1.Advisory{
+		adv := &commit0v1.Advisory{
 			Id:          *advID,
 			Module:      *advModule,
 			SymbolLevel: *advSym != "",
-			Ecosystem:   anstv1.Ecosystem_ECOSYSTEM_CRATES_IO,
+			Ecosystem:   commit0v1.Ecosystem_ECOSYSTEM_CRATES_IO,
 		}
 		if *advPkg != "" && *advSym != "" {
-			adv.Symbols = []*anstv1.Symbol{{
+			adv.Symbols = []*commit0v1.Symbol{{
 				Package: *advPkg,
 				Name:    *advSym,
 			}}

@@ -47,7 +47,7 @@ jobs:
               - 'proto/**'
               - 'buf.yaml'
               - 'buf.gen.yaml'
-              - 'pkg/contract/anstv1/**'
+              - 'pkg/contract/commit0v1/**'
               - '.github/workflows/ci.yml'
             js:
               - 'plugins/js-reachability/**'
@@ -81,7 +81,7 @@ jobs:
       - name: Check proto-gen drift
         # Fails if generated files differ from committed files, catching drift
         # from proto changes without re-running buf generate.
-        run: git diff --exit-code -- pkg/contract/anstv1/
+        run: git diff --exit-code -- pkg/contract/commit0v1/
 
   build-test:
     name: Build, Test, Lint

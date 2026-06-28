@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/pkg/contract"
+	"github.com/commit0-dev/commit0-analyzer/pkg/contract"
 )
 
 func TestProtocolVersion_Present(t *testing.T) {

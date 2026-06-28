@@ -26,7 +26,7 @@ func jsPluginBuilt(t *testing.T) bool {
 		"oxc-binding",
 		"parser."+runtime.GOOS+"-"+runtime.GOARCH+".node",
 	)
-	_, errBin := os.Stat(filepath.Join(root, "plugins", "js-reachability", "dist", "anst-js-reachability"))
+	_, errBin := os.Stat(filepath.Join(root, "plugins", "js-reachability", "dist", "commit0-js-reachability"))
 	_, errSidecar := os.Stat(sidecar)
 	return errBin == nil && errSidecar == nil
 }

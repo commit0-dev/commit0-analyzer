@@ -5,33 +5,33 @@ import (
 	"sort"
 )
 
-// DeltaKind classifies the relationship between an anst result and a comparator
+// DeltaKind classifies the relationship between a commit0-analyzer result and a comparator
 // result for one vulnerability. The set is closed and ordered for deterministic
 // reporting.
 type DeltaKind string
 
 const (
-	// DeltaShared: both anst and the comparator reported the vulnerability and
-	// anst reported it as reachable/affected (not suppressed, not unknown).
+	// DeltaShared: both commit0-analyzer and the comparator reported the vulnerability and
+	// commit0-analyzer reported it as reachable/affected (not suppressed, not unknown).
 	DeltaShared DeltaKind = "shared"
-	// DeltaSuppressedSound: the comparator flagged it and anst carries the same
+	// DeltaSuppressedSound: the comparator flagged it and commit0-analyzer carries the same
 	// advisory with a proven NOT_REACHABLE verdict — a correct reachability
-	// suppression, anst's differentiator, NOT a miss.
+	// suppression, commit0-analyzer's differentiator, NOT a miss.
 	DeltaSuppressedSound DeltaKind = "suppressed-sound"
-	// DeltaUnknownSurfaced: the comparator flagged it and anst surfaced it but
+	// DeltaUnknownSurfaced: the comparator flagged it and commit0-analyzer surfaced it but
 	// could not decide reachability (UNKNOWN/incomplete). Not a clean miss —
-	// unknown ≠ safe means anst still reports it for the user/gate.
+	// unknown ≠ safe means commit0-analyzer still reports it for the user/gate.
 	DeltaUnknownSurfaced DeltaKind = "unknown-surfaced"
-	// DeltaMiss: the comparator flagged it and anst has no record at all — a
+	// DeltaMiss: the comparator flagged it and commit0-analyzer has no record at all — a
 	// genuine false negative.
 	DeltaMiss DeltaKind = "miss"
-	// DeltaAnstUnique: anst reported it and the comparator did not — broader
+	// DeltaCommit0Unique: commit0-analyzer reported it and the comparator did not — broader
 	// coverage or a candidate false positive; flagged for human review, never
 	// auto-counted as a confirmed FP.
-	DeltaAnstUnique DeltaKind = "anst-unique"
+	DeltaCommit0Unique DeltaKind = "commit0-analyzer-unique"
 )
 
-// Delta is one classified relationship between anst and a comparator for a
+// Delta is one classified relationship between commit0-analyzer and a comparator for a
 // single vulnerability on a single package.
 type Delta struct {
 	Kind       DeltaKind `json:"kind"`
@@ -42,36 +42,36 @@ type Delta struct {
 	Reason string `json:"reason"`
 }
 
-// ComparisonResult is the full classified comparison of anst against one
+// ComparisonResult is the full classified comparison of commit0-analyzer against one
 // comparator on one corpus entry.
 type ComparisonResult struct {
 	Comparator      string  `json:"comparator"`
 	Corpus          string  `json:"corpus"`
-	AnstCount       int     `json:"anst_count"`
+	Commit0Count       int     `json:"commit0_count"`
 	ComparatorCount int     `json:"comparator_count"`
 	Deltas          []Delta `json:"deltas"`
 }
 
-// Compare classifies anst's findings against one comparator's findings for a
+// Compare classifies commit0-analyzer's findings against one comparator's findings for a
 // single corpus entry. The result is deterministic: deltas are stable-sorted by
 // (kind, vuln id, package). The classification never launders a miss into a
-// suppression — only a proven NOT_REACHABLE anst record yields DeltaSuppressedSound.
-func Compare(corpus, comparator string, anst, other []Finding) ComparisonResult {
+// suppression — only a proven NOT_REACHABLE commit0-analyzer record yields DeltaSuppressedSound.
+func Compare(corpus, comparator string, commit0Analyzer, other []Finding) ComparisonResult {
 	res := ComparisonResult{
 		Comparator:      comparator,
 		Corpus:          corpus,
-		AnstCount:       len(anst),
+		Commit0Count:       len(commit0Analyzer),
 		ComparatorCount: len(other),
 	}
 
-	// Track which anst findings were matched by some comparator finding so the
-	// remainder can be reported as anst-unique.
-	matchedAnst := make([]bool, len(anst))
+	// Track which commit0-analyzer findings were matched by some comparator finding so the
+	// remainder can be reported as commit0-analyzer-unique.
+	matchedCommit0 := make([]bool, len(commit0Analyzer))
 
 	for _, c := range other {
-		kind, reason, anstIdx := classifyAgainstAnst(c, anst)
-		if anstIdx >= 0 {
-			matchedAnst[anstIdx] = true
+		kind, reason, commit0Idx := classifyAgainstCommit0(c, commit0Analyzer)
+		if commit0Idx >= 0 {
+			matchedCommit0[commit0Idx] = true
 		}
 		res.Deltas = append(res.Deltas, Delta{
 			Kind:       kind,
@@ -82,16 +82,16 @@ func Compare(corpus, comparator string, anst, other []Finding) ComparisonResult 
 		})
 	}
 
-	for i, a := range anst {
-		if matchedAnst[i] {
+	for i, a := range commit0Analyzer {
+		if matchedCommit0[i] {
 			continue
 		}
 		res.Deltas = append(res.Deltas, Delta{
-			Kind:       DeltaAnstUnique,
+			Kind:       DeltaCommit0Unique,
 			VulnID:     a.VulnID,
 			Package:    a.Package,
 			Comparator: comparator,
-			Reason:     "anst reported; " + comparator + " did not (broader coverage or candidate FP — needs review)",
+			Reason:     "commit0-analyzer reported; " + comparator + " did not (broader coverage or candidate FP — needs review)",
 		})
 	}
 
@@ -99,14 +99,14 @@ func Compare(corpus, comparator string, anst, other []Finding) ComparisonResult 
 	return res
 }
 
-// classifyAgainstAnst classifies one comparator finding against anst's full
+// classifyAgainstCommit0 classifies one comparator finding against commit0-analyzer's full
 // finding set. It returns the delta kind, a reason, and the index of the matching
-// anst finding (or -1 when none matched). The order of checks encodes the
-// cardinal rule: a comparator-only finding is a suppression ONLY when anst proved
-// NOT_REACHABLE; an undecided anst record is "surfaced", and no anst record is a
+// commit0-analyzer finding (or -1 when none matched). The order of checks encodes the
+// cardinal rule: a comparator-only finding is a suppression ONLY when commit0-analyzer proved
+// NOT_REACHABLE; an undecided commit0-analyzer record is "surfaced", and no commit0-analyzer record is a
 // miss.
-func classifyAgainstAnst(c Finding, anst []Finding) (DeltaKind, string, int) {
-	for i, a := range anst {
+func classifyAgainstCommit0(c Finding, commit0Analyzer []Finding) (DeltaKind, string, int) {
+	for i, a := range commit0Analyzer {
 		if !sameVuln(a, c) {
 			continue
 		}
@@ -117,18 +117,18 @@ func classifyAgainstAnst(c Finding, anst []Finding) (DeltaKind, string, int) {
 			// analysis cannot prove unreachability, so it is surfaced (next case),
 			// never laundered into a suppression — the harness must not be less
 			// conservative than the product's own VEX guard.
-			return DeltaSuppressedSound, "anst proved NOT_REACHABLE (sound reachability suppression)", i
+			return DeltaSuppressedSound, "commit0-analyzer proved NOT_REACHABLE (sound reachability suppression)", i
 		case a.Incomplete || a.Reachability == reachUnknown:
-			return DeltaUnknownSurfaced, "anst surfaced as UNKNOWN/incomplete (reported, not dropped)", i
+			return DeltaUnknownSurfaced, "commit0-analyzer surfaced as UNKNOWN/incomplete (reported, not dropped)", i
 		case a.isReachable():
-			return DeltaShared, "both tools flagged; anst reachable", i
+			return DeltaShared, "both tools flagged; commit0-analyzer reachable", i
 		default:
-			// anst carries the record but with no reachability verdict — still
+			// commit0-analyzer carries the record but with no reachability verdict — still
 			// surfaced, never silently safe.
-			return DeltaUnknownSurfaced, "anst surfaced without a reachability verdict", i
+			return DeltaUnknownSurfaced, "commit0-analyzer surfaced without a reachability verdict", i
 		}
 	}
-	return DeltaMiss, "comparator flagged; anst has no record (genuine false negative)", -1
+	return DeltaMiss, "comparator flagged; commit0-analyzer has no record (genuine false negative)", -1
 }
 
 // sortDeltas orders deltas deterministically by kind, then vuln id, then package.
@@ -145,13 +145,13 @@ func sortDeltas(ds []Delta) {
 }
 
 // Summary aggregates delta counts for a comparison. FalseNegatives is the
-// soundness-critical number: comparator findings anst missed entirely.
+// soundness-critical number: comparator findings commit0-analyzer missed entirely.
 type Summary struct {
 	Shared          int `json:"shared"`
 	SuppressedSound int `json:"suppressed_sound"`
 	UnknownSurfaced int `json:"unknown_surfaced"`
 	FalseNegatives  int `json:"false_negatives"`
-	AnstUnique      int `json:"anst_unique"`
+	Commit0Unique      int `json:"commit0_unique"`
 }
 
 // Summarize counts each delta kind in a comparison result.
@@ -167,8 +167,8 @@ func Summarize(res ComparisonResult) Summary {
 			s.UnknownSurfaced++
 		case DeltaMiss:
 			s.FalseNegatives++
-		case DeltaAnstUnique:
-			s.AnstUnique++
+		case DeltaCommit0Unique:
+			s.Commit0Unique++
 		}
 	}
 	return s

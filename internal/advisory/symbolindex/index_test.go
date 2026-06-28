@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ducthinh993/anst-analyzer/internal/advisory"
-	"github.com/ducthinh993/anst-analyzer/internal/advisory/symbolindex"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory"
+	"github.com/commit0-dev/commit0-analyzer/internal/advisory/symbolindex"
 )
 
 // TestIndex_LoadSave_RoundTrip verifies that an index persisted to disk is

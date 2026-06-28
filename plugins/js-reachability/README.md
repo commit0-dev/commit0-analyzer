@@ -1,7 +1,7 @@
 # js-reachability plugin
 
-JS/TS SCA reachability analyzer plugin for `anst-analyzer`. Implements the
-`anst.v1.Analyzer` gRPC service over the `hashicorp/go-plugin` v1.8.0 subprocess
+JS/TS SCA reachability analyzer plugin for `commit0-analyzer`. Implements the
+`commit0.v1.Analyzer` gRPC service over the `hashicorp/go-plugin` v1.8.0 subprocess
 transport.
 
 ## Distribution layout
@@ -10,7 +10,7 @@ The plugin ships as two files:
 
 ```
 dist/
-  anst-js-reachability              # compiled Bun binary (main executable)
+  commit0-js-reachability              # compiled Bun binary (main executable)
   oxc-binding/
     parser.<platform>-<arch>.node   # oxc native addon sidecar
 ```
@@ -32,7 +32,7 @@ Which runs:
 ```sh
 cd plugins/js-reachability
 bun install
-bun build src/main.ts --compile --outfile dist/anst-js-reachability
+bun build src/main.ts --compile --outfile dist/commit0-js-reachability
 # then places the oxc sidecar at dist/oxc-binding/parser.<platform>.node
 ```
 
@@ -58,7 +58,7 @@ buf generate --template buf.gen.js.yaml
 ```
 
 Stubs are committed to `src/gen/` (parity with Go's committed
-`pkg/contract/anstv1/` stubs). Regenerate whenever `proto/anst/v1/plugin.proto`
+`pkg/contract/commit0v1/` stubs). Regenerate whenever `proto/commit0/v1/plugin.proto`
 changes.
 
 ## Transport details
@@ -69,7 +69,7 @@ Magic-cookie guard (checked before the server starts):
 
 | Env var                  | Required value            |
 |--------------------------|---------------------------|
-| `ANST_PLUGIN_MAGIC_COOKIE` | `anst-analyzer-v0-plugin` |
+| `COMMIT0_PLUGIN_MAGIC_COOKIE` | `commit0-analyzer-v0-plugin` |
 
 If the env var is absent or wrong the binary prints a human-readable error to
 stderr and exits 1. This is a UX guard against accidental direct execution, not
@@ -100,7 +100,7 @@ so insecure credentials are correct.
 | Service                  | Why required |
 |--------------------------|--------------|
 | `grpc.health.v1.Health`  | **Mandatory.** go-plugin `Ping()` calls `Health/Check` with `service="plugin"`; must return `SERVING` or the connection fails. |
-| `anst.v1.Analyzer`       | The actual plugin contract (`Metadata` + `Analyze`). |
+| `commit0.v1.Analyzer`       | The actual plugin contract (`Metadata` + `Analyze`). |
 | `plugin.GRPCController`  | `Shutdown()`: without it `Kill()` waits the 2-second grace period before SIGKILL. |
 | `plugin.GRPCStdio`       | `StreamStdio` no-op: without it go-plugin logs an `Unimplemented` warning. |
 

@@ -1,11 +1,11 @@
 {
-  "name": "anst-js-reachability",
+  "name": "commit0-js-reachability",
   "version": "0.1.0",
   "private": true,
-  "description": "JS/TS SCA reachability plugin for anst-analyzer",
+  "description": "JS/TS SCA reachability plugin for commit0-analyzer",
   "type": "module",
   "scripts": {
-    "build": "bun build src/main.ts --compile --outfile dist/anst-js-reachability",
+    "build": "bun build src/main.ts --compile --outfile dist/commit0-js-reachability",
     "generate": "npx ts-proto-gen",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

@@ -418,13 +418,13 @@ func TestPubResolveLanguageDart(t *testing.T) {
 
 // ── scan guard tests ──────────────────────────────────────────────────────────
 
-// buildPubTestBinary compiles the anst-analyzer CLI binary into a temp dir and
+// buildPubTestBinary compiles the commit0-analyzer CLI binary into a temp dir and
 // returns its path. Shared by the guard tests below.
 func buildPubTestBinary(t *testing.T) string {
 	t.Helper()
-	cliBin := filepath.Join(t.TempDir(), "anst-analyzer")
-	out, err := exec.Command("go", "build", "-o", cliBin, "github.com/ducthinh993/anst-analyzer/cmd/anst").CombinedOutput()
-	require.NoError(t, err, "build anst-analyzer CLI:\n%s", out)
+	cliBin := filepath.Join(t.TempDir(), "commit0-analyzer")
+	out, err := exec.Command("go", "build", "-o", cliBin, "github.com/commit0-dev/commit0-analyzer/cmd/commit0-analyzer").CombinedOutput()
+	require.NoError(t, err, "build commit0-analyzer CLI:\n%s", out)
 	return cliBin
 }
 

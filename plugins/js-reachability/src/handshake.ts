@@ -34,8 +34,8 @@
 
 import * as grpc from "@grpc/grpc-js";
 
-const MAGIC_COOKIE_KEY = "ANST_PLUGIN_MAGIC_COOKIE";
-const MAGIC_COOKIE_VALUE = "anst-analyzer-v0-plugin";
+const MAGIC_COOKIE_KEY = "COMMIT0_PLUGIN_MAGIC_COOKIE";
+const MAGIC_COOKIE_VALUE = "commit0-analyzer-v0-plugin";
 
 // go-plugin protocol constants.
 const CORE_PROTOCOL = 1;
@@ -46,7 +46,7 @@ export function checkMagicCookie(): void {
   const value = process.env[MAGIC_COOKIE_KEY];
   if (value !== MAGIC_COOKIE_VALUE) {
     process.stderr.write(
-      `This binary is a plugin for anst-analyzer and must be launched by the host process.\n` +
+      `This binary is a plugin for commit0-analyzer and must be launched by the host process.\n` +
         `It cannot be run directly.\n` +
         `Expected env var ${MAGIC_COOKIE_KEY}=${MAGIC_COOKIE_VALUE}.\n`,
     );

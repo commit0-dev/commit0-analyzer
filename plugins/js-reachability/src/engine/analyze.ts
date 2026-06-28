@@ -35,8 +35,8 @@ import { buildFinding, sortFindings } from "../finding.js";
 import { detectEntrypoints } from "../entry/detect-entrypoints.js";
 import { buildProjectModel } from "../project/build-project-model.js";
 import { computeWorkspaceClosure } from "../project/dep-closure.js";
-import { Confidence } from "../gen/anst/v1/plugin.js";
-import type { Finding } from "../gen/anst/v1/plugin.js";
+import { Confidence } from "../gen/commit0/v1/plugin.js";
+import type { Finding } from "../gen/commit0/v1/plugin.js";
 import * as telemetry from "../telemetry.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
   const { moduleRoot, advisories } = req;
 
   // Per-scan telemetry: reset accumulators so a debug summary reflects this
-  // scan only (no-op unless ANST_DEBUG/ANST_TELEMETRY is set). Flushed to
+  // scan only (no-op unless COMMIT0_DEBUG/COMMIT0_TELEMETRY is set). Flushed to
   // stderr before each return below.
   telemetry.reset();
 
