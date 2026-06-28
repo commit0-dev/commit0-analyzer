@@ -50,6 +50,82 @@ func cvssScoreToSeverity(score float64) Severity {
 	}
 }
 
+// CVSSMetric is a single parsed CVSS vector together with its computed base
+// score. It is additive enrichment carried Go-side only — it never appears on
+// the wire Advisory proto.
+//
+// BaseScore semantics by version:
+//   - "3.0" / "3.1": the exact base score computed from the vector per the
+//     official CVSS v3.x specification.
+//   - "4.0": the vector is captured losslessly but BaseScore is 0 because the
+//     exact v4.0 base-score math is deferred (see cvss.go). A zero BaseScore on a
+//     v4.0 metric therefore means "not yet computed", and severityFromMetrics
+//     deliberately does NOT downgrade severity from it — unknown ≠ safe.
+type CVSSMetric struct {
+	// Version is the CVSS version: "3.0", "3.1", or "4.0".
+	Version string
+	// Vector is the full CVSS vector string, captured losslessly.
+	Vector string
+	// BaseScore is the computed base score (see type doc for v4.0 caveat).
+	BaseScore float64
+	// Source attributes which feed supplied this metric (e.g. "nvd", "ghsa").
+	// Empty when the producing source did not record an attribution.
+	Source string
+}
+
+// EPSSScore is the FIRST Exploit Prediction Scoring System signal for a CVE.
+// Filled by the EPSS enricher (later phase); nil when no EPSS data was fetched.
+type EPSSScore struct {
+	// Probability is the EPSS probability of exploitation in the next 30 days [0,1].
+	Probability float64
+	// Percentile is the EPSS percentile rank among all scored CVEs [0,1].
+	Percentile float64
+	// Date is the EPSS model date (YYYY-MM-DD) the score was published on.
+	Date string
+}
+
+// KEVEntry is the CISA Known Exploited Vulnerabilities catalog signal for a CVE.
+// Filled by the KEV enricher (later phase); nil when the CVE is not in the catalog
+// OR the catalog could not be fetched — the distinction is carried by the scan's
+// incomplete flag, never by silently treating a missing entry as "not exploited".
+type KEVEntry struct {
+	// Listed is true when the CVE appears in the KEV catalog.
+	Listed bool
+	// DateAdded is the catalog addition date (YYYY-MM-DD).
+	DateAdded string
+	// DueDate is the federal remediation due date (YYYY-MM-DD).
+	DueDate string
+	// KnownRansomware is true when CISA marks the entry as used in ransomware.
+	KnownRansomware bool
+}
+
+// RiskScore is the fused, explainable risk-prioritization signal. Filled by the
+// risk-fusion phase; nil until then.
+type RiskScore struct {
+	// Score is the numeric risk on a 0–100 scale.
+	Score float64
+	// Tier is the human-readable band (e.g. "critical", "high").
+	Tier string
+	// Rationale explains, deterministically, how the score was derived.
+	Rationale string
+}
+
+// SourceContribution records what a single source contributed to a merged
+// advisory so cross-source conflict resolution and provenance reporting can
+// decide without re-querying the source.
+type SourceContribution struct {
+	// Name is the source name (e.g. "ghsa", "nvd", "go-vuln-db").
+	Name string
+	// Severity is the severity this source reported for the advisory.
+	Severity Severity
+	// Vector is the CVSS vector this source reported, if any.
+	Vector string
+	// FetchedAt is the RFC3339 time this source's data was fetched.
+	FetchedAt string
+	// SnapshotAge is a human-readable freshness string (e.g. "72h").
+	SnapshotAge string
+}
+
 // Symbol is a vulnerable function or method within a package.
 type Symbol struct {
 	// Package is the fully-qualified Go import path (e.g. "crypto/tls").
@@ -144,6 +220,27 @@ type Advisory struct {
 	SnapshotDigest  string // content digest of the snapshot this advisory came from
 	SnapshotAge     string // human-readable age string (e.g. "72h")
 	DBSourceVersion string // version string reported by the DB (e.g. "2024-06-01T00:00:00Z")
+
+	// ── Enrichment (additive; Go-side only, never on the wire proto) ──────────
+	// These are populated by enrichers and downstream phases. A nil/empty value
+	// means "no signal fetched", which is NEVER interpreted as "safe": a fetch
+	// failure is surfaced as incomplete by the enrichment chain.
+
+	// CVSS holds every parsed CVSS metric for this advisory (possibly from
+	// multiple sources / versions). Severity is derived from these via
+	// severityFromMetrics when present.
+	CVSS []CVSSMetric
+	// EPSS is the exploit-prediction signal for this advisory's CVE; nil when none.
+	EPSS *EPSSScore
+	// KEV is the CISA known-exploited signal for this advisory's CVE; nil when none.
+	KEV *KEVEntry
+	// CWEs are the associated CWE identifiers (e.g. "CWE-79"); empty when none.
+	CWEs []string
+	// RiskScore is the fused risk-prioritization signal; nil until computed.
+	RiskScore *RiskScore
+	// SourceMeta records per-source contributions for conflict resolution and
+	// provenance; empty until populated by the merge layer.
+	SourceMeta []SourceContribution
 }
 
 // VersionVerdict is the tri-state result of a version range comparison.

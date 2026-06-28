@@ -1,0 +1,21 @@
+{
+  "id": "GHSA-with-draw-nnnn",
+  "aliases": ["CVE-2024-0002"],
+  "summary": "Withdrawn advisory for github.com/foo/bar",
+  "withdrawn": "2024-02-01T00:00:00Z",
+  "affected": [
+    {
+      "package": {"ecosystem": "Go", "name": "github.com/foo/bar"},
+      "ranges": [
+        {"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "2.0.0"}]}
+      ]
+    }
+  ],
+  "severity": [
+    {"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
+  ],
+  "database_specific": {
+    "cwe_ids": ["CWE-200"],
+    "severity": "HIGH"
+  }
+}

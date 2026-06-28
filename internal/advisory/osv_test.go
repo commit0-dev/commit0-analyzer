@@ -897,3 +897,54 @@ func TestBuildAdvisoryIndex_PyPI_GitRangeNoVersions(t *testing.T) {
 		}
 	}
 }
+
+// TestParseOSVRecordPerPackage_CVSSMetricsPopulated verifies that the shared
+// per-package OSV parser parses the severity[] CVSS vector into Advisory.CVSS
+// losslessly (via the exact ParseCVSS engine) and derives Severity from it. The
+// fixture's exact base score is 7.0 (raw 6.92256), which the legacy round-half-up
+// path would have undershot to 6.9 — SeverityMedium instead of SeverityHigh.
+func TestParseOSVRecordPerPackage_CVSSMetricsPopulated(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "GO-CVSS-ROUNDING-TEST.json")
+	advs, err := parseOSVRecordPerPackage(data, EcosystemGo)
+	require.NoError(t, err)
+	require.Len(t, advs, 1)
+
+	require.Len(t, advs[0].CVSS, 1, "CVSS metric must be populated from severity[]")
+	assert.Equal(t, "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L", advs[0].CVSS[0].Vector,
+		"vector must be captured losslessly")
+	assert.InDelta(t, 7.0, advs[0].CVSS[0].BaseScore, 0.001,
+		"exact CVSS Roundup must yield 7.0, not the legacy round-half-up 6.9")
+	assert.Equal(t, SeverityHigh, advs[0].Severity,
+		"exact base score 7.0 must map to SeverityHigh")
+}
+
+// TestParseOSVRecordPerPackage_SeverityParity verifies that records with NO CVSS
+// vector derive the EXACT same Severity through the new severityFromMetrics path
+// as the pre-existing textual / no-severity fallback produced.
+func TestParseOSVRecordPerPackage_SeverityParity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fixture  string
+		eco      string
+		expected Severity
+	}{
+		{"textual HIGH only", "GO-TEXT-SEVERITY-TEST.json", EcosystemGo, SeverityHigh},
+		{"no severity at all", "GO-2024-0001.json", EcosystemGo, SeverityUnspecified},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			advs, err := parseOSVRecordPerPackage(loadFixture(t, tt.fixture), tt.eco)
+			require.NoError(t, err)
+			require.NotEmpty(t, advs)
+			for i := range advs {
+				assert.Empty(t, advs[i].CVSS, "no CVSS vector → no metrics")
+				assert.Equal(t, tt.expected, advs[i].Severity)
+			}
+		})
+	}
+}

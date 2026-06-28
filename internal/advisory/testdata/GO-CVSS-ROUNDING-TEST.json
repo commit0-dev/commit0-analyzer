@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.4.0",
+  "id": "GO-CVSS-ROUNDING-TEST",
+  "modified": "2024-03-01T00:00:00Z",
+  "published": "2024-01-01T00:00:00Z",
+  "aliases": ["CVE-2024-90001"],
+  "summary": "CVSS boundary-rounding fixture (raw base 6.92256)",
+  "severity": [
+    {
+      "type": "CVSS_V3",
+      "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L"
+    }
+  ],
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "example.com/rounding"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "1.2.0"}
+          ]
+        }
+      ]
+    }
+  ],
+  "references": [
+    {"type": "ADVISORY", "url": "https://example.com/advisories/GO-CVSS-ROUNDING-TEST"}
+  ]
+}

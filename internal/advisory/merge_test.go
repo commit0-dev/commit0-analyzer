@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -142,6 +143,83 @@ func TestMerge_SymbolLevelPreferenceOverVersionRange(t *testing.T) {
 	assert.Equal(t, "GO-2024-0001", got.ID, "wider-range advisory must be the representative")
 }
 
+// TestMerge_TrustTieBreakAfterSymbolAndRange verifies the trust tie-break only
+// engages when symbol-level and range-width tie, and that the higher-trust
+// source's copy becomes the representative.
+func TestMerge_TrustTieBreakAfterSymbolAndRange(t *testing.T) {
+	// Both package-level, identical range width, alias-equivalent. Without trust,
+	// the lexicographically smaller ID ("AAA-0001") would represent the group.
+	// With trust(BBB's source) > trust(AAA's source), BBB-0002 must win.
+	aaa := makeAdvisory("AAA-0001", []string{"CVE-2024-77001"}, false, []string{SourceOSV},
+		[]VersionRange{{Introduced: "", Fixed: "v2.0.0"}})
+	bbb := makeAdvisory("BBB-0002", []string{"CVE-2024-77001"}, false, []string{SourceGHSA},
+		[]VersionRange{{Introduced: "", Fixed: "v2.0.0"}})
+
+	trust := map[string]int{SourceGHSA: 2, SourceOSV: 1}
+
+	merged := mergeAdvisoriesTrust([]Advisory{aaa, bbb}, trust)
+	require.Len(t, merged, 1)
+	assert.Equal(t, "BBB-0002", merged[0].ID,
+		"higher-trust source's advisory must represent the merged group on a symbol/range tie")
+	assert.ElementsMatch(t, []string{SourceGHSA, SourceOSV}, merged[0].Sources)
+}
+
+// TestMerge_TrustNeverOverridesSymbolLevel verifies trust does NOT promote a
+// lower-confidence advisory over a symbol-level one even when its source is more
+// trusted — the symbol-level rule outranks trust.
+func TestMerge_TrustNeverOverridesSymbolLevel(t *testing.T) {
+	// Symbol-level advisory from a lower-trust source vs package-level from a
+	// higher-trust source. Symbol-level must still win.
+	symbol := makeAdvisory("AAA-0001", []string{"CVE-2024-77002"}, true, []string{SourceOSV}, nil)
+	pkg := makeAdvisory("BBB-0002", []string{"CVE-2024-77002"}, false, []string{SourceGoVulnDB}, nil)
+
+	trust := map[string]int{SourceGoVulnDB: 9, SourceOSV: 1}
+
+	merged := mergeAdvisoriesTrust([]Advisory{symbol, pkg}, trust)
+	require.Len(t, merged, 1)
+	assert.Equal(t, "AAA-0001", merged[0].ID, "symbol-level must outrank source trust")
+	assert.True(t, merged[0].SymbolLevel)
+}
+
+// TestMerge_TrustUnsetIdenticalToIDTieBreak verifies that a nil/empty trust map
+// reproduces the pre-trust representative choice (lexicographic ID), so existing
+// callers and goldens are unaffected.
+func TestMerge_TrustUnsetIdenticalToIDTieBreak(t *testing.T) {
+	aaa := makeAdvisory("AAA-0001", []string{"CVE-2024-77003"}, false, []string{SourceOSV},
+		[]VersionRange{{Introduced: "", Fixed: "v2.0.0"}})
+	bbb := makeAdvisory("BBB-0002", []string{"CVE-2024-77003"}, false, []string{SourceGHSA},
+		[]VersionRange{{Introduced: "", Fixed: "v2.0.0"}})
+
+	withNil := mergeAdvisoriesTrust([]Advisory{aaa, bbb}, nil)
+	withEmpty := mergeAdvisoriesTrust([]Advisory{aaa, bbb}, map[string]int{})
+	legacy := mergeAdvisories([]Advisory{aaa, bbb})
+
+	require.Len(t, legacy, 1)
+	assert.Equal(t, "AAA-0001", legacy[0].ID, "unset trust must fall to the lexicographic ID tie-break")
+	assert.Equal(t, legacy, withNil)
+	assert.Equal(t, legacy, withEmpty)
+}
+
+// TestMultiSource_TrustTieBreak verifies trust threads from NamedSource through
+// MultiSource.Query into the representative choice.
+func TestMultiSource_TrustTieBreak(t *testing.T) {
+	osvAdv := makeAdvisory("AAA-0001", []string{"CVE-2024-77004"}, false, []string{SourceOSV},
+		[]VersionRange{{Introduced: "", Fixed: "v2.0.0"}})
+	ghsaAdv := makeAdvisory("BBB-0002", []string{"CVE-2024-77004"}, false, []string{SourceGHSA},
+		[]VersionRange{{Introduced: "", Fixed: "v2.0.0"}})
+
+	ms := NewMultiSource(
+		NamedSource{Name: SourceOSV, S: &staticSource{advs: []Advisory{osvAdv}}, Trust: 1},
+		NamedSource{Name: SourceGHSA, S: &staticSource{advs: []Advisory{ghsaAdv}}, Trust: 2},
+	)
+
+	advs, err := ms.Query(context.Background(), Package{Ecosystem: EcosystemGo, Name: "github.com/example/pkg"}, "v1.0.0")
+	require.NoError(t, err)
+	require.Len(t, advs, 1)
+	assert.Equal(t, "BBB-0002", advs[0].ID, "higher-trust source must represent the merged group")
+	assert.ElementsMatch(t, []string{SourceGHSA, SourceOSV}, advs[0].Sources)
+}
+
 // TestMerge_Empty verifies that mergeAdvisories handles an empty input gracefully.
 func TestMerge_Empty(t *testing.T) {
 	merged := mergeAdvisories(nil)
@@ -205,6 +283,65 @@ func TestMultiSource_SecondarySourceFails(t *testing.T) {
 
 	// The successful source's advisories must still be returned.
 	require.Len(t, advs, 1, "successful source's advisories must be returned despite secondary failure")
+	assert.Equal(t, "GO-2024-0001", advs[0].ID)
+}
+
+// TestMultiSource_StaleSourceKeepsAdvisories verifies that a StalenessWarningError
+// from a source is treated as warn-only: its (old) advisories are still merged and
+// returned, and the aggregate error is a *StalenessWarningError, NOT a
+// *SourcesIncompleteError. Dropping a stale snapshot's advisories would lose
+// coverage and force a false incomplete — a stale snapshot must keep reporting its
+// known vulnerabilities.
+func TestMultiSource_StaleSourceKeepsAdvisories(t *testing.T) {
+	staleAdv := makeAdvisory("GO-2024-0001", []string{"CVE-2024-99001"}, true, []string{SourceGoVulnDB}, nil)
+	stale := &StalenessWarningError{
+		Warning:    "snapshot is 200h old (threshold 168h)",
+		Age:        200 * time.Hour,
+		Threshold:  168 * time.Hour,
+		Advisories: []Advisory{staleAdv},
+	}
+
+	ms := NewMultiSource(
+		NamedSource{Name: SourceGoVulnDB, S: &staticSource{err: stale}},
+	)
+
+	advs, err := ms.Query(context.Background(), Package{Ecosystem: EcosystemGo, Name: "github.com/example/pkg"}, "v1.0.0")
+
+	// Coverage must be preserved: the stale advisory is still returned.
+	require.Len(t, advs, 1, "stale snapshot advisories must NOT be dropped")
+	assert.Equal(t, "GO-2024-0001", advs[0].ID)
+
+	// The aggregate error is warn-only staleness, never an incomplete-driving failure.
+	var staleErr *StalenessWarningError
+	require.True(t, errors.As(err, &staleErr),
+		"a stale source must surface *StalenessWarningError, got: %T %v", err, err)
+	var incompleteErr *SourcesIncompleteError
+	assert.False(t, errors.As(err, &incompleteErr),
+		"staleness is warn-only; it must NOT be reported as *SourcesIncompleteError")
+	assert.Len(t, staleErr.Advisories, 1, "the staleness warning must carry the merged advisories")
+}
+
+// TestMultiSource_StalePlusFailure verifies failure precedence: when one source is
+// stale and another genuinely fails, the aggregate is a *SourcesIncompleteError
+// (incomplete → exit 3), but the stale source's advisories are still merged in
+// (coverage is never dropped, even alongside a real failure).
+func TestMultiSource_StalePlusFailure(t *testing.T) {
+	staleAdv := makeAdvisory("GO-2024-0001", []string{"CVE-2024-99001"}, true, []string{SourceGoVulnDB}, nil)
+	stale := &StalenessWarningError{Warning: "stale", Age: 200 * time.Hour, Threshold: 168 * time.Hour, Advisories: []Advisory{staleAdv}}
+
+	ms := NewMultiSource(
+		NamedSource{Name: SourceGoVulnDB, S: &staticSource{err: stale}},
+		NamedSource{Name: SourceOSV, S: &staticSource{err: errors.New("OSV network error")}},
+	)
+
+	advs, err := ms.Query(context.Background(), Package{Ecosystem: EcosystemGo, Name: "github.com/example/pkg"}, "v1.0.0")
+
+	var incompleteErr *SourcesIncompleteError
+	require.True(t, errors.As(err, &incompleteErr),
+		"a real failure alongside staleness must surface *SourcesIncompleteError")
+	assert.Equal(t, []string{SourceOSV}, incompleteErr.FailedSources,
+		"only the genuinely-failed source is listed; the stale one is not a failure")
+	require.Len(t, advs, 1, "the stale source's advisories must still be merged in despite the sibling failure")
 	assert.Equal(t, "GO-2024-0001", advs[0].ID)
 }
 

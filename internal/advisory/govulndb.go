@@ -166,9 +166,17 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 		adv.VersionRanges = append(adv.VersionRanges, VersionRange{})
 	}
 
-	// Parse severity from the OSV severity[] array (prefer CVSS_V3/CVSS_V4)
-	// or fall back to database_specific.severity string.
-	adv.Severity = parseOSVSeverity(rec.Severity, rec.DatabaseSpecific.Severity)
+	// Parse the OSV severity[] CVSS vectors into metrics via the exact ParseCVSS
+	// engine (cvss.go), attach them losslessly, and derive Severity through
+	// severityFromMetrics. This makes severity vector-accurate (exact CVSS Roundup
+	// instead of the legacy round-half-up approximation) while preserving the
+	// textual fallback: a record with no CVSS vector yields the same Severity as
+	// the database_specific.severity string alone.
+	metrics := parseOSVCVSSMetrics(rec.Severity)
+	if len(metrics) > 0 {
+		adv.CVSS = metrics
+	}
+	adv.Severity = severityFromMetrics(metrics, 0, rec.DatabaseSpecific.Severity)
 
 	// Collect URLs from references entries whose type is "FIX". These point at
 	// the commits or patches that resolved the vulnerability. Deduplicate and
@@ -176,6 +184,32 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 	adv.FixRefs = extractFixRefs(rec.References)
 
 	return adv, nil
+}
+
+// parseOSVCVSSMetrics parses every CVSS_V3/CVSS_V4 entry in an OSV record's
+// severity[] array into a CVSSMetric via the exact ParseCVSS engine (cvss.go).
+// It is shared by both OSV-schema parsers (the Go vuln DB record parser and the
+// OSV bundle per-package parser).
+//
+// An unparseable or unsupported vector is skipped rather than scored zero — the
+// caller's textual severity fallback still carries the band, and a bad vector is
+// never silently treated as "None" (unknown ≠ safe). The returned metrics are
+// attached to Advisory.CVSS and fed to severityFromMetrics so severity is derived
+// with the spec-exact CVSS Roundup, not the legacy round-half-up approximation.
+func parseOSVCVSSMetrics(entries []osvSeverityEntry) []CVSSMetric {
+	var out []CVSSMetric
+	for _, e := range entries {
+		t := strings.ToUpper(e.Type)
+		if t != "CVSS_V3" && t != "CVSS_V4" {
+			continue
+		}
+		m, err := ParseCVSS(e.Score)
+		if err != nil {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // parseOSVSeverity extracts the Severity level from OSV severity entries and/or

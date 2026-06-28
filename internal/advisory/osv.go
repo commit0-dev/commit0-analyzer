@@ -552,7 +552,13 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 	}
 
 	// Top-level fields shared by all per-package advisories in this record.
-	severity := parseOSVSeverity(rec.Severity, rec.DatabaseSpecific.Severity)
+	// Parse the severity[] CVSS vectors via the exact ParseCVSS engine, then derive
+	// Severity through severityFromMetrics (which falls back to the textual
+	// database_specific.severity when no vector scores). The metrics are attached to
+	// each per-package advisory's CVSS below. A record with no CVSS vector yields
+	// the same Severity as the legacy textual-only path.
+	cvssMetrics := parseOSVCVSSMetrics(rec.Severity)
+	severity := severityFromMetrics(cvssMetrics, 0, rec.DatabaseSpecific.Severity)
 	fixRefs := extractFixRefs(rec.References)
 
 	var result []Advisory
@@ -569,6 +575,11 @@ func parseOSVRecordPerPackage(data []byte, ecosystem string) ([]Advisory, error)
 			Severity:  severity,
 			FixRefs:   fixRefs,
 			Module:    aff.Package.Name,
+		}
+		// Copy the shared CVSS metrics per advisory so later per-query stamping
+		// never mutates a slice aliased across packages in the same record.
+		if len(cvssMetrics) > 0 {
+			adv.CVSS = append([]CVSSMetric(nil), cvssMetrics...)
 		}
 
 		// Collect SEMVER/ECOSYSTEM ranges only. GIT and other non-version range

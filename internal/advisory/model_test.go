@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ─── crates.io routing fix ────────────────────────────────────────────────────
@@ -166,4 +167,54 @@ func TestCVSSBaseScoreToSeverity(t *testing.T) {
 		assert.Equal(t, tc.want, got,
 			"cvssScoreToSeverity(%v) = %v, want %v", tc.score, got, tc.want)
 	}
+}
+
+// ─── Enrichment fields ──────────────────────────────────────────────────────
+
+// TestAdvisoryEnrichmentFieldsDefaultEmpty verifies the new additive enrichment
+// fields default to nil/empty so an un-enriched advisory carries no fabricated
+// signal — a missing EPSS/KEV/CVSS is absence of data, not "safe".
+func TestAdvisoryEnrichmentFieldsDefaultEmpty(t *testing.T) {
+	t.Parallel()
+
+	var a Advisory
+	assert.Nil(t, a.CVSS, "CVSS defaults nil")
+	assert.Nil(t, a.EPSS, "EPSS defaults nil")
+	assert.Nil(t, a.KEV, "KEV defaults nil")
+	assert.Nil(t, a.CWEs, "CWEs defaults nil")
+	assert.Nil(t, a.RiskScore, "RiskScore defaults nil")
+	assert.Nil(t, a.SourceMeta, "SourceMeta defaults nil")
+}
+
+// TestAdvisoryEnrichmentFieldsRoundTrip verifies the enrichment fields hold the
+// values assigned to them (the model carries the full intelligence shape that
+// downstream phases populate).
+func TestAdvisoryEnrichmentFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	a := Advisory{
+		ID: "GO-2024-0001",
+		CVSS: []CVSSMetric{
+			{Version: "3.1", Vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", BaseScore: 9.8, Source: "nvd"},
+		},
+		EPSS:      &EPSSScore{Probability: 0.97, Percentile: 0.99, Date: "2026-06-27"},
+		KEV:       &KEVEntry{Listed: true, DateAdded: "2024-01-01", DueDate: "2024-01-15", KnownRansomware: true},
+		CWEs:      []string{"CWE-79"},
+		RiskScore: &RiskScore{Score: 92.5, Tier: "critical", Rationale: "reachable + KEV"},
+		SourceMeta: []SourceContribution{
+			{Name: "ghsa", Severity: SeverityCritical, Vector: "CVSS:3.1/...", FetchedAt: "2026-06-27T00:00:00Z", SnapshotAge: "1h"},
+		},
+	}
+
+	require.Len(t, a.CVSS, 1)
+	assert.Equal(t, 9.8, a.CVSS[0].BaseScore)
+	require.NotNil(t, a.EPSS)
+	assert.Equal(t, 0.97, a.EPSS.Probability)
+	require.NotNil(t, a.KEV)
+	assert.True(t, a.KEV.KnownRansomware)
+	assert.Equal(t, []string{"CWE-79"}, a.CWEs)
+	require.NotNil(t, a.RiskScore)
+	assert.Equal(t, "critical", a.RiskScore.Tier)
+	require.Len(t, a.SourceMeta, 1)
+	assert.Equal(t, SeverityCritical, a.SourceMeta[0].Severity)
 }

@@ -1,0 +1,16 @@
+{
+  "id": "GHSA-git-only-zzzz",
+  "aliases": ["CVE-2024-0003"],
+  "summary": "GIT-range-only advisory with no versions enumeration",
+  "affected": [
+    {
+      "package": {"ecosystem": "Go", "name": "github.com/foo/gitonly"},
+      "ranges": [
+        {"type": "GIT", "events": [{"introduced": "0"}, {"fixed": "deadbeefcafebabe"}]}
+      ]
+    }
+  ],
+  "database_specific": {
+    "severity": "HIGH"
+  }
+}
