@@ -2,9 +2,11 @@ package advisory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ─── SourcesIncompleteError ───────────────────────────────────────────────────
@@ -38,6 +40,13 @@ func (e *SourcesIncompleteError) Error() string {
 type NamedSource struct {
 	Name string
 	S    Source
+	// Trust is the source's trust tier, consulted only as a tie-break in
+	// chooseRepresentative AFTER the symbol-level and range-width rules. A higher
+	// value wins. The zero value ("unset") expresses no preference, preserving the
+	// pre-trust representative choice (the lexicographic-ID tie-break). Trust never
+	// changes WHICH advisory groups exist — only which member copy represents a
+	// group — so adding a more-trusted source can never drop coverage.
+	Trust int
 }
 
 // ─── MultiSource ─────────────────────────────────────────────────────────────
@@ -72,14 +81,37 @@ func NewMultiSource(sources ...NamedSource) *MultiSource {
 // errors.As and treat it as a warning (not a fatal abort).
 func (ms *MultiSource) Query(ctx context.Context, pkg Package, version string) ([]Advisory, error) {
 	var (
-		allAdvs       []Advisory
-		failedNames   []string
-		failedErrors  []error
+		allAdvs      []Advisory
+		failedNames  []string
+		failedErrors []error
+		staleWarns   []*StalenessWarningError
 	)
+
+	// trust maps each configured source name to its trust tier so mergeAdvisories
+	// can break representative ties deterministically. Built from every configured
+	// source (not only the ones that succeeded) so trust ordering is stable.
+	trust := make(map[string]int, len(ms.sources))
+	for _, ns := range ms.sources {
+		if ns.Trust > trust[ns.Name] {
+			trust[ns.Name] = ns.Trust
+		}
+	}
 
 	for _, ns := range ms.sources {
 		advs, err := ns.S.Query(ctx, pkg, version)
 		if err != nil {
+			// A StalenessWarningError is NOT a source failure: it carries usable
+			// (if old) advisories. Merge them and record the warning rather than
+			// dropping them — a stale snapshot must still surface its known
+			// vulnerabilities (warned), never silently stop reporting them or force
+			// a false incomplete. unknown ≠ safe cuts both ways: losing coverage
+			// because data is old is as wrong as passing a clean on a failed query.
+			var stale *StalenessWarningError
+			if errors.As(err, &stale) {
+				allAdvs = append(allAdvs, stale.Advisories...)
+				staleWarns = append(staleWarns, stale)
+				continue
+			}
 			failedNames = append(failedNames, ns.Name)
 			failedErrors = append(failedErrors, err)
 			// Do not abort: collect failures and continue querying remaining sources.
@@ -88,15 +120,47 @@ func (ms *MultiSource) Query(ctx context.Context, pkg Package, version string) (
 		allAdvs = append(allAdvs, advs...)
 	}
 
-	merged := mergeAdvisories(allAdvs)
+	merged := mergeAdvisoriesTrust(allAdvs, trust)
 
+	// Error precedence: a real source failure (→ incomplete → exit 3) outranks a
+	// staleness warning (warn-only). Either way the advisories already merged above
+	// are returned, so coverage is never dropped.
 	if len(failedNames) > 0 {
 		return merged, &SourcesIncompleteError{
 			FailedSources: failedNames,
 			Errors:        failedErrors,
 		}
 	}
+	if len(staleWarns) > 0 {
+		return merged, combineStaleWarnings(staleWarns, merged)
+	}
 	return merged, nil
+}
+
+// combineStaleWarnings folds one or more per-source staleness warnings into a
+// single *StalenessWarningError wrapping the full merged advisory set. The result
+// is warn-only: callers surface Warning and keep Advisories without marking the
+// scan incomplete. Output is deterministic (messages sorted) and the widest
+// (largest) reported age is retained for reporting.
+func combineStaleWarnings(warns []*StalenessWarningError, merged []Advisory) *StalenessWarningError {
+	msgs := make([]string, 0, len(warns))
+	var maxAge, threshold time.Duration
+	for _, w := range warns {
+		msgs = append(msgs, w.Warning)
+		if w.Age > maxAge {
+			maxAge = w.Age
+		}
+		if w.Threshold > threshold {
+			threshold = w.Threshold
+		}
+	}
+	sort.Strings(msgs)
+	return &StalenessWarningError{
+		Warning:    strings.Join(msgs, "; "),
+		Age:        maxAge,
+		Threshold:  threshold,
+		Advisories: merged,
+	}
 }
 
 // ─── Merge / dedup ────────────────────────────────────────────────────────────
@@ -118,14 +182,29 @@ func (ms *MultiSource) Query(ctx context.Context, pkg Package, version string) (
 //
 // After grouping, union Sources and Aliases from all members of the group into
 // the representative. Stable-sort the result by ID.
+//
+// mergeAdvisories is the trust-agnostic entry point (trust unset → identical
+// behavior to before trust tiers existed). MultiSource.Query uses
+// mergeAdvisoriesTrust to thread source trust into the representative tie-break.
 func mergeAdvisories(advs []Advisory) []Advisory {
+	return mergeAdvisoriesTrust(advs, nil)
+}
+
+// mergeAdvisoriesTrust is mergeAdvisories with a source-name→trust map used as a
+// representative tie-break AFTER the symbol-level and range-width rules. A nil or
+// empty map reproduces the pre-trust behavior exactly.
+//
+// Each alias-merged group is collapsed by resolveGroup (conflict.go), which picks
+// the representative and folds conflicting facts (severity/range/withdrawn) across
+// every member toward the fail-safe outcome while recording provenance.
+func mergeAdvisoriesTrust(advs []Advisory, trust map[string]int) []Advisory {
 	if len(advs) == 0 {
 		return nil
 	}
 
-	// groups holds merged representatives; groupIDs holds the combined identity
-	// sets (used for intersection checks on subsequent advisories).
-	groups := make([]Advisory, 0, len(advs))
+	// members holds the raw advisories grouped by alias-equivalence; groupIDs
+	// holds the combined identity sets used for intersection checks.
+	members := make([][]Advisory, 0, len(advs))
 	groupIDs := make([]map[string]struct{}, 0, len(advs))
 
 	for _, adv := range advs {
@@ -142,18 +221,21 @@ func mergeAdvisories(advs []Advisory) []Advisory {
 
 		if matched == -1 {
 			// No existing group matches — start a new one.
-			cp := copyAdvisory(adv)
-			groups = append(groups, cp)
+			members = append(members, []Advisory{adv})
 			groupIDs = append(groupIDs, ids)
 		} else {
-			// Merge adv into the existing group.
-			rep := mergeInto(groups[matched], adv)
-			groups[matched] = rep
+			members[matched] = append(members[matched], adv)
 			// Expand the group's identity set with all new IDs from adv.
 			for id := range ids {
 				groupIDs[matched][id] = struct{}{}
 			}
 		}
+	}
+
+	// Collapse each group into a single resolved advisory.
+	groups := make([]Advisory, 0, len(members))
+	for _, grp := range members {
+		groups = append(groups, resolveGroup(grp, trust))
 	}
 
 	// Stable-sort by ID for deterministic output.
@@ -188,48 +270,17 @@ func setsIntersect(a, b map[string]struct{}) bool {
 	return false
 }
 
-// mergeInto merges src into dst and returns the updated representative.
-// The representative is the "better" advisory per the preference rules:
-//   1. SymbolLevel=true wins over false.
-//   2. Among equal symbol-level, wider version range wins (empty Introduced = widest).
-//   3. Lexicographically smaller ID as final tie-break.
-//
-// Sources and Aliases are always unioned into the winner regardless of which is
-// chosen as representative.
-func mergeInto(dst, src Advisory) Advisory {
-	// Determine the representative (the one whose fields we keep).
-	rep, other := chooseRepresentative(dst, src)
-
-	// Union Sources: collect unique entries from both.
-	rep.Sources = unionStrings(rep.Sources, other.Sources)
-
-	// Union Aliases: include all alias strings from both advisories, plus the
-	// other advisory's own ID (since it was alias-equivalent to rep).
-	aliasSet := make(map[string]struct{}, len(rep.Aliases)+len(other.Aliases)+1)
-	for _, a := range rep.Aliases {
-		aliasSet[a] = struct{}{}
-	}
-	// The other advisory's ID becomes an alias of the representative.
-	aliasSet[other.ID] = struct{}{}
-	for _, a := range other.Aliases {
-		aliasSet[a] = struct{}{}
-	}
-	// Remove rep's own ID from its alias list to avoid self-reference.
-	delete(aliasSet, rep.ID)
-
-	rep.Aliases = sortedKeys(aliasSet)
-
-	return rep
-}
-
 // chooseRepresentative picks the "better" of two advisories as the merge
 // representative. The preference order is:
 //  1. SymbolLevel=true over false.
 //  2. Among equal symbol-level: earlier (empty or smaller) Introduced in the
 //     first VersionRange — an empty Introduced means "since the beginning",
 //     which is the widest possible range.
-//  3. Lexicographically smaller ID as final stable tie-break.
-func chooseRepresentative(a, b Advisory) (rep, other Advisory) {
+//  3. Higher source trust tier (per the trust map; symbol-curated > GHSA > OSV).
+//     Trust is consulted ONLY when the rules above tie, and a nil/equal trust
+//     map leaves the choice to the final ID tie-break (no behavior change).
+//  4. Lexicographically smaller ID as final stable tie-break.
+func chooseRepresentative(a, b Advisory, trust map[string]int) (rep, other Advisory) {
 	// Prefer symbol-level.
 	if a.SymbolLevel && !b.SymbolLevel {
 		return a, b
@@ -250,11 +301,34 @@ func chooseRepresentative(a, b Advisory) (rep, other Advisory) {
 		return b, a
 	}
 
+	// Trust tie-break: prefer the advisory from the more-trusted source. Unset or
+	// equal trust falls through to the deterministic ID tie-break below.
+	aTrust := advisoryTrust(a, trust)
+	bTrust := advisoryTrust(b, trust)
+	if aTrust > bTrust {
+		return a, b
+	}
+	if bTrust > aTrust {
+		return b, a
+	}
+
 	// Final tie-break: lexicographically smaller ID wins.
 	if a.ID <= b.ID {
 		return a, b
 	}
 	return b, a
+}
+
+// advisoryTrust returns the highest trust tier among the advisory's contributing
+// sources per the trust map. A nil map or unknown sources yield 0 ("unset").
+func advisoryTrust(adv Advisory, trust map[string]int) int {
+	best := 0
+	for _, s := range adv.Sources {
+		if t, ok := trust[s]; ok && t > best {
+			best = t
+		}
+	}
+	return best
 }
 
 // firstIntroduced returns the Introduced field of the first VersionRange, or ""

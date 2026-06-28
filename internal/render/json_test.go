@@ -142,3 +142,43 @@ func TestJSON_NilInput(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, "[]", string(out))
 }
+
+// TestJSON_ProvenanceBlockDistinctFromSources locks the contract that the typed
+// provenance block exposes the per-source provenance SUMMARY under "summary"
+// (name SEVERITY vector), which is a different value from properties["sources"]
+// (the comma-joined contributing-source list). Regression guard: the provenance
+// summary must never be emitted under a "sources" key (which previously collided
+// with the real source list and read as "go-vuln-db UNSPECIFIED").
+func TestJSON_ProvenanceBlockDistinctFromSources(t *testing.T) {
+	findings := []*anstv1.Finding{
+		{
+			Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0001"},
+			Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+			Properties: map[string]string{
+				"sources":           "go-vuln-db,osv.dev",
+				"provenance":        "go-vuln-db UNSPECIFIED; osv.dev HIGH",
+				"severity_conflict": "go-vuln-db:UNSPECIFIED,osv.dev:HIGH",
+			},
+		},
+	}
+
+	out, err := render.ToJSON(findings)
+	require.NoError(t, err)
+
+	var parsed []map[string]interface{}
+	require.NoError(t, json.Unmarshal(out, &parsed))
+	require.Len(t, parsed, 1)
+
+	props := parsed[0]["properties"].(map[string]interface{})
+	assert.Equal(t, "go-vuln-db,osv.dev", props["sources"],
+		"properties.sources must remain the comma-joined source list")
+
+	prov, ok := parsed[0]["provenance"].(map[string]interface{})
+	require.True(t, ok, "typed provenance block must be present")
+	assert.Equal(t, "go-vuln-db UNSPECIFIED; osv.dev HIGH", prov["summary"],
+		"provenance summary must be under \"summary\"")
+	assert.Equal(t, "go-vuln-db:UNSPECIFIED,osv.dev:HIGH", prov["severity_conflict"])
+	_, hasSources := prov["sources"]
+	assert.False(t, hasSources,
+		"provenance block must NOT carry a \"sources\" key (collides with the real source list)")
+}

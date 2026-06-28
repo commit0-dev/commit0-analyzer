@@ -1,0 +1,25 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://anst.dev/vex/test",
+  "author": "anst-analyzer",
+  "timestamp": "2026-06-27T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": { "name": "GO-2024-0001", "aliases": ["CVE-2024-1111", "GHSA-aaaa-bbbb-cccc"] },
+      "products": [{ "@id": "pkg:golang/github.com/foo/bar" }],
+      "status": "affected"
+    },
+    {
+      "vulnerability": { "name": "GO-2024-0002", "aliases": ["CVE-2024-2222"] },
+      "products": [{ "@id": "pkg:golang/github.com/foo/unreachable" }],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path"
+    },
+    {
+      "vulnerability": { "name": "GO-2024-0003", "aliases": ["CVE-2024-3333"] },
+      "products": [{ "@id": "pkg:golang/github.com/foo/maybe" }],
+      "status": "under_investigation"
+    }
+  ]
+}

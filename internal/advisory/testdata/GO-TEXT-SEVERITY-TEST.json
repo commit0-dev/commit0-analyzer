@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.4.0",
+  "id": "GO-TEXT-SEVERITY-TEST",
+  "modified": "2024-03-01T00:00:00Z",
+  "published": "2024-01-01T00:00:00Z",
+  "summary": "Textual-only severity fixture (no CVSS vector)",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "example.com/textsev"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "0"},
+            {"fixed": "1.0.0"}
+          ]
+        }
+      ]
+    }
+  ],
+  "database_specific": {
+    "severity": "HIGH"
+  },
+  "references": [
+    {"type": "ADVISORY", "url": "https://example.com/advisories/GO-TEXT-SEVERITY-TEST"}
+  ]
+}

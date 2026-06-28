@@ -1,0 +1,97 @@
+{
+  "document": {
+    "category": "csaf_vex",
+    "csaf_version": "2.0",
+    "title": "anst reachability VEX",
+    "publisher": {
+      "category": "vendor",
+      "name": "anst-analyzer",
+      "namespace": "https://github.com/ducthinh993/anst-analyzer"
+    },
+    "tracking": {
+      "id": "anst-vex-e838458162dc6150",
+      "status": "final",
+      "version": "1",
+      "initial_release_date": "2026-06-27T12:00:00Z",
+      "current_release_date": "2026-06-27T12:00:00Z",
+      "revision_history": [
+        {
+          "number": "1",
+          "date": "2026-06-27T12:00:00Z",
+          "summary": "Initial reachability assessment."
+        }
+      ]
+    }
+  },
+  "product_tree": {
+    "full_product_names": [
+      {
+        "product_id": "pkg:golang/golang.org/x/net",
+        "name": "pkg:golang/golang.org/x/net"
+      },
+      {
+        "product_id": "pkg:maven/org.apache.logging.log4j/log4j-core",
+        "name": "pkg:maven/org.apache.logging.log4j/log4j-core"
+      },
+      {
+        "product_id": "pkg:npm/lodash",
+        "name": "pkg:npm/lodash"
+      },
+      {
+        "product_id": "pkg:pypi/requests",
+        "name": "pkg:pypi/requests"
+      }
+    ]
+  },
+  "vulnerabilities": [
+    {
+      "cve": "CVE-2024-1000",
+      "product_status": {
+        "known_affected": [
+          "pkg:golang/golang.org/x/net"
+        ]
+      },
+      "remediations": [
+        {
+          "category": "vendor_fix",
+          "details": "Update golang.org/x/net to v0.17.0 or later.",
+          "product_ids": [
+            "pkg:golang/golang.org/x/net"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2024-2000",
+      "product_status": {
+        "known_not_affected": [
+          "pkg:npm/lodash"
+        ]
+      },
+      "flags": [
+        {
+          "label": "vulnerable_code_not_in_execute_path",
+          "product_ids": [
+            "pkg:npm/lodash"
+          ]
+        }
+      ]
+    },
+    {
+      "cve": "CVE-2024-3000",
+      "product_status": {
+        "under_investigation": [
+          "pkg:pypi/requests"
+        ]
+      }
+    },
+    {
+      "cve": "CVE-2024-4000",
+      "product_status": {
+        "under_investigation": [
+          "pkg:maven/org.apache.logging.log4j/log4j-core"
+        ]
+      }
+    }
+  ]
+}

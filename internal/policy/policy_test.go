@@ -434,3 +434,119 @@ func TestPolicy_NonElevatedIgnore_NonCritical_StillSuppresses(t *testing.T) {
 		})
 	}
 }
+
+// makeLowFinding returns a PACKAGE_REACHABLE LOW finding with optional risk
+// properties, used to exercise the opt-in additive gate predicates.
+func makeLowFinding(props map[string]string) *anstv1.Finding {
+	return &anstv1.Finding{
+		Advisory:   &anstv1.AdvisoryRef{Id: "GO-2024-0009"},
+		Module:     "github.com/example/low",
+		Confidence: anstv1.Confidence_CONFIDENCE_PACKAGE_REACHABLE,
+		Severity:   anstv1.Severity_SEVERITY_LOW,
+		Properties: props,
+	}
+}
+
+// TestPolicy_DefaultGateOn_UnchangedByPredicateSupport is the regression guard:
+// the default gate-on string with no predicates must produce identical verdicts
+// to the pre-change gate for every confidence tier.
+func TestPolicy_DefaultGateOn_UnchangedByPredicateSupport(t *testing.T) {
+	p, err := policy.LoadPolicy([]byte("fail-on: high\n"))
+	require.NoError(t, err)
+	require.Empty(t, p.GatePredicates, "default policy must carry no gate predicates")
+
+	cases := []struct {
+		name string
+		f    *anstv1.Finding
+		want int
+	}{
+		{"symbol_high", makeHighFinding(), policy.ExitGateFailure},
+		{"package_high", makePackageReachableFinding(), policy.ExitGateFailure},
+		{"unknown_high", makeUnknownFinding(), policy.ExitGateFailure},
+		{"not_reachable_high", makeNotReachableFinding(), policy.ExitPass},
+		{"package_low", makeLowFinding(nil), policy.ExitPass},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, p.Evaluate([]*anstv1.Finding{tc.f}), tc.name)
+	}
+}
+
+// TestPolicy_GateOnKEV verifies the kev predicate gates a sub-threshold finding
+// only when its advisory is KEV-listed, and never gates a NOT_REACHABLE finding.
+func TestPolicy_GateOnKEV(t *testing.T) {
+	p, err := policy.LoadPolicy([]byte("fail-on: high\ngate-on: reachable+unknown,kev\n"))
+	require.NoError(t, err)
+
+	// LOW finding, KEV-listed → gates via the predicate (severity alone would not).
+	kevLow := makeLowFinding(map[string]string{"kev": "true"})
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{kevLow}),
+		"KEV-listed reachable finding must gate even below the severity threshold")
+
+	// LOW finding, not KEV → predicate does not fire, severity below threshold → pass.
+	plainLow := makeLowFinding(map[string]string{"kev": "false"})
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{plainLow}),
+		"non-KEV sub-threshold finding must not gate")
+
+	// NOT_REACHABLE must never gate even when KEV-listed (eligibility preserved).
+	nr := makeNotReachableFinding()
+	nr.Properties = map[string]string{"kev": "true"}
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{nr}),
+		"NOT_REACHABLE must never gate, even KEV-listed")
+}
+
+// TestPolicy_GateOnEPSS verifies the epss>=X predicate gates by EPSS probability.
+func TestPolicy_GateOnEPSS(t *testing.T) {
+	p, err := policy.LoadPolicy([]byte("fail-on: critical\ngate-on: reachable+unknown,epss>=0.5\n"))
+	require.NoError(t, err)
+
+	high := makeLowFinding(map[string]string{"epss": "0.70"})
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{high}),
+		"EPSS 0.70 ≥ 0.5 must gate")
+
+	low := makeLowFinding(map[string]string{"epss": "0.30"})
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{low}),
+		"EPSS 0.30 < 0.5 must not gate")
+
+	// Missing EPSS data: predicate cannot fire; sub-critical severity → pass.
+	none := makeLowFinding(nil)
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{none}),
+		"missing EPSS data must not gate via the epss predicate")
+}
+
+// TestPolicy_GateOnRisk verifies the risk>=Y predicate gates by fused risk score.
+func TestPolicy_GateOnRisk(t *testing.T) {
+	p, err := policy.LoadPolicy([]byte("fail-on: critical\ngate-on: reachable+unknown,risk>=70\n"))
+	require.NoError(t, err)
+
+	high := makeLowFinding(map[string]string{"risk_score": "80.0"})
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{high}),
+		"risk 80 ≥ 70 must gate")
+
+	low := makeLowFinding(map[string]string{"risk_score": "50.0"})
+	assert.Equal(t, policy.ExitPass, p.Evaluate([]*anstv1.Finding{low}),
+		"risk 50 < 70 must not gate")
+}
+
+// TestPolicy_Predicates_AddNeverRemove verifies that adding a predicate never
+// removes a finding the base severity gate would already catch.
+func TestPolicy_Predicates_AddNeverRemove(t *testing.T) {
+	p, err := policy.LoadPolicy([]byte("fail-on: high\ngate-on: reachable+unknown,kev\n"))
+	require.NoError(t, err)
+
+	// A HIGH finding with no KEV signal must still gate via the base severity path.
+	assert.Equal(t, policy.ExitGateFailure, p.Evaluate([]*anstv1.Finding{makeHighFinding()}),
+		"base severity gate must still fire when a predicate is configured")
+}
+
+// TestPolicy_GateOn_InvalidPredicate verifies a malformed predicate is a load
+// error so a typo never silently disables gating.
+func TestPolicy_GateOn_InvalidPredicate(t *testing.T) {
+	_, err := policy.LoadPolicy([]byte("fail-on: high\ngate-on: reachable+unknown,epss>0.5\n"))
+	assert.Error(t, err, "epss>0.5 (wrong comparator) must be rejected")
+
+	_, err = policy.LoadPolicy([]byte("fail-on: high\ngate-on: bogus\n"))
+	assert.Error(t, err, "unknown gate-on token must be rejected")
+
+	_, err = policy.LoadPolicy([]byte("fail-on: high\ngate-on: reachable,all\n"))
+	assert.Error(t, err, "two confidence tiers must be rejected")
+}

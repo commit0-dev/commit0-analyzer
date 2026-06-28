@@ -1,0 +1,21 @@
+{
+  "SchemaVersion": 2,
+  "Results": [
+    {
+      "Target": "go.mod",
+      "Type": "gomod",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-1111",
+          "PkgName": "github.com/foo/bar",
+          "InstalledVersion": "1.2.0"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-2222",
+          "PkgName": "github.com/foo/unreachable",
+          "InstalledVersion": "0.9.0"
+        }
+      ]
+    }
+  ]
+}

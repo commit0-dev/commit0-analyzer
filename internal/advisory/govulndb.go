@@ -18,9 +18,9 @@ import (
 // is Advisory and Symbol in model.go.
 
 type osvRecord struct {
-	ID       string         `json:"id"`
-	Aliases  []string       `json:"aliases"`
-	Affected []osvAffect    `json:"affected"`
+	ID       string      `json:"id"`
+	Aliases  []string    `json:"aliases"`
+	Affected []osvAffect `json:"affected"`
 	// Withdrawn is an RFC3339 timestamp present when the advisory has been
 	// retracted by the Go vuln DB maintainers. A non-empty value means the
 	// record is no longer considered a real vulnerability and must be excluded
@@ -166,9 +166,17 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 		adv.VersionRanges = append(adv.VersionRanges, VersionRange{})
 	}
 
-	// Parse severity from the OSV severity[] array (prefer CVSS_V3/CVSS_V4)
-	// or fall back to database_specific.severity string.
-	adv.Severity = parseOSVSeverity(rec.Severity, rec.DatabaseSpecific.Severity)
+	// Parse the OSV severity[] CVSS vectors into metrics via the exact ParseCVSS
+	// engine (cvss.go), attach them losslessly, and derive Severity through
+	// severityFromMetrics. This makes severity vector-accurate (exact CVSS Roundup
+	// instead of the legacy round-half-up approximation) while preserving the
+	// textual fallback: a record with no CVSS vector yields the same Severity as
+	// the database_specific.severity string alone.
+	metrics := parseOSVCVSSMetrics(rec.Severity)
+	if len(metrics) > 0 {
+		adv.CVSS = metrics
+	}
+	adv.Severity = severityFromMetrics(metrics, 0, rec.DatabaseSpecific.Severity)
 
 	// Collect URLs from references entries whose type is "FIX". These point at
 	// the commits or patches that resolved the vulnerability. Deduplicate and
@@ -178,137 +186,30 @@ func parseOSVRecord(data []byte, ecosystem string) (*Advisory, error) {
 	return adv, nil
 }
 
-// parseOSVSeverity extracts the Severity level from OSV severity entries and/or
-// a database_specific severity string. CVSS_V3 and CVSS_V4 score vectors are
-// preferred; the database_specific string is the fallback.
+// parseOSVCVSSMetrics parses every CVSS_V3/CVSS_V4 entry in an OSV record's
+// severity[] array into a CVSSMetric via the exact ParseCVSS engine (cvss.go).
+// It is shared by both OSV-schema parsers (the Go vuln DB record parser and the
+// OSV bundle per-package parser).
 //
-// CVSS base score is the last numeric field in the vector string, which encodes
-// the score as part of the vector (e.g. "CVSS:3.1/.../C:H/I:H/A:H" has a base
-// score that must be computed from the vector). However, OSV records do NOT embed
-// the base score numerically in the severity entry — the score field IS the full
-// CVSS vector string. The base score must be extracted from the CVSS metrics.
-//
-// For pragmatic correctness without a full CVSS library, we parse the database_-
-// specific.severity string first (HIGH, CRITICAL, etc.) when available, and for
-// CVSS vectors we extract the base score from the well-known OSV GitHub Advisory
-// Database format where the score appears in the vector's trailing /X.X suffix
-// or is embedded in the CVSS:3.1/... string itself. For the common case of GHSA-
-// sourced records we fall back to parsing the vector's component metrics to derive
-// the approximate base score, implemented in parseCVSSVectorScore.
-func parseOSVSeverity(entries []osvSeverityEntry, dbSpecific string) Severity {
-	// Try CVSS vector entries first (CVSS_V3 preferred, CVSS_V4 accepted).
+// An unparseable or unsupported vector is skipped rather than scored zero — the
+// caller's textual severity fallback still carries the band, and a bad vector is
+// never silently treated as "None" (unknown ≠ safe). The returned metrics are
+// attached to Advisory.CVSS and fed to severityFromMetrics so severity is derived
+// with the spec-exact CVSS Roundup, not the legacy round-half-up approximation.
+func parseOSVCVSSMetrics(entries []osvSeverityEntry) []CVSSMetric {
+	var out []CVSSMetric
 	for _, e := range entries {
 		t := strings.ToUpper(e.Type)
 		if t != "CVSS_V3" && t != "CVSS_V4" {
 			continue
 		}
-		score, ok := parseCVSSVectorScore(e.Score)
-		if ok {
-			return cvssScoreToSeverity(score)
-		}
-	}
-
-	// Fall back to database_specific.severity textual string.
-	if dbSpecific != "" {
-		return textSeverityToSeverity(dbSpecific)
-	}
-
-	return SeverityUnspecified
-}
-
-// parseCVSSVectorScore extracts the base score from a CVSS v3.x or v4.0 vector
-// string. The OSV schema stores the full vector (e.g.
-// "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"); the base score is NOT
-// separately stored in the vector itself — it must be computed from the metrics.
-//
-// To avoid a full CVSS library dependency, this function uses a well-known
-// approximation for the most common CVSS v3 base metrics to derive a score that
-// is accurate enough for the four severity bands (Low/Medium/High/Critical).
-// Specifically, it sums the per-metric weights defined by CVSS 3.1 §7.1 and
-// returns the rounded base score. If the vector cannot be parsed, returns (0, false).
-//
-// For CVSS v4.0 vectors (CVSS:4.0/...) the same metric extraction is applied
-// to the base metrics (AV, AC, AT, PR, UI, VC, VI, VA, SC, SI, SA), which map
-// to approximately the same severity bands for triage purposes.
-func parseCVSSVectorScore(vector string) (float64, bool) {
-	if vector == "" {
-		return 0, false
-	}
-	// CVSS vectors start with "CVSS:3.0/", "CVSS:3.1/", or "CVSS:4.0/".
-	// Strip the version prefix and parse the metrics map.
-	slashIdx := strings.Index(vector, "/")
-	if slashIdx < 0 {
-		return 0, false
-	}
-	metricsStr := vector[slashIdx+1:]
-	metrics := make(map[string]string)
-	for _, part := range strings.Split(metricsStr, "/") {
-		kv := strings.SplitN(part, ":", 2)
-		if len(kv) != 2 {
+		m, err := ParseCVSS(e.Score)
+		if err != nil {
 			continue
 		}
-		metrics[kv[0]] = kv[1]
+		out = append(out, m)
 	}
-
-	// Derive base score for CVSS v3.x using the standard formulae.
-	// We compute ISCBase, ISC, ExploitabilityScore, and BaseScore per CVSS 3.1 §7.1.
-	// Reference: https://www.first.org/cvss/v3.1/specification-document
-	av, avOK := cvss3AV(metrics["AV"])
-	ac, acOK := cvss3AC(metrics["AC"])
-	pr, prOK := cvss3PR(metrics["PR"], metrics["S"])
-	ui, uiOK := cvss3UI(metrics["UI"])
-	s, sOK := metrics["S"]
-	c, cOK := cvss3CIA(metrics["C"])
-	i, iOK := cvss3CIA(metrics["I"])
-	a, aOK := cvss3CIA(metrics["A"])
-
-	if !avOK || !acOK || !prOK || !uiOK || !sOK || !cOK || !iOK || !aOK {
-		// Missing required base metrics — cannot compute.
-		return 0, false
-	}
-
-	iscBase := 1 - (1-c)*(1-i)*(1-a)
-	var isc float64
-	if s == "U" {
-		isc = 6.42 * iscBase
-	} else {
-		isc = 7.52*(iscBase-0.029) - 3.25*pow(iscBase-0.02, 15)
-	}
-	exploitability := 8.22 * av * ac * pr * ui
-
-	var base float64
-	if isc <= 0 {
-		base = 0
-	} else if s == "U" {
-		base = roundHalfUp(min64(isc+exploitability, 10))
-	} else {
-		base = roundHalfUp(min64(1.08*(isc+exploitability), 10))
-	}
-	return base, true
-}
-
-// roundHalfUp rounds x to one decimal place using CVSS rounding (round half up).
-func roundHalfUp(x float64) float64 {
-	// CVSS 3.1 §7.4: Roundup(x) = ceil(x * 10) / 10
-	return float64(int64(x*10+0.5)) / 10
-}
-
-// min64 returns the smaller of two float64 values.
-func min64(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// pow computes base^exp using repeated multiplication (avoids math package import).
-// Only used for CVSS formula with small integer exponents.
-func pow(base float64, exp int) float64 {
-	result := 1.0
-	for range exp {
-		result *= base
-	}
-	return result
+	return out
 }
 
 // CVSS v3.1 base metric weight tables (§7.1).
@@ -570,7 +471,7 @@ func (d *dirSource) query(ctx context.Context, pkg Package, version string) ([]A
 			adv.Sources = append([]string(nil), d.sources...)
 			adv.Incomplete = true
 			results = append(results, *adv)
-		// VersionNotAffected: drop — the only safe drop.
+			// VersionNotAffected: drop — the only safe drop.
 		}
 	}
 

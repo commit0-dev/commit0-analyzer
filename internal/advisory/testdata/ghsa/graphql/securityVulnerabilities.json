@@ -1,0 +1,40 @@
+{
+  "data": {
+    "securityVulnerabilities": {
+      "pageInfo": {"hasNextPage": false, "endCursor": "Y3Vyc29yOjE="},
+      "nodes": [
+        {
+          "package": {"name": "github.com/foo/baz", "ecosystem": "GO"},
+          "vulnerableVersionRange": ">= 1.0.0, < 1.5.0",
+          "firstPatchedVersion": {"identifier": "1.5.0"},
+          "advisory": {
+            "ghsaId": "GHSA-dddd-eeee-ffff",
+            "summary": "GraphQL-sourced advisory for github.com/foo/baz",
+            "withdrawnAt": null,
+            "identifiers": [
+              {"type": "GHSA", "value": "GHSA-dddd-eeee-ffff"},
+              {"type": "CVE", "value": "CVE-2024-9999"}
+            ],
+            "cvss": {"score": 9.8, "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"},
+            "cwes": {"nodes": [{"cweId": "CWE-79"}]}
+          }
+        },
+        {
+          "package": {"name": "github.com/foo/baz", "ecosystem": "GO"},
+          "vulnerableVersionRange": ">= 2.0.0, < 2.1.0",
+          "firstPatchedVersion": {"identifier": "2.1.0"},
+          "advisory": {
+            "ghsaId": "GHSA-with-drawn-gql",
+            "summary": "Withdrawn GraphQL advisory must be filtered",
+            "withdrawnAt": "2024-03-01T00:00:00Z",
+            "identifiers": [
+              {"type": "GHSA", "value": "GHSA-with-drawn-gql"}
+            ],
+            "cvss": {"score": 0.0, "vectorString": ""},
+            "cwes": {"nodes": []}
+          }
+        }
+      ]
+    }
+  }
+}

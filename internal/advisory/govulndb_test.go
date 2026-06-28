@@ -817,6 +817,55 @@ func TestParseOSVRecord_NoSeverity(t *testing.T) {
 		"advisory without severity array must have SeverityUnspecified")
 }
 
+// TestParseOSVRecord_CVSSMetricsPopulated verifies that parseOSVRecord parses the
+// OSV severity[] CVSS vectors into Advisory.CVSS losslessly via the exact ParseCVSS
+// engine. The fixture carries a CVSS:3.1 vector whose exact base score is 7.0
+// (raw 6.92256, exact CVSS Roundup → 7.0), which the legacy round-half-up path
+// would have undershot to 6.9 — i.e. SeverityMedium instead of the spec-correct
+// SeverityHigh.
+func TestParseOSVRecord_CVSSMetricsPopulated(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "GO-CVSS-ROUNDING-TEST.json")
+	adv, err := parseOSVRecord(data, EcosystemGo)
+	require.NoError(t, err)
+
+	require.Len(t, adv.CVSS, 1, "CVSS metric must be populated from severity[]")
+	assert.Equal(t, "3.1", adv.CVSS[0].Version)
+	assert.Equal(t, "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L", adv.CVSS[0].Vector,
+		"vector must be captured losslessly")
+	assert.InDelta(t, 7.0, adv.CVSS[0].BaseScore, 0.001,
+		"exact CVSS Roundup must yield 7.0, not the legacy round-half-up 6.9")
+	assert.Equal(t, SeverityHigh, adv.Severity,
+		"exact base score 7.0 must map to SeverityHigh (round-half-up would undershoot to Medium)")
+}
+
+// TestParseOSVRecord_SeverityParity verifies that records with NO CVSS vector
+// derive the EXACT same Severity through the new severityFromMetrics path as the
+// pre-existing textual / no-severity fallback produced.
+func TestParseOSVRecord_SeverityParity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fixture  string
+		eco      string
+		expected Severity
+	}{
+		{"textual HIGH only", "GO-TEXT-SEVERITY-TEST.json", EcosystemGo, SeverityHigh},
+		{"no severity at all", "GO-2024-0001.json", EcosystemGo, SeverityUnspecified},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			adv, err := parseOSVRecord(loadFixture(t, tt.fixture), tt.eco)
+			require.NoError(t, err)
+			assert.Empty(t, adv.CVSS, "no CVSS vector → no metrics")
+			assert.Equal(t, tt.expected, adv.Severity)
+		})
+	}
+}
+
 // TestToProto verifies that an internal Advisory converts cleanly to *anstv1.Advisory.
 func TestToProto(t *testing.T) {
 	data := loadFixture(t, "GO-2024-0001.json")

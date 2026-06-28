@@ -1,0 +1,62 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/anst-bb3ecd4e9213ef2d",
+  "author": "anst-analyzer",
+  "timestamp": "2026-06-27T12:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2024-1000",
+        "aliases": [
+          "GHSA-aaaa-bbbb-cccc"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/net"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "Update golang.org/x/net to v0.17.0 or later.",
+      "timestamp": "2026-06-27T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-2000"
+      },
+      "products": [
+        {
+          "@id": "pkg:npm/lodash"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "timestamp": "2026-06-27T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-3000"
+      },
+      "products": [
+        {
+          "@id": "pkg:pypi/requests"
+        }
+      ],
+      "status": "under_investigation",
+      "timestamp": "2026-06-27T12:00:00Z"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-4000"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/org.apache.logging.log4j/log4j-core"
+        }
+      ],
+      "status": "under_investigation",
+      "timestamp": "2026-06-27T12:00:00Z"
+    }
+  ]
+}
