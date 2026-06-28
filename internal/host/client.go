@@ -14,7 +14,7 @@ import (
 
 	"github.com/commit0-dev/commit0-analyzer/pkg/contract"
 	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
-	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 )
 
 // PluginClient wraps a launched go-plugin Client together with the dispensed
@@ -99,8 +99,8 @@ func Launch(ctx context.Context, m *Manifest, opts LaunchOptions) (*PluginClient
 	cmd := exec.CommandContext(ctx, m.ExecPath)
 
 	cfg := &goplugin.ClientConfig{
-		HandshakeConfig: anstplugin.HandshakeConfig,
-		Plugins:         anstplugin.PluginMap(nil), // nil Impl: client side
+		HandshakeConfig: commit0plugin.HandshakeConfig,
+		Plugins:         commit0plugin.PluginMap(nil), // nil Impl: client side
 		Cmd:             cmd,
 		AllowedProtocols: []goplugin.Protocol{
 			goplugin.ProtocolGRPC,
@@ -121,10 +121,10 @@ func Launch(ctx context.Context, m *Manifest, opts LaunchOptions) (*PluginClient
 	}
 
 	// Dispense the commit0v1.Analyzer interface through the plugin map.
-	dispensed, err := rpcClient.Dispense(anstplugin.PluginName)
+	dispensed, err := rpcClient.Dispense(commit0plugin.PluginName)
 	if err != nil {
 		raw.Kill()
-		return nil, fmt.Errorf("launch %s: dispense %q: %w", m.Name, anstplugin.PluginName, err)
+		return nil, fmt.Errorf("launch %s: dispense %q: %w", m.Name, commit0plugin.PluginName, err)
 	}
 
 	analyzer, ok := dispensed.(commit0v1.AnalyzerClient)

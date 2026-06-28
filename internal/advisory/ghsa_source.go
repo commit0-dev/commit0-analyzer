@@ -722,7 +722,7 @@ var ghsaEcosystemEnum = map[string]string{
 	EcosystemSwiftURL:  "SWIFT",
 }
 
-// toGHSAEcosystem maps an commit0-analyzer ecosystem constant to its GHSA GraphQL enum value.
+// toGHSAEcosystem maps a commit0-analyzer ecosystem constant to its GHSA GraphQL enum value.
 // The second return is false when GHSA does not serve the ecosystem, in which
 // case Query returns (nil, nil).
 func toGHSAEcosystem(ecosystem string) (string, bool) {

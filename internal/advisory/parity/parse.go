@@ -84,7 +84,7 @@ func ParseCommit0VEX(data []byte) (map[string]string, error) {
 	return out, nil
 }
 
-// normalizeConfidence maps an commit0-analyzer proto Confidence enum string to a reach*
+// normalizeConfidence maps a commit0-analyzer proto Confidence enum string to a reach*
 // verdict. An unrecognized value maps to reachUnknown (unknown ≠ safe): it is
 // never treated as not-reachable, so it can never be mistaken for a sound
 // suppression in the comparison.

@@ -131,12 +131,12 @@ func identifiersIntersect(a, b []string) bool {
 	return false
 }
 
-// isReachable reports whether an commit0-analyzer finding is reachable (symbol or package).
+// isReachable reports whether a commit0-analyzer finding is reachable (symbol or package).
 func (f Finding) isReachable() bool {
 	return f.Reachability == reachSymbol || f.Reachability == reachPackage
 }
 
-// isNotReachable reports whether an commit0-analyzer finding carries a NOT_REACHABLE
+// isNotReachable reports whether a commit0-analyzer finding carries a NOT_REACHABLE
 // verdict. A NOT_REACHABLE verdict only counts as a sound suppression when the
 // analysis was also complete (see classifyAgainstCommit0, which pairs this with
 // !Incomplete to mirror vex.MapStatus): an incomplete analysis cannot prove

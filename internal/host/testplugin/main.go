@@ -27,12 +27,12 @@ import (
 	"strconv"
 	"time"
 
-	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
 )
 
 func main() {
-	anstplugin.Serve(&fakeAnalyzer{})
+	commit0plugin.Serve(&fakeAnalyzer{})
 }
 
 // fakeAnalyzer implements commit0v1.AnalyzerServer using env-var-driven modes.

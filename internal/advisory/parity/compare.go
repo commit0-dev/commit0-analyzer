@@ -5,7 +5,7 @@ import (
 	"sort"
 )
 
-// DeltaKind classifies the relationship between an commit0-analyzer result and a comparator
+// DeltaKind classifies the relationship between a commit0-analyzer result and a comparator
 // result for one vulnerability. The set is closed and ordered for deterministic
 // reporting.
 type DeltaKind string

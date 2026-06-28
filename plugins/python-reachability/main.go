@@ -72,7 +72,7 @@ import (
 	"time"
 
 	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
-	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 )
 
 // ---------------------------------------------------------------------------
@@ -1465,7 +1465,7 @@ func main() {
 		// Default mode: start the gRPC plugin server.
 		// The host (internal/host) launched us via go-plugin; we communicate
 		// over the stdio-multiplexed gRPC transport.
-		anstplugin.Serve(&grpcServer{})
+		commit0plugin.Serve(&grpcServer{})
 
 	case args[0] == "--extract-symbols":
 		// Read patch+files JSON from stdin, print symbol array to stdout.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
-	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 	engine "github.com/commit0-dev/commit0-analyzer/plugins/go-reachability/internal/engine"
 )
 
@@ -51,5 +51,5 @@ func (s *grpcServer) Analyze(
 // the go-plugin managed gRPC transport (stdio mux). This replaces the raw TCP
 // listener from Phase 4 so the host can drive the plugin through pkg/plugin.Serve.
 func main() {
-	anstplugin.Serve(&grpcServer{builder: nil})
+	commit0plugin.Serve(&grpcServer{builder: nil})
 }

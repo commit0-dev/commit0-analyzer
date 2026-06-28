@@ -894,7 +894,7 @@ var gitlabPackageType = map[string]string{
 	EcosystemPub:       "pub",
 }
 
-// toGitLabPackageType maps an commit0-analyzer ecosystem to its gemnasium package_type. The
+// toGitLabPackageType maps a commit0-analyzer ecosystem to its gemnasium package_type. The
 // second return is false when gemnasium does not serve the ecosystem.
 func toGitLabPackageType(ecosystem string) (string, bool) {
 	t, ok := gitlabPackageType[ecosystem]

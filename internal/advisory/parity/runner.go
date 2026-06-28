@@ -48,7 +48,7 @@ type RunOptions struct {
 
 // Run executes the harness over the full corpus and returns a populated report.
 // It never claims parity for an absent comparator: missing binaries are recorded
-// in SkippedComparators. commit0-analyzer itself is required; an commit0-analyzer failure on an entry is
+// in SkippedComparators. commit0-analyzer itself is required; a commit0-analyzer failure on an entry is
 // surfaced as an assertion failure, never silently skipped.
 func Run(ctx context.Context, opts RunOptions) (*Report, error) {
 	if opts.Commit0Binary == "" {

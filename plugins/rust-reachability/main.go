@@ -37,7 +37,7 @@ import (
 	"fmt"
 
 	commit0v1 "github.com/commit0-dev/commit0-analyzer/pkg/contract/commit0v1"
-	anstplugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
+	commit0plugin "github.com/commit0-dev/commit0-analyzer/pkg/plugin"
 	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/cargo"
 	"github.com/commit0-dev/commit0-analyzer/plugins/rust-reachability/internal/engine"
 )
@@ -97,5 +97,5 @@ func (s *grpcServer) Analyze(
 // The host (internal/host) launches this binary via exec and communicates over
 // the go-plugin managed gRPC transport (stdio mux).
 func main() {
-	anstplugin.Serve(&grpcServer{})
+	commit0plugin.Serve(&grpcServer{})
 }
