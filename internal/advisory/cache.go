@@ -18,7 +18,7 @@ import (
 
 // ManifestFilename is the well-known name for the snapshot manifest file inside
 // a snapshot directory.
-const ManifestFilename = "anst-snapshot-manifest.json"
+const ManifestFilename = "commit0-analyzer-snapshot-manifest.json"
 
 // DefaultStalenessWarning is the default threshold after which a snapshot is
 // considered stale. 7 days matches typical Go vuln DB update cadence.
@@ -478,7 +478,7 @@ func writeManifestToDir(destDir, dbModified string) error {
 func atomicWrite(path string, data []byte, fsync bool) error {
 	dir := filepath.Dir(path)
 
-	tmp, err := os.CreateTemp(dir, ".anst-tmp-*")
+	tmp, err := os.CreateTemp(dir, ".commit0-analyzer-tmp-*")
 	if err != nil {
 		return fmt.Errorf("advisory: atomicWrite: create temp file: %w", err)
 	}
@@ -540,7 +540,7 @@ func syncDir(dir string) error {
 // unlock function. It blocks until the lock is available.
 // This prevents cross-process torn writes to the same cache directory.
 func lockDir(dir string) (unlock func(), err error) {
-	lockPath := filepath.Join(dir, ".anst-cache.lock")
+	lockPath := filepath.Join(dir, ".commit0-analyzer-cache.lock")
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open lock file %q: %w", lockPath, err)

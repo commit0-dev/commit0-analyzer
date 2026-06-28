@@ -60,9 +60,9 @@ func TestParseAnstUnknownConfidenceIsNotSafe(t *testing.T) {
 	}
 }
 
-// TestParseAnstIncompleteSignals pins the real incompleteness signal anst emits:
+// TestParseAnstIncompleteSignals pins the real incompleteness signal commit0-analyzer emits:
 // confidence == CONFIDENCE_UNKNOWN AND/OR properties["synthetic"] == "true".
-// anst never emits a properties["incomplete"] key, so the harness must not depend
+// commit0-analyzer never emits a properties["incomplete"] key, so the harness must not depend
 // on one (depending on a phantom key would silently classify every finding as
 // complete and launder an incomplete NOT_REACHABLE into a sound suppression).
 func TestParseAnstIncompleteSignals(t *testing.T) {
@@ -117,7 +117,7 @@ func TestParseAnstIncompleteSignals(t *testing.T) {
 }
 
 // TestParseAnstKEVAndTier verifies that the KEV flag and risk tier are read from
-// the real properties anst stamps (properties["kev"], properties["risk_tier"]),
+// the real properties commit0-analyzer stamps (properties["kev"], properties["risk_tier"]),
 // so the harness can assert the KEV non-negotiable.
 func TestParseAnstKEVAndTier(t *testing.T) {
 	const data = `[{"advisory":{"id":"CVE-2021-44228"},"module":"org.apache.logging.log4j:log4j-core","confidence":"CONFIDENCE_PACKAGE_REACHABLE","properties":{"kev":"true","risk_tier":"critical","risk_score":"99.0"}}]`
@@ -236,7 +236,7 @@ func TestParsersRejectGarbage(t *testing.T) {
 		name string
 		p    func([]byte) ([]Finding, error)
 	}{
-		{"anst", ParseAnst},
+		{"commit0-analyzer", ParseAnst},
 		{"osv-scanner", ParseOSVScanner},
 		{"grype", ParseGrype},
 		{"trivy", ParseTrivy},

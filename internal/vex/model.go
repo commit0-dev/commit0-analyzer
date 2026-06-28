@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Author is the VEX document author/publisher anst stamps into every document.
+// Author is the VEX document author/publisher commit0-analyzer stamps into every document.
 const Author = "commit0-analyzer"
 
 // Status is a VEX exploitability status. The string values are the OpenVEX
@@ -21,10 +21,10 @@ const (
 	// StatusAffected means the vulnerable code is reachable (package or symbol).
 	StatusAffected Status = "affected"
 	// StatusUnderInvestigation means reachability is unknown or analysis was
-	// incomplete. This is the conservative status for anything anst could not
+	// incomplete. This is the conservative status for anything commit0-analyzer could not
 	// prove safe — it is NEVER not_affected.
 	StatusUnderInvestigation Status = "under_investigation"
-	// StatusFixed means the product ships a fixed version. anst does not emit it
+	// StatusFixed means the product ships a fixed version. commit0-analyzer does not emit it
 	// today (it reports reachability, not remediation state) but the model carries
 	// it so the formatters cover the full vocabulary.
 	StatusFixed Status = "fixed"
@@ -34,7 +34,7 @@ const (
 type Justification string
 
 const (
-	// JustificationVulnerableCodeNotInExecutePath is the only justification anst
+	// JustificationVulnerableCodeNotInExecutePath is the only justification commit0-analyzer
 	// emits: the vulnerable symbol/package is not on any execution path.
 	JustificationVulnerableCodeNotInExecutePath Justification = "vulnerable_code_not_in_execute_path"
 	// JustificationComponentNotPresent is reserved for the case where the
@@ -151,7 +151,7 @@ var purlTypes = map[string]string{
 }
 
 // PackageURL builds a Package URL (purl) for a package in the given advisory
-// ecosystem. version may be empty for a package-level identity (anst does not
+// ecosystem. version may be empty for a package-level identity (commit0-analyzer does not
 // invent a version it does not have). Returns "" when the ecosystem is unknown
 // or the name is empty so callers can fall back to a name identifier.
 func PackageURL(ecosystem, name, version string) string {

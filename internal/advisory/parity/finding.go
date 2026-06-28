@@ -5,17 +5,17 @@ import (
 	"strings"
 )
 
-// Tool names recorded on findings and in the report. anst is the subject under
+// Tool names recorded on findings and in the report. commit0-analyzer is the subject under
 // test; the rest are the external comparators it is measured against.
 const (
-	ToolAnst        = "anst"
+	ToolAnst        = "commit0-analyzer"
 	ToolOSVScanner  = "osv-scanner"
 	ToolGrype       = "grype"
 	ToolTrivy       = "trivy"
 	ToolGovulncheck = "govulncheck"
 )
 
-// Reachability verdicts as anst reports them in the native JSON Confidence
+// Reachability verdicts as commit0-analyzer reports them in the native JSON Confidence
 // field. They are normalized (lower-case, prefix-stripped) from the proto enum
 // strings so the comparison logic does not depend on the proto package.
 const (
@@ -25,7 +25,7 @@ const (
 	reachNotReachable = "not_reachable"
 )
 
-// Finding is one vulnerability finding normalized across tools so anst and a
+// Finding is one vulnerability finding normalized across tools so commit0-analyzer and a
 // comparator can be compared on a common identity. Only the fields needed for
 // coverage comparison are kept; richer per-tool detail is intentionally dropped.
 type Finding struct {
@@ -44,20 +44,20 @@ type Finding struct {
 	// Version is the affected installed version, when the tool reports it.
 	Version string
 
-	// Reachability is anst's verdict for this finding (one of the reach*
+	// Reachability is commit0-analyzer's verdict for this finding (one of the reach*
 	// constants); empty for comparator findings, which carry no reachability.
 	Reachability string
-	// Incomplete is true when anst could not decide reachability for this finding
+	// Incomplete is true when commit0-analyzer could not decide reachability for this finding
 	// (unknown ≠ safe): such a finding is surfaced, never dropped. The real signal
-	// anst emits is confidence == CONFIDENCE_UNKNOWN and/or
-	// properties["synthetic"] == "true" (a crashed/timed-out plugin marker); anst
+	// commit0-analyzer emits is confidence == CONFIDENCE_UNKNOWN and/or
+	// properties["synthetic"] == "true" (a crashed/timed-out plugin marker); commit0-analyzer
 	// never emits a properties["incomplete"] key, so the harness must not read one.
 	Incomplete bool
 
-	// KEV is true when anst flagged this finding's advisory as listed in CISA's
+	// KEV is true when commit0-analyzer flagged this finding's advisory as listed in CISA's
 	// Known Exploited Vulnerabilities catalog (properties["kev"] == "true").
 	KEV bool
-	// RiskTier is the fused risk band anst stamped (properties["risk_tier"], e.g.
+	// RiskTier is the fused risk band commit0-analyzer stamped (properties["risk_tier"], e.g.
 	// "critical", "high"); empty when no risk signal was computed.
 	RiskTier string
 }
@@ -131,12 +131,12 @@ func identifiersIntersect(a, b []string) bool {
 	return false
 }
 
-// isReachable reports whether an anst finding is reachable (symbol or package).
+// isReachable reports whether an commit0-analyzer finding is reachable (symbol or package).
 func (f Finding) isReachable() bool {
 	return f.Reachability == reachSymbol || f.Reachability == reachPackage
 }
 
-// isNotReachable reports whether an anst finding carries a NOT_REACHABLE
+// isNotReachable reports whether an commit0-analyzer finding carries a NOT_REACHABLE
 // verdict. A NOT_REACHABLE verdict only counts as a sound suppression when the
 // analysis was also complete (see classifyAgainstAnst, which pairs this with
 // !Incomplete to mirror vex.MapStatus): an incomplete analysis cannot prove

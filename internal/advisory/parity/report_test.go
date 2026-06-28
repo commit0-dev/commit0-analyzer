@@ -8,10 +8,10 @@ import (
 
 func sampleReport(t *testing.T) *Report {
 	t.Helper()
-	anst, osv := loadCompareInputs(t)
+	commit0Analyzer, osv := loadCompareInputs(t)
 	return &Report{
 		GeneratedFrom: "test",
-		Comparisons:   []ComparisonResult{Compare("go-fixture", ToolOSVScanner, anst, osv)},
+		Comparisons:   []ComparisonResult{Compare("go-fixture", ToolOSVScanner, commit0Analyzer, osv)},
 		Assertions: []Assertion{
 			{Name: "determinism/go-fixture", Passed: true, Detail: "byte-identical"},
 			{Name: "fail-closed/go-fixture", Passed: true, Detail: "exit 3"},

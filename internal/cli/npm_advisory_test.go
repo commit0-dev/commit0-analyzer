@@ -200,7 +200,7 @@ func TestScan_NPM_ListDepsAndOSVQuery(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -254,7 +254,7 @@ func TestScan_NPM_ScopedPackage(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -298,7 +298,7 @@ func TestScan_NPM_OSVFailure_WarnAndIncomplete(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -352,8 +352,8 @@ func TestScan_NPM_GoVulnDB_NotContacted(t *testing.T) {
 
 	_, stderr, _ := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + goSrv.URL, // would be hit if go-vuln-db queried
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_VULN_DB_URL=" + goSrv.URL, // would be hit if go-vuln-db queried
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -423,7 +423,7 @@ func TestScan_NPM_CorruptLockfileZeroRuntimeDeps_IsIncomplete(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -473,7 +473,7 @@ func TestScan_NPM_GoVulnDBOnlySource_WarnAndIncomplete(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + goSrv.URL,
+			"COMMIT0_VULN_DB_URL=" + goSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},

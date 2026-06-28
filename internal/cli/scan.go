@@ -273,7 +273,7 @@ const (
 )
 
 // nvdAPIDefaultURL is the NVD CVE API 2.0 endpoint used by the opt-in `nvd`
-// enricher and `nvd-cpe` source when online and ANST_NVD_API_URL is unset.
+// enricher and `nvd-cpe` source when online and COMMIT0_NVD_API_URL is unset.
 const nvdAPIDefaultURL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 // newScanCmd returns the cobra sub-command for `commit0-analyzer scan`.
@@ -521,9 +521,9 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 				cacheCfg.Dir = filepath.Join(cacheDir, "commit0-analyzer", "vuln-db")
 				cacheCfg.Offline = flags.offline
 				if !flags.offline {
-					// ANST_VULN_DB_URL overrides the default vuln.go.dev base URL (test seam).
+					// COMMIT0_VULN_DB_URL overrides the default vuln.go.dev base URL (test seam).
 					f := advisory.NewFetcher()
-					if override := os.Getenv("ANST_VULN_DB_URL"); override != "" {
+					if override := os.Getenv("COMMIT0_VULN_DB_URL"); override != "" {
 						f.BaseURL = override
 					}
 					cacheCfg.Fetcher = f
@@ -560,9 +560,9 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
-			// ANST_OSV_DB_URL overrides the default OSV GCS base URL (test seam).
+			// COMMIT0_OSV_DB_URL overrides the default OSV GCS base URL (test seam).
 			// BaseURL is an exported field on OSVBundleSource for exactly this purpose.
-			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+			if override := os.Getenv("COMMIT0_OSV_DB_URL"); override != "" {
 				osvSrc.BaseURL = override
 			}
 			osvSrc.ForceUpdate = flags.update
@@ -738,7 +738,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			osvSrc := advisory.NewOSVBundleSource(osvCacheDir)
-			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+			if override := os.Getenv("COMMIT0_OSV_DB_URL"); override != "" {
 				osvSrc.BaseURL = override
 			}
 			osvSrc.ForceUpdate = flags.update
@@ -926,7 +926,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			cratesOSV := advisory.NewOSVBundleSource(osvCacheDir)
-			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+			if override := os.Getenv("COMMIT0_OSV_DB_URL"); override != "" {
 				cratesOSV.BaseURL = override
 			}
 			cratesOSV.ForceUpdate = flags.update
@@ -1083,7 +1083,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			pypiOSV := advisory.NewOSVBundleSource(osvCacheDir)
-			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+			if override := os.Getenv("COMMIT0_OSV_DB_URL"); override != "" {
 				pypiOSV.BaseURL = override
 			}
 			pypiOSV.ForceUpdate = flags.update
@@ -1313,7 +1313,7 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 			osvCacheDir := filepath.Join(cacheDir, "commit0-analyzer", "osv")
 
 			laneAOSV := advisory.NewOSVBundleSource(osvCacheDir)
-			if override := os.Getenv("ANST_OSV_DB_URL"); override != "" {
+			if override := os.Getenv("COMMIT0_OSV_DB_URL"); override != "" {
 				laneAOSV.BaseURL = override
 			}
 			laneAOSV.ForceUpdate = flags.update
@@ -1565,16 +1565,16 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 
 		// Signal offline mode to child plugins via environment. The Rust plugin reads
-		// ANST_CARGO_OFFLINE to decide whether to pass --offline to cargo metadata.
+		// COMMIT0_CARGO_OFFLINE to decide whether to pass --offline to cargo metadata.
 		// Plugin subprocesses inherit the host process environment (go-plugin uses
 		// exec.CommandContext with no explicit cmd.Env override), and the plugin's
-		// sanitized cargo env allowlists ANST_CARGO_OFFLINE so it flows through to
+		// sanitized cargo env allowlists COMMIT0_CARGO_OFFLINE so it flows through to
 		// the cargo subprocess. We unset it when not in offline mode so a stale env
 		// var from a parent process cannot accidentally trigger offline mode.
 		if flags.offline {
-			_ = os.Setenv("ANST_CARGO_OFFLINE", "1")
+			_ = os.Setenv("COMMIT0_CARGO_OFFLINE", "1")
 		} else {
-			_ = os.Unsetenv("ANST_CARGO_OFFLINE")
+			_ = os.Unsetenv("COMMIT0_CARGO_OFFLINE")
 		}
 
 		stopPluginRun := telemetry.Span("scan.plugin.run")
@@ -2254,7 +2254,7 @@ func sanitizedCargoEnv() []string {
 		"CARGO_HTTP_",
 		// Offline mode signal forwarded from the host to the Rust plugin so
 		// the plugin's own cargo metadata invocation can also honour offline mode.
-		"ANST_CARGO_OFFLINE",
+		"COMMIT0_CARGO_OFFLINE",
 	}
 
 	var env []string
@@ -2538,14 +2538,14 @@ func parseSourceFlag(flag string) (map[string]bool, error) {
 }
 
 // snapshotStalenessThreshold returns the age past which a pinned Go vuln DB
-// snapshot is flagged stale. ANST_SNAPSHOT_STALENESS overrides
+// snapshot is flagged stale. COMMIT0_SNAPSHOT_STALENESS overrides
 // advisory.DefaultStalenessWarning with a Go duration string; an unset or
 // unparseable value uses the production default, so there is no behavior change
 // outside tests. It is a hermeticity seam: the E2E suite pins date-stamped corpus
 // snapshots whose age would otherwise drift past the default 7-day threshold over
 // calendar time, making the suite depend on wall-clock rather than its inputs.
 func snapshotStalenessThreshold() time.Duration {
-	if v := os.Getenv("ANST_SNAPSHOT_STALENESS"); v != "" {
+	if v := os.Getenv("COMMIT0_SNAPSHOT_STALENESS"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			return d
 		}
@@ -2556,7 +2556,7 @@ func snapshotStalenessThreshold() time.Duration {
 // buildGHSASource constructs the GHSA source for the given user cache root. The
 // offline OSV-format bundle under <cache>/commit0-analyzer/ghsa is the breadth
 // floor; the live GraphQL layer is token-gated (GITHUB_TOKEN) and disabled in
-// offline mode so --offline never touches the network. ANST_GHSA_GRAPHQL_URL
+// offline mode so --offline never touches the network. COMMIT0_GHSA_GRAPHQL_URL
 // overrides the endpoint (test seam). A missing bundle directory makes Query a
 // no-op (nil,nil), so attaching GHSA never converts "no advisory" into a failure.
 func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
@@ -2565,7 +2565,7 @@ func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
 		// Offline: bundle floor only; never attempt the live GraphQL layer.
 		return advisory.NewGHSASource(dir, advisory.WithGHSAGraphQLURL(""))
 	}
-	if override := os.Getenv("ANST_GHSA_GRAPHQL_URL"); override != "" {
+	if override := os.Getenv("COMMIT0_GHSA_GRAPHQL_URL"); override != "" {
 		return advisory.NewGHSASource(dir, advisory.WithGHSAGraphQLURL(override))
 	}
 	return advisory.NewGHSASource(dir)
@@ -2575,13 +2575,13 @@ func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
 // source for the given user cache root. The extracted archive under
 // <cache>/commit0-analyzer/gitlab is the offline floor; Query never touches the
 // network (it reads the already-extracted cache), so offline mode needs no
-// special handling here. ANST_GITLAB_DB_URL overrides the gitlab.com base URL
+// special handling here. COMMIT0_GITLAB_DB_URL overrides the gitlab.com base URL
 // (test seam; also lets advanced users retarget the primary gemnasium-db host).
 // A missing cache directory makes Query a no-op (nil,nil), so attaching GitLab
 // never converts "no advisory" into a failure.
 func buildGitLabSource(userCacheDir string) advisory.Source {
 	dir := filepath.Join(userCacheDir, "commit0-analyzer", "gitlab")
-	if override := os.Getenv("ANST_GITLAB_DB_URL"); override != "" {
+	if override := os.Getenv("COMMIT0_GITLAB_DB_URL"); override != "" {
 		return advisory.NewGitLabSource(dir, advisory.WithGitLabBaseURL(override))
 	}
 	return advisory.NewGitLabSource(dir)
@@ -2608,7 +2608,7 @@ func refreshGitLabArchive(ctx context.Context, dir string, flags scanFlags) (inc
 	}
 
 	var src *advisory.GitLabSource
-	if override := os.Getenv("ANST_GITLAB_DB_URL"); override != "" {
+	if override := os.Getenv("COMMIT0_GITLAB_DB_URL"); override != "" {
 		src = advisory.NewGitLabSource(dir, advisory.WithGitLabBaseURL(override))
 	} else {
 		src = advisory.NewGitLabSource(dir)
@@ -2632,7 +2632,7 @@ func gitlabCacheExists(dir string) bool {
 }
 
 // buildNVDCPESource constructs the opt-in NVD CPE-breadth source for the given
-// user cache root. Online it uses the NVD API 2.0 endpoint (ANST_NVD_API_URL
+// user cache root. Online it uses the NVD API 2.0 endpoint (COMMIT0_NVD_API_URL
 // override honored); offline it serves only the cached feed. A feed-load failure
 // surfaces as a query error (unknown ≠ safe), never an empty clean result.
 func buildNVDCPESource(userCacheDir string, offline bool) advisory.Source {
@@ -2640,7 +2640,7 @@ func buildNVDCPESource(userCacheDir string, offline bool) advisory.Source {
 	if offline {
 		return advisory.NewNVDCPESource(dir)
 	}
-	if override := os.Getenv("ANST_NVD_API_URL"); override != "" {
+	if override := os.Getenv("COMMIT0_NVD_API_URL"); override != "" {
 		return advisory.NewNVDCPESource(dir, advisory.WithNVDBaseURL(override))
 	}
 	return advisory.NewNVDCPESource(dir, advisory.WithNVDBaseURL(nvdAPIDefaultURL))
@@ -2688,8 +2688,8 @@ func appendSecondarySources(named []advisory.NamedSource, selected map[string]bo
 // catalog. The NVD enricher (rate-limited to 5 req/30s anonymous) and the EPSS
 // enricher (heavy daily feeds) are opt-in via --source nvd / --source epss, so a
 // default scan never pays their latency. All network enrichers honor --offline
-// (cached floor only). Test seams: KEV honors ANST_KEV_URL, EPSS honors
-// ANST_EPSS_API_URL / ANST_EPSS_CSV_URL, and NVD honors ANST_NVD_API_URL; each
+// (cached floor only). Test seams: KEV honors COMMIT0_KEV_URL, EPSS honors
+// COMMIT0_EPSS_API_URL / COMMIT0_EPSS_CSV_URL, and NVD honors COMMIT0_NVD_API_URL; each
 // falls back to its production endpoint when the seam is unset and online.
 // A degraded enricher warns and is skipped (see runEnrichment) rather than
 // changing the exit code, so a missing cache or network outage never marks the
@@ -2703,7 +2703,7 @@ func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string
 		CacheDir: filepath.Join(userCacheDir, "commit0-analyzer", "kev"),
 		Offline:  offline,
 	}
-	if url := os.Getenv("ANST_KEV_URL"); url != "" {
+	if url := os.Getenv("COMMIT0_KEV_URL"); url != "" {
 		kev.URL = url
 	}
 	chain := advisory.EnrichmentChain{
@@ -2716,8 +2716,8 @@ func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string
 		switch {
 		case offline:
 			chain = append(chain, advisory.NewNVDEnricher(nvdDir))
-		case os.Getenv("ANST_NVD_API_URL") != "":
-			chain = append(chain, advisory.NewNVDEnricher(nvdDir, advisory.WithNVDBaseURL(os.Getenv("ANST_NVD_API_URL"))))
+		case os.Getenv("COMMIT0_NVD_API_URL") != "":
+			chain = append(chain, advisory.NewNVDEnricher(nvdDir, advisory.WithNVDBaseURL(os.Getenv("COMMIT0_NVD_API_URL"))))
 		default:
 			chain = append(chain, advisory.NewNVDEnricher(nvdDir, advisory.WithNVDBaseURL(nvdAPIDefaultURL)))
 		}
@@ -2728,10 +2728,10 @@ func buildEnrichmentChain(userCacheDir string, offline bool, selected map[string
 			CacheDir: filepath.Join(userCacheDir, "commit0-analyzer", "epss"),
 			Offline:  offline,
 		}
-		if api := os.Getenv("ANST_EPSS_API_URL"); api != "" {
+		if api := os.Getenv("COMMIT0_EPSS_API_URL"); api != "" {
 			epss.APIBaseURL = api
 		}
-		if csv := os.Getenv("ANST_EPSS_CSV_URL"); csv != "" {
+		if csv := os.Getenv("COMMIT0_EPSS_CSV_URL"); csv != "" {
 			epss.CSVURL = csv
 		}
 		chain = append(chain, epss)
@@ -2773,7 +2773,7 @@ func osvCacheDirExists(osvRoot, ecosystem string) bool {
 // The binary is placed at a stable path within the OS temp dir to allow
 // callers to cache it across repeated scan invocations in the same process.
 func buildPlugin(ctx context.Context) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "anst-plugin-*")
+	tmpDir, err := os.MkdirTemp("", "commit0-analyzer-plugin-*")
 	if err != nil {
 		return "", fmt.Errorf("mktemp: %w", err)
 	}
@@ -2850,7 +2850,7 @@ func rustDistDir() string {
 // (the override disables on-demand build).
 // When overrideBin is empty and the dist binary is absent, the plugin is built
 // on demand via `go build` — mirroring the Go plugin's buildPlugin(ctx) path.
-// This enables zero-config: `anst scan <repo>` builds and runs all detected plugins.
+// This enables zero-config: `commit0-analyzer scan <repo>` builds and runs all detected plugins.
 // Returns (manifest, true) on success, or (nil, false) when the build fails or
 // the binary cannot be located — callers treat this identically to the absent case.
 func buildRustPluginManifest(ctx context.Context, overrideBin string) (*host.Manifest, bool) {

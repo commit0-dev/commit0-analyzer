@@ -151,7 +151,7 @@ func TestDetectEcosystems_BuildGradleKts(t *testing.T) {
 
 // TestDetectEcosystems_AllFiveEcosystems verifies that a polyglot repo with
 // all five manifest files detects all five ecosystems. This is the zero-config
-// acceptance test: `anst scan <path>` auto-detects every ecosystem present.
+// acceptance test: `commit0-analyzer scan <path>` auto-detects every ecosystem present.
 func TestDetectEcosystems_AllFiveEcosystems(t *testing.T) {
 	dir := t.TempDir()
 	writeFixtureFile(t, dir, "go.mod")
@@ -215,7 +215,7 @@ func TestResolveLanguage_Auto_Both(t *testing.T) {
 
 // TestResolveLanguage_Auto_AllFive verifies that --language auto (the default)
 // on a polyglot repo with all five manifest files resolves to all five
-// ecosystems. This proves the zero-config UX invariant: a single `anst scan
+// ecosystems. This proves the zero-config UX invariant: a single `commit0-analyzer scan
 // <path>` runs every detected plugin without any --language flag.
 func TestResolveLanguage_Auto_AllFive(t *testing.T) {
 	dir := t.TempDir()

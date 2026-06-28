@@ -68,12 +68,12 @@ func isExitError(err error, target **exec.ExitError) bool {
 }
 
 // runScanBinaryWithEnv is like runScanBinary but accepts extra env vars appended
-// to the process environment. Used to inject ANST_VULN_DB_URL for mock servers.
+// to the process environment. Used to inject COMMIT0_VULN_DB_URL for mock servers.
 //
 // KEV + CWE enrichment is always on, so every scan would otherwise reach the live
 // CISA KEV catalog. To keep the suite hermetic and fast, this points the
-// subprocess at a local server returning an empty KEV catalog via ANST_KEV_URL,
-// unless the test already supplied its own ANST_KEV_URL.
+// subprocess at a local server returning an empty KEV catalog via COMMIT0_KEV_URL,
+// unless the test already supplied its own COMMIT0_KEV_URL.
 func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 
@@ -86,19 +86,19 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 	require.NoError(t, err, "build commit0-analyzer CLI:\n%s", out)
 
 	env := append(os.Environ(), extraEnv...)
-	if !envHasKey(extraEnv, "ANST_KEV_URL") {
+	if !envHasKey(extraEnv, "COMMIT0_KEV_URL") {
 		kevSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"vulnerabilities":[]}`))
 		}))
 		t.Cleanup(kevSrv.Close)
-		env = append(env, "ANST_KEV_URL="+kevSrv.URL)
+		env = append(env, "COMMIT0_KEV_URL="+kevSrv.URL)
 	}
 	// Date-stamped corpus snapshots would drift past the default 7-day staleness
 	// threshold over calendar time, dropping advisories and flaking the suite.
 	// Pin a very large threshold so scans depend on their inputs, not wall-clock,
 	// unless a test exercises staleness with its own value.
-	if !envHasKey(extraEnv, "ANST_SNAPSHOT_STALENESS") {
-		env = append(env, "ANST_SNAPSHOT_STALENESS=876000h")
+	if !envHasKey(extraEnv, "COMMIT0_SNAPSHOT_STALENESS") {
+		env = append(env, "COMMIT0_SNAPSHOT_STALENESS=876000h")
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -137,7 +137,7 @@ func runScanBinaryWithEnv(t *testing.T, extraEnv []string, args ...string) (stdo
 
 // envHasKey reports whether env contains an assignment for the given KEY (i.e. an
 // entry of the form "KEY=..."). Used so the hermetic KEV seam defers to a test
-// that supplies its own ANST_KEV_URL.
+// that supplies its own COMMIT0_KEV_URL.
 func envHasKey(env []string, key string) bool {
 	prefix := key + "="
 	for _, e := range env {
@@ -468,7 +468,7 @@ func TestScan_OnlineMode_FetchesAndFindsAdvisory(t *testing.T) {
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + srv.URL,
+			"COMMIT0_VULN_DB_URL=" + srv.URL,
 			// Point XDG_CACHE_HOME at our temp dir so the CLI writes there.
 			"XDG_CACHE_HOME=" + cacheDir,
 			// macOS: override HOME so os.UserCacheDir() returns our temp dir.
@@ -553,7 +553,7 @@ func TestScan_FetchFailureNoCache_ExitsThree(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + srv.URL,
+			"COMMIT0_VULN_DB_URL=" + srv.URL,
 			"HOME=" + emptyCacheDir,
 			"XDG_CACHE_HOME=" + emptyCacheDir,
 		},
@@ -593,7 +593,7 @@ func TestScan_ProbeFailureWithValidCache_IncompleteNotZero(t *testing.T) {
 
 	_, populateStderr, populateCode := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + populateSrv.URL,
+			"COMMIT0_VULN_DB_URL=" + populateSrv.URL,
 			"HOME=" + cacheBaseDir,
 			"XDG_CACHE_HOME=" + cacheBaseDir,
 		},
@@ -614,7 +614,7 @@ func TestScan_ProbeFailureWithValidCache_IncompleteNotZero(t *testing.T) {
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + probeFails.URL,
+			"COMMIT0_VULN_DB_URL=" + probeFails.URL,
 			"HOME=" + cacheBaseDir,
 			"XDG_CACHE_HOME=" + cacheBaseDir,
 		},
@@ -700,8 +700,8 @@ func TestScan_MultiSource_DefaultBothSources(t *testing.T) {
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + goSrv.URL,
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_VULN_DB_URL=" + goSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheBaseDir,
 			"XDG_CACHE_HOME=" + cacheBaseDir,
 		},
@@ -744,8 +744,8 @@ func TestScan_MultiSource_OSVFailure_WarnAndIncomplete(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + goSrv.URL,
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_VULN_DB_URL=" + goSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheBaseDir,
 			"XDG_CACHE_HOME=" + cacheBaseDir,
 		},
@@ -795,8 +795,8 @@ func TestScan_MultiSource_GoDBOnly(t *testing.T) {
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_VULN_DB_URL=" + goSrv.URL,
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_VULN_DB_URL=" + goSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheBaseDir,
 			"XDG_CACHE_HOME=" + cacheBaseDir,
 		},
@@ -927,7 +927,7 @@ func TestScan_DBSnapshotIsReadOnly(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	_, stderr, _ := runScanBinaryWithEnv(t,
-		[]string{"ANST_VULN_DB_URL=" + srv.URL},
+		[]string{"COMMIT0_VULN_DB_URL=" + srv.URL},
 		"scan",
 		filepath.Join(corpusDir(t), "reachable-cve"),
 		"--format", "sarif",
@@ -1267,7 +1267,7 @@ func TestScan_RustPlugin_WithAdvisory_PACKAGE_REACHABLE(t *testing.T) {
 	}
 
 	extraEnv := []string{
-		"ANST_OSV_DB_URL=" + osvSrv.URL,
+		"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 		"HOME=" + cacheDir,
 		"XDG_CACHE_HOME=" + cacheDir,
 	}
@@ -1346,7 +1346,7 @@ func TestScan_RustPlugin_PartialResolve_ExitsThree(t *testing.T) {
 		}
 	}
 	extraEnv := []string{
-		"ANST_OSV_DB_URL=" + osvSrv.URL,
+		"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 		"HOME=" + cacheDir,
 		"XDG_CACHE_HOME=" + cacheDir,
 	}
@@ -1639,7 +1639,7 @@ func TestScan_PythonPlugin_RequirementsTxt_AdvisoryFound_ExitsThree(t *testing.T
 
 	stdout, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -1696,7 +1696,7 @@ func TestScan_PythonPlugin_ManifestOnly_NoLockfile_ExitsThree(t *testing.T) {
 
 	_, stderr, code := runScanBinaryWithEnv(t,
 		[]string{
-			"ANST_OSV_DB_URL=" + osvSrv.URL,
+			"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 			"HOME=" + cacheDir,
 			"XDG_CACHE_HOME=" + cacheDir,
 		},
@@ -1884,7 +1884,7 @@ func TestScan_SeverityJoin_OSVAdvisoryWithCVSS(t *testing.T) {
 		}
 	}
 	extraEnv := []string{
-		"ANST_OSV_DB_URL=" + osvSrv.URL,
+		"COMMIT0_OSV_DB_URL=" + osvSrv.URL,
 		"HOME=" + cacheDir,
 		"XDG_CACHE_HOME=" + cacheDir,
 	}

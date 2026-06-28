@@ -879,7 +879,7 @@ func applyFixedVersionBound(vr VersionRange, fixed []string) VersionRange {
 
 // ─── Ecosystem & slug mapping ───────────────────────────────────────────────
 
-// gitlabPackageType maps anst ecosystem constants to gemnasium package_type
+// gitlabPackageType maps commit0-analyzer ecosystem constants to gemnasium package_type
 // directory names. Ecosystems gemnasium does not serve (Hex, SwiftURL, conan)
 // are absent, so toGitLabPackageType reports ok=false for them.
 var gitlabPackageType = map[string]string{
@@ -894,7 +894,7 @@ var gitlabPackageType = map[string]string{
 	EcosystemPub:       "pub",
 }
 
-// toGitLabPackageType maps an anst ecosystem to its gemnasium package_type. The
+// toGitLabPackageType maps an commit0-analyzer ecosystem to its gemnasium package_type. The
 // second return is false when gemnasium does not serve the ecosystem.
 func toGitLabPackageType(ecosystem string) (string, bool) {
 	t, ok := gitlabPackageType[ecosystem]

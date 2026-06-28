@@ -65,7 +65,7 @@ export async function analyze(req: EngineRequest): Promise<Finding[]> {
   const { moduleRoot, advisories } = req;
 
   // Per-scan telemetry: reset accumulators so a debug summary reflects this
-  // scan only (no-op unless ANST_DEBUG/ANST_TELEMETRY is set). Flushed to
+  // scan only (no-op unless COMMIT0_DEBUG/COMMIT0_TELEMETRY is set). Flushed to
   // stderr before each return below.
   telemetry.reset();
 

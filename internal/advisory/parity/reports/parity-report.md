@@ -1,15 +1,15 @@
 # Advisory parity report
 
-Generated from: anst=anst corpus=4 baseline="go-vuln-db,osv" full="go-vuln-db,osv,ghsa"
+Generated from: commit0-analyzer=commit0-analyzer corpus=4 baseline="go-vuln-db,osv" full="go-vuln-db,osv,ghsa"
 
 ## Coverage summary
 
-| Corpus | Comparator | Shared | Sound suppression | Unknown surfaced | Misses (FN) | anst-unique |
+| Corpus | Comparator | Shared | Sound suppression | Unknown surfaced | Misses (FN) | commit0-analyzer-unique |
 |---|---|---|---|---|---|---|
 
 ## False negatives (misses)
 
-None — anst carried a record for every comparator finding.
+None — commit0-analyzer carried a record for every comparator finding.
 
 ## Coverage gain over the 2-source baseline
 

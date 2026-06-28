@@ -7,7 +7,7 @@
 // build scripts (build.rs) or proc-macros, making it safe on untrusted repos.
 // By default cargo metadata runs in online mode so it can resolve dependencies
 // on fresh clones where crate metadata is not yet in the local registry cache.
-// When ANST_CARGO_OFFLINE is set to a truthy value (e.g. "1"), --offline is
+// When COMMIT0_CARGO_OFFLINE is set to a truthy value (e.g. "1"), --offline is
 // passed to cargo so the scan runs from the already-fetched cache only — this
 // matches the behaviour requested by the user's --offline scan flag.
 // RUSTUP_TOOLCHAIN=stable is always pinned to prevent a repo-supplied
@@ -154,14 +154,14 @@ type cargoDepKind struct {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-// cargoOfflineRequested returns true when the ANST_CARGO_OFFLINE environment
+// cargoOfflineRequested returns true when the COMMIT0_CARGO_OFFLINE environment
 // variable is set to a truthy value ("1", "true", "yes", case-insensitive).
 //
 // The host scan process sets this variable before launching the plugin when
 // the user passed --offline, allowing the plugin to honour the same flag
 // without requiring a separate CLI argument or gRPC field.
 func cargoOfflineRequested() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("ANST_CARGO_OFFLINE")))
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("COMMIT0_CARGO_OFFLINE")))
 	return v == "1" || v == "true" || v == "yes"
 }
 
@@ -170,10 +170,10 @@ func cargoOfflineRequested() bool {
 //
 // Online vs offline mode: by default cargo metadata runs online so it can
 // fetch registry index and crate metadata on fresh clones. When the env var
-// ANST_CARGO_OFFLINE is set to a truthy value ("1", "true", "yes"), --offline
+// COMMIT0_CARGO_OFFLINE is set to a truthy value ("1", "true", "yes"), --offline
 // is added and cargo reads only the already-fetched local cache. This mirrors
 // the host scan's --offline flag, which the host signals by setting
-// ANST_CARGO_OFFLINE before launching the plugin subprocess.
+// COMMIT0_CARGO_OFFLINE before launching the plugin subprocess.
 //
 // On any failure (cargo not on PATH, non-zero exit, timeout, JSON parse
 // error, empty resolve), LoadManifest returns a non-nil Manifest with
@@ -433,7 +433,7 @@ func CrateNameFromID(id string) string {
 //   - XDG_*                 — honoured by some cargo/rustup paths on Linux
 //   - HTTP_PROXY/HTTPS_PROXY/NO_PROXY (and lowercase) — proxy for online resolution
 //   - CARGO_HTTP_*          — cargo-specific HTTP config (proxy, timeout, etc.)
-//   - ANST_CARGO_OFFLINE    — internal signal: host sets this to propagate --offline
+//   - COMMIT0_CARGO_OFFLINE    — internal signal: host sets this to propagate --offline
 //
 // Anything not on this list is dropped; RUSTUP_TOOLCHAIN is explicitly pinned
 // rather than inherited so it cannot be overridden by the calling environment.
@@ -472,7 +472,7 @@ func SanitizedCargoEnv() []string {
 		"CARGO_HTTP_",
 		// Internal signal from the host scan: set to "1" when the user passed
 		// --offline so the plugin's LoadManifest call can honour offline mode.
-		"ANST_CARGO_OFFLINE=",
+		"COMMIT0_CARGO_OFFLINE=",
 	}
 
 	// RUSTUP_TOOLCHAIN is pinned below, never inherited, so a rust-toolchain.toml

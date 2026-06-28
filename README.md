@@ -26,20 +26,20 @@
 go install github.com/commit0-dev/commit0-analyzer/cmd/commit0-analyzer@latest
 
 # Point it at any project — every ecosystem present is auto-detected and scanned.
-anst scan /path/to/project
+commit0-analyzer scan /path/to/project
 ```
 
-That's the whole interface. By default anst installs the project's dependencies (scripts disabled, so it never runs untrusted package code) and performs call-graph reachability, giving you real results with no flags.
+That's the whole interface. By default commit0-analyzer installs the project's dependencies (scripts disabled, so it never runs untrusted package code) and performs call-graph reachability, giving you real results with no flags.
 
 ```sh
 # Fast, no-side-effects pass (skip install + reachability → package-level matches):
-anst scan . --skip-deps-install --skip-reachability-analysis
+commit0-analyzer scan . --skip-deps-install --skip-reachability-analysis
 
 # CI: SARIF for GitHub code scanning + a VEX document for downstream tools:
-anst scan . --format sarif --vex openvex --vex-out anst.vex.json
+commit0-analyzer scan . --format sarif --vex openvex --vex-out commit0-analyzer.vex.json
 
 # Gate on exploit-in-the-wild signals, not just severity:
-anst scan . --gate-on reachable+unknown,kev,epss>=0.5
+commit0-analyzer scan . --gate-on reachable+unknown,kev,epss>=0.5
 ```
 
 > **JS/TS reachability** uses a small native plugin compiled with [Bun](https://bun.sh); install Bun for call-graph analysis of npm/Yarn/pnpm projects (everything else runs from the single Go binary).
@@ -88,7 +88,7 @@ Findings cover the **full installed closure** — direct *and* transitive. Depen
 
 ## Advisory intelligence
 
-anst merges several advisory databases and deduplicates by CVE/GHSA alias, so one vulnerability becomes one finding that credits every source:
+commit0-analyzer merges several advisory databases and deduplicates by CVE/GHSA alias, so one vulnerability becomes one finding that credits every source:
 
 | Source | Default | Role |
 |---|---|---|
@@ -98,7 +98,7 @@ anst merges several advisory databases and deduplicates by CVE/GHSA alias, so on
 
 Every finding gets a deterministic **0–100 risk score** (also emitted as SARIF `rank`) fusing *reachability × CVSS × KEV × EPSS* — a reachable, known-exploited CVE rises to the top; an unreachable one drops to zero.
 
-> GitLab's database defaults to the **MIT-licensed community mirror** (`gitlab-org/advisories-community`) so anst stays fully open-source; point `ANST_GITLAB_DB_URL` at the upstream gemnasium-db if you're entitled to it.
+> GitLab's database defaults to the **MIT-licensed community mirror** (`gitlab-org/advisories-community`) so commit0-analyzer stays fully open-source; point `COMMIT0_GITLAB_DB_URL` at the upstream gemnasium-db if you're entitled to it.
 
 ---
 
@@ -111,9 +111,9 @@ Every finding gets a deterministic **0–100 risk score** (also emitted as SARIF
 
 ```yaml
 # GitHub Actions
-- run: anst scan . --format sarif > anst.sarif
+- run: commit0-analyzer scan . --format sarif > commit0-analyzer.sarif
 - uses: github/codeql-action/upload-sarif@v3
-  with: { sarif_file: anst.sarif }
+  with: { sarif_file: commit0-analyzer.sarif }
 ```
 
 ---

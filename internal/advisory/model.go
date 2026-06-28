@@ -200,7 +200,7 @@ type Advisory struct {
 	Versions []string
 
 	// UndecidableRanges is true when the OSV affected entry carried a non-version
-	// (GIT-commit) range anst cannot compare AND no versions[] enumeration to fall
+	// (GIT-commit) range commit0-analyzer cannot compare AND no versions[] enumeration to fall
 	// back on. AffectsVersionV returns VersionUndecidable in that case so the
 	// advisory is forwarded as an UNKNOWN finding rather than silently dropped
 	// (unknown != safe). It distinguishes a GIT-range-only entry (undecidable) from

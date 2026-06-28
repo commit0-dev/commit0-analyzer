@@ -23,8 +23,8 @@ const (
 	// This is not a cryptographic secret — it is a UX guard against accidental
 	// execution. Binary hash pinning (SecureConfig) in internal/host is the
 	// actual integrity mechanism.
-	MagicCookieKey   = "ANST_PLUGIN_MAGIC_COOKIE"
-	MagicCookieValue = "anst-analyzer-v0-plugin" // TODO: bump to commit0-analyzer-v0-plugin once bun recompiles plugin binaries in CI
+	MagicCookieKey   = "COMMIT0_PLUGIN_MAGIC_COOKIE"
+	MagicCookieValue = "commit0-analyzer-v0-plugin"
 )
 
 // HandshakeConfig is the shared go-plugin handshake used by both host and

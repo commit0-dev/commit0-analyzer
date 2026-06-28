@@ -34,8 +34,8 @@
 
 import * as grpc from "@grpc/grpc-js";
 
-const MAGIC_COOKIE_KEY = "ANST_PLUGIN_MAGIC_COOKIE";
-const MAGIC_COOKIE_VALUE = "commit0-analyzer-v0-plugin"; // NOTE: prebuilt binary uses "anst-analyzer-v0-plugin" until bun recompiles it
+const MAGIC_COOKIE_KEY = "COMMIT0_PLUGIN_MAGIC_COOKIE";
+const MAGIC_COOKIE_VALUE = "commit0-analyzer-v0-plugin";
 
 // go-plugin protocol constants.
 const CORE_PROTOCOL = 1;

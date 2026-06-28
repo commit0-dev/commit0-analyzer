@@ -12,7 +12,7 @@ import (
 // stable-sorted by (corpus, comparator) and every contained slice is sorted — so
 // two runs on the same inputs marshal byte-identically.
 type Report struct {
-	// GeneratedFrom is a stable description of the corpus/anst version under test.
+	// GeneratedFrom is a stable description of the corpus/commit0-analyzer version under test.
 	GeneratedFrom string `json:"generated_from"`
 	// SkippedComparators lists comparators absent from PATH, with the reason. The
 	// harness records skips so a missing tool is never silently read as "parity".
@@ -133,7 +133,7 @@ func (r *Report) ToMarkdown() string {
 	}
 
 	b.WriteString("## Coverage summary\n\n")
-	b.WriteString("| Corpus | Comparator | Shared | Sound suppression | Unknown surfaced | Misses (FN) | anst-unique |\n")
+	b.WriteString("| Corpus | Comparator | Shared | Sound suppression | Unknown surfaced | Misses (FN) | commit0-analyzer-unique |\n")
 	b.WriteString("|---|---|---|---|---|---|---|\n")
 	for _, c := range r.Comparisons {
 		s := Summarize(c)
@@ -150,12 +150,12 @@ func (r *Report) ToMarkdown() string {
 			if d.Kind != DeltaMiss {
 				continue
 			}
-			fmt.Fprintf(&b, "- `%s` %s (%s found, anst missed): %s\n", d.VulnID, d.Package, c.Comparator, d.Reason)
+			fmt.Fprintf(&b, "- `%s` %s (%s found, commit0-analyzer missed): %s\n", d.VulnID, d.Package, c.Comparator, d.Reason)
 			wroteMiss = true
 		}
 	}
 	if !wroteMiss {
-		b.WriteString("None — anst carried a record for every comparator finding.\n")
+		b.WriteString("None — commit0-analyzer carried a record for every comparator finding.\n")
 	}
 	b.WriteString("\n")
 

@@ -14,13 +14,13 @@ const (
 
 // VEXForUnreachable is the empirical non-negotiable "a known-unreachable CVE ⇒
 // VEX status not_affected". It cross-checks that every COMPLETE, proven
-// NOT_REACHABLE anst finding is recorded in the VEX document as not_affected — the
+// NOT_REACHABLE commit0-analyzer finding is recorded in the VEX document as not_affected — the
 // proof that a reachability suppression flows through to the VEX output rather
 // than being silently dropped. statuses maps a normalized vuln identifier to its
 // VEX status (from ParseAnstVEX).
 //
 // Incomplete NOT_REACHABLE verdicts are skipped: they are not sound suppressions
-// (anst maps them to under_investigation), so requiring not_affected for them
+// (commit0-analyzer maps them to under_investigation), so requiring not_affected for them
 // would be wrong. When there are no complete NOT_REACHABLE findings, the result is
 // an honest pass with a note — there is nothing to cross-check, and the harness
 // never fabricates a suppression that did not occur.
@@ -58,7 +58,7 @@ func vexStatusForFinding(f Finding, statuses map[string]string) (string, bool) {
 // KEVTopTier is the empirical non-negotiable "a known-KEV dependency ⇒ KEV flag +
 // top risk tier". It asserts the finding identified by id (matched against the
 // primary id or any alias) carries the KEV flag and the top fused-risk band. A
-// KEV dependency anst never found is a miss (fail), not a pass.
+// KEV dependency commit0-analyzer never found is a miss (fail), not a pass.
 func KEVTopTier(findings []Finding, id string) (bool, string) {
 	norm := normalizeID(id)
 	for _, f := range findings {
@@ -73,7 +73,7 @@ func KEVTopTier(findings []Finding, id string) (bool, string) {
 		}
 		return true, fmt.Sprintf("%s: KEV flag set and risk tier = %q", id, f.RiskTier)
 	}
-	return false, fmt.Sprintf("%s not found in anst findings (KEV dependency missed)", id)
+	return false, fmt.Sprintf("%s not found in commit0-analyzer findings (KEV dependency missed)", id)
 }
 
 // hasIdentifier reports whether a finding carries the given normalized identifier.

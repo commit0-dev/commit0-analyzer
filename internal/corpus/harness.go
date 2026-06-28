@@ -224,7 +224,7 @@ func queryAdvisory(ctx context.Context, advisoryID, snapshotDir string) ([]*comm
 // buildPluginBinary compiles the go-reachability plugin into a temp directory
 // and returns the path to the resulting binary.
 func buildPluginBinary(ctx context.Context) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "anst-plugin-*")
+	tmpDir, err := os.MkdirTemp("", "commit0-analyzer-plugin-*")
 	if err != nil {
 		return "", fmt.Errorf("mktemp: %w", err)
 	}

@@ -152,10 +152,10 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 
 **Environment variables:**
 - `GITHUB_TOKEN` — enables the GHSA live GraphQL layer (raises rate limits; adds freshness over the cached bundle). Optional: without it GHSA falls back to the offline bundle.
-- The NVD API 2.0 endpoint is used over its public (no-key) rate limits; `ANST_NVD_API_URL` overrides the endpoint (primarily a test seam).
-- `ANST_KEV_URL` overrides the CISA KEV catalog URL (primarily a test seam).
-- `ANST_EPSS_API_URL` and `ANST_EPSS_CSV_URL` override the FIRST EPSS query API and daily-snapshot CSV endpoints respectively (primarily test seams).
-- `ANST_GITLAB_DB_URL` overrides the GitLab base URL used to resolve the default branch and download the gemnasium-db archive (a test seam; also lets advanced users retarget the primary `gemnasium-db` host instead of the community mirror).
+- The NVD API 2.0 endpoint is used over its public (no-key) rate limits; `COMMIT0_NVD_API_URL` overrides the endpoint (primarily a test seam).
+- `COMMIT0_KEV_URL` overrides the CISA KEV catalog URL (primarily a test seam).
+- `COMMIT0_EPSS_API_URL` and `COMMIT0_EPSS_CSV_URL` override the FIRST EPSS query API and daily-snapshot CSV endpoints respectively (primarily test seams).
+- `COMMIT0_GITLAB_DB_URL` overrides the GitLab base URL used to resolve the default branch and download the gemnasium-db archive (a test seam; also lets advanced users retarget the primary `gemnasium-db` host instead of the community mirror).
 
 **Honest coverage notes:**
 - For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and multi-ecosystem support.
@@ -171,7 +171,7 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 - For Ruby, OSV.dev includes RubyGems advisories. Reachability is package-level (lockfile-static; `Gemfile` is executable Ruby and is never evaluated). Version matching uses `Gem::Version` canonical segments.
 - For Elixir, OSV.dev includes Hex advisories. Reachability is package-level (lockfile-static; `mix.exs` is executable Elixir and is never evaluated). Version matching uses SemVer 2.0. Unparseable lockfiles are marked incomplete (exit 3).
 - For Dart, OSV.dev includes Pub advisories. Reachability is package-level (lockfile-static, no static call graph available). Advisory volume is currently thin. Version matching uses `pub_semver` (build metadata is significant, unlike SemVer 2.0).
-- For Swift, OSV.dev includes SwiftURL ecosystem advisories. Reachability is package-level (lockfile-static; `Package.swift` is executable Swift and is never evaluated). Packages are identified by their git repository URL (anst normalizes resolved URLs to match advisory identifiers). Version matching uses SemVer 2.0. All dependencies in `Package.resolved` are tagged as runtime (dependency types are not distinguished in the lockfile).
+- For Swift, OSV.dev includes SwiftURL ecosystem advisories. Reachability is package-level (lockfile-static; `Package.swift` is executable Swift and is never evaluated). Packages are identified by their git repository URL (commit0-analyzer normalizes resolved URLs to match advisory identifiers). Version matching uses SemVer 2.0. All dependencies in `Package.resolved` are tagged as runtime (dependency types are not distinguished in the lockfile).
 
 **Cache directories:**
 - Go vuln DB writable cache: `$XDG_CACHE_HOME/commit0-analyzer/vuln-db` (Linux) / `~/Library/Caches/commit0-analyzer/vuln-db` (macOS).
@@ -225,7 +225,7 @@ addition to the normal output. Formats: `openvex`, `cyclonedx` (CycloneDX-VEX), 
 (CSAF 2.0), or `all`. `--vex-out` sets the path (`-`/empty = stdout for a single format;
 with `--vex all` it must be a directory).
 
-Status mapping is the cardinal soundness contract — anst **never** emits a false `not_affected`:
+Status mapping is the cardinal soundness contract — commit0-analyzer **never** emits a false `not_affected`:
 
 | Reachability verdict | VEX status | Justification |
 |---|---|---|
@@ -258,7 +258,7 @@ commit0-analyzer scan --vex all --vex-out ./vex/
 #### Examples
 
 ```sh
-# Zero-config (default): point it at any project. anst auto-detects every
+# Zero-config (default): point it at any project. commit0-analyzer auto-detects every
 # ecosystem present (Go, JS/TS, Rust, Python, JVM, .NET, PHP, Ruby, Elixir, Dart, Swift) and scans them all — no --language.
 commit0-analyzer scan /path/to/project
 
@@ -362,14 +362,14 @@ The engine uses VTA (Variable Type Analysis) on a CHA/RTA base graph for interfa
 **Benchmark procedure (opt-in, not a hard CI gate):**
 
 ```sh
-# Set ANST_BENCH=1 to enable the perf benchmark in the corpus harness.
-ANST_BENCH=1 go test ./internal/corpus/... -bench=. -benchtime=1x -v
+# Set COMMIT0_BENCH=1 to enable the perf benchmark in the corpus harness.
+COMMIT0_BENCH=1 go test ./internal/corpus/... -bench=. -benchtime=1x -v
 ```
 
 Observed ratio on the `reachable-cve` corpus module (darwin/arm64, M-series):
 - Engine (VTA): ~2–4 s for a ~5 k-LOC synthetic module.
 - `govulncheck` (same module): ~1–2 s.
-- Ratio: ~1.5–2× (within the budget for the synthetic corpus; real ~50 k-LOC modules should be re-measured with `ANST_BENCH=1`).
+- Ratio: ~1.5–2× (within the budget for the synthetic corpus; real ~50 k-LOC modules should be re-measured with `COMMIT0_BENCH=1`).
 
 If the ratio exceeds 1.5× on your target, switch to RTA via `--algorithm rta` and record the precision trade-off in your security runbook.
 
@@ -379,6 +379,6 @@ If the ratio exceeds 1.5× on your target, switch to RTA via `--algorithm rta` a
 
 **Default writable cache:** `$XDG_CACHE_HOME/commit0-analyzer/vuln-db` (Linux) or `$HOME/Library/Caches/commit0-analyzer/vuln-db` (macOS).
 
-**Pinned snapshot format:** a directory of OSV JSON files plus `anst-snapshot-manifest.json` (generated by the cache layer when it fetches from `vuln.go.dev`). The manifest records a SHA-256 content digest and the `modified` timestamp from the DB at fetch time.
+**Pinned snapshot format:** a directory of OSV JSON files plus `commit0-analyzer-snapshot-manifest.json` (generated by the cache layer when it fetches from `vuln.go.dev`). The manifest records a SHA-256 content digest and the `modified` timestamp from the DB at fetch time.
 
 Two scans using the same pinned snapshot directory produce byte-identical output (offline determinism contract).

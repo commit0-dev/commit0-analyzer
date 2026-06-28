@@ -69,7 +69,7 @@ Magic-cookie guard (checked before the server starts):
 
 | Env var                  | Required value            |
 |--------------------------|---------------------------|
-| `ANST_PLUGIN_MAGIC_COOKIE` | `commit0-analyzer-v0-plugin` |
+| `COMMIT0_PLUGIN_MAGIC_COOKIE` | `commit0-analyzer-v0-plugin` |
 
 If the env var is absent or wrong the binary prints a human-readable error to
 stderr and exits 1. This is a UX guard against accidental direct execution, not

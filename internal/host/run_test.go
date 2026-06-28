@@ -25,7 +25,7 @@ var pluginBinPath string
 // The binary is shared across all tests in the package.
 func TestMain(m *testing.M) {
 	// Build the testplugin binary.
-	dir, err := os.MkdirTemp("", "anst-testplugin-*")
+	dir, err := os.MkdirTemp("", "commit0-analyzer-testplugin-*")
 	if err != nil {
 		panic("TestMain: create temp dir: " + err.Error())
 	}

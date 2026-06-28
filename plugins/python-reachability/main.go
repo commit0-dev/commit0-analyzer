@@ -112,7 +112,7 @@ var (
 // the process.
 func extractSidecar() (string, error) {
 	sidecarOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "anst-python-sidecar-*")
+		dir, err := os.MkdirTemp("", "commit0-analyzer-python-sidecar-*")
 		if err != nil {
 			sidecarErr = fmt.Errorf("python-reachability: mkdirtemp: %w", err)
 			return

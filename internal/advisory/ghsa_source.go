@@ -705,7 +705,7 @@ func fillGHSAFields(dst, src Advisory) Advisory {
 
 // ─── Ecosystem mapping ──────────────────────────────────────────────────────
 
-// ghsaEcosystemEnum maps anst ecosystem constants to the GitHub GraphQL
+// ghsaEcosystemEnum maps commit0-analyzer ecosystem constants to the GitHub GraphQL
 // SecurityAdvisoryEcosystem enum values. Ecosystems GHSA does not serve are
 // absent, so toGHSAEcosystem reports ok=false for them.
 var ghsaEcosystemEnum = map[string]string{
@@ -722,7 +722,7 @@ var ghsaEcosystemEnum = map[string]string{
 	EcosystemSwiftURL:  "SWIFT",
 }
 
-// toGHSAEcosystem maps an anst ecosystem constant to its GHSA GraphQL enum value.
+// toGHSAEcosystem maps an commit0-analyzer ecosystem constant to its GHSA GraphQL enum value.
 // The second return is false when GHSA does not serve the ecosystem, in which
 // case Query returns (nil, nil).
 func toGHSAEcosystem(ecosystem string) (string, bool) {

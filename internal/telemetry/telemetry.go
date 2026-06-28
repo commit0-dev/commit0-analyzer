@@ -1,5 +1,5 @@
 // Package telemetry provides lightweight phase timing for the scan pipeline.
-// All output goes to stderr and is gated on ANST_DEBUG or ANST_TELEMETRY env vars
+// All output goes to stderr and is gated on COMMIT0_DEBUG or COMMIT0_TELEMETRY env vars
 // so normal runs are completely unaffected.
 package telemetry
 
@@ -14,10 +14,10 @@ import (
 // out is the writer for telemetry lines. Overridable in tests.
 var out io.Writer = os.Stderr
 
-// Enabled returns true when ANST_DEBUG or ANST_TELEMETRY is set to a truthy
+// Enabled returns true when COMMIT0_DEBUG or COMMIT0_TELEMETRY is set to a truthy
 // value: "1", "true", or "yes" (case-insensitive).
 func Enabled() bool {
-	return isTruthy(os.Getenv("ANST_DEBUG")) || isTruthy(os.Getenv("ANST_TELEMETRY"))
+	return isTruthy(os.Getenv("COMMIT0_DEBUG")) || isTruthy(os.Getenv("COMMIT0_TELEMETRY"))
 }
 
 func isTruthy(v string) bool {

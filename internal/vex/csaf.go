@@ -8,7 +8,7 @@ import (
 )
 
 // CSAFFormatter renders a Document as a CSAF 2.0 "csaf_vex" document. CSAF groups
-// assertions per vulnerability with product_status arrays, so multiple anst
+// assertions per vulnerability with product_status arrays, so multiple commit0-analyzer
 // statements about the same vulnerability collapse into one CSAF vulnerability.
 type CSAFFormatter struct{}
 

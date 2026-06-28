@@ -51,7 +51,7 @@ type LaneAAdapter struct {
 
 	// DetectFiles is a list of filenames; if ANY exists in the module root, this
 	// ecosystem is considered present. Detection is zero-config: the adapter runs
-	// automatically when `anst scan <path>` is invoked (no --language flag needed).
+	// automatically when `commit0-analyzer scan <path>` is invoked (no --language flag needed).
 	// At least one entry must be a lockfile (not only an executable manifest) to
 	// avoid the ACE risk of detecting a manifest-only project and then running the
 	// build tool to resolve deps.

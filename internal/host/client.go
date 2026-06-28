@@ -52,7 +52,7 @@ type LaunchOptions struct {
 // Security (Red Team #7):
 //
 //   - Magic cookie: enforced by go-plugin's HandshakeConfig; a binary that does
-//     not read ANST_PLUGIN_MAGIC_COOKIE will be rejected before any RPC.
+//     not read COMMIT0_PLUGIN_MAGIC_COOKIE will be rejected before any RPC.
 //
 //   - Hash pinning: when m.SHA256 != "" and opts.SkipHashCheck == false,
 //     VerifyHash is called first to check ALL artifacts (main binary and every

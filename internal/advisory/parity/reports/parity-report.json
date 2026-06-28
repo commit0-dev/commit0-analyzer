@@ -1,5 +1,5 @@
 {
-  "generated_from": "anst=anst corpus=4 baseline=\"go-vuln-db,osv\" full=\"go-vuln-db,osv,ghsa\"",
+  "generated_from": "commit0-analyzer=commit0-analyzer corpus=4 baseline=\"go-vuln-db,osv\" full=\"go-vuln-db,osv,ghsa\"",
   "skipped_comparators": [
     {
       "comparator": "govulncheck",

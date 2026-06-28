@@ -85,7 +85,7 @@ describe("parsePnpmLockfile – lockfile v9 optional flag in snapshots block", (
   let dir: string;
 
   beforeAll(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), "anst-pnpm-v9-"));
+    dir = await mkdtemp(path.join(os.tmpdir(), "commit0-analyzer-pnpm-v9-"));
     await writeFile(path.join(dir, "package.json"), PACKAGE_JSON);
     await writeFile(path.join(dir, "pnpm-lock.yaml"), PNPM_LOCK);
     // Deliberately NO node_modules → every store path is missing.

@@ -2,23 +2,23 @@ package parity
 
 import "testing"
 
-// loadCompareInputs parses the anst + osv-scanner fixtures used by the
+// loadCompareInputs parses the commit0-analyzer + osv-scanner fixtures used by the
 // comparison tests.
-func loadCompareInputs(t *testing.T) (anst, osv []Finding) {
+func loadCompareInputs(t *testing.T) (commit0Analyzer, osv []Finding) {
 	t.Helper()
 	var err error
-	if anst, err = ParseAnst(readFixture(t, "anst.json")); err != nil {
-		t.Fatalf("parse anst: %v", err)
+	if commit0Analyzer, err = ParseAnst(readFixture(t, "anst.json")); err != nil {
+		t.Fatalf("parse commit0-analyzer: %v", err)
 	}
 	if osv, err = ParseOSVScanner(readFixture(t, "osv-scanner.json")); err != nil {
 		t.Fatalf("parse osv: %v", err)
 	}
-	return anst, osv
+	return commit0Analyzer, osv
 }
 
 func TestCompareClassifies(t *testing.T) {
-	anst, osv := loadCompareInputs(t)
-	res := Compare("go-fixture", ToolOSVScanner, anst, osv)
+	commit0Analyzer, osv := loadCompareInputs(t)
+	res := Compare("go-fixture", ToolOSVScanner, commit0Analyzer, osv)
 	s := Summarize(res)
 
 	if s.Shared != 1 {
@@ -39,11 +39,11 @@ func TestCompareClassifies(t *testing.T) {
 }
 
 func TestCompareMissIsNotLaunderedToSuppression(t *testing.T) {
-	// The cardinal rule: a comparator finding anst has no record of is a MISS,
-	// never a sound suppression. Only a proven NOT_REACHABLE anst record may be
+	// The cardinal rule: a comparator finding commit0-analyzer has no record of is a MISS,
+	// never a sound suppression. Only a proven NOT_REACHABLE commit0-analyzer record may be
 	// classified as suppressed.
-	anst, osv := loadCompareInputs(t)
-	res := Compare("go-fixture", ToolOSVScanner, anst, osv)
+	commit0Analyzer, osv := loadCompareInputs(t)
+	res := Compare("go-fixture", ToolOSVScanner, commit0Analyzer, osv)
 
 	var miss *Delta
 	for i := range res.Deltas {
@@ -60,18 +60,18 @@ func TestCompareMissIsNotLaunderedToSuppression(t *testing.T) {
 }
 
 func TestCompareSuppressionRequiresProvenNotReachable(t *testing.T) {
-	// An UNKNOWN/incomplete anst record must NOT be classified as a sound
+	// An UNKNOWN/incomplete commit0-analyzer record must NOT be classified as a sound
 	// suppression — it is surfaced, not proven safe.
-	anst := []Finding{
+	commit0Analyzer := []Finding{
 		{Tool: ToolAnst, VulnID: "CVE-2024-3333", Package: "p", Reachability: reachUnknown, Incomplete: true},
 	}
 	other := []Finding{{Tool: ToolGrype, VulnID: "CVE-2024-3333", Package: "p"}}
-	res := Compare("c", ToolGrype, anst, other)
+	res := Compare("c", ToolGrype, commit0Analyzer, other)
 	if len(res.Deltas) != 1 {
 		t.Fatalf("want 1 delta, got %d", len(res.Deltas))
 	}
 	if res.Deltas[0].Kind != DeltaUnknownSurfaced {
-		t.Fatalf("unknown anst record classified as %q, want %q", res.Deltas[0].Kind, DeltaUnknownSurfaced)
+		t.Fatalf("unknown commit0-analyzer record classified as %q, want %q", res.Deltas[0].Kind, DeltaUnknownSurfaced)
 	}
 }
 
@@ -81,11 +81,11 @@ func TestCompareIncompleteNotReachableIsNotSuppression(t *testing.T) {
 	// This mirrors vex.MapStatus, which maps NOT_REACHABLE+incomplete to
 	// under_investigation, never not_affected. The harness must be at least as
 	// conservative as the product's own VEX guard.
-	anst := []Finding{
+	commit0Analyzer := []Finding{
 		{Tool: ToolAnst, VulnID: "CVE-2024-4444", Package: "p", Reachability: reachNotReachable, Incomplete: true},
 	}
 	other := []Finding{{Tool: ToolGrype, VulnID: "CVE-2024-4444", Package: "p"}}
-	res := Compare("c", ToolGrype, anst, other)
+	res := Compare("c", ToolGrype, commit0Analyzer, other)
 	if len(res.Deltas) != 1 {
 		t.Fatalf("want 1 delta, got %d", len(res.Deltas))
 	}
@@ -96,12 +96,12 @@ func TestCompareIncompleteNotReachableIsNotSuppression(t *testing.T) {
 
 func TestCompareCompleteNotReachableIsSuppression(t *testing.T) {
 	// The complement: a COMPLETE, proven NOT_REACHABLE verdict IS a sound
-	// suppression — anst's differentiator, not a miss.
-	anst := []Finding{
+	// suppression — commit0-analyzer's differentiator, not a miss.
+	commit0Analyzer := []Finding{
 		{Tool: ToolAnst, VulnID: "CVE-2024-5555", Package: "p", Reachability: reachNotReachable, Incomplete: false},
 	}
 	other := []Finding{{Tool: ToolGrype, VulnID: "CVE-2024-5555", Package: "p"}}
-	res := Compare("c", ToolGrype, anst, other)
+	res := Compare("c", ToolGrype, commit0Analyzer, other)
 	if len(res.Deltas) != 1 {
 		t.Fatalf("want 1 delta, got %d", len(res.Deltas))
 	}
@@ -111,9 +111,9 @@ func TestCompareCompleteNotReachableIsSuppression(t *testing.T) {
 }
 
 func TestCompareDeterministicOrder(t *testing.T) {
-	anst, osv := loadCompareInputs(t)
-	a := Compare("c", ToolOSVScanner, anst, osv)
-	b := Compare("c", ToolOSVScanner, anst, osv)
+	commit0Analyzer, osv := loadCompareInputs(t)
+	a := Compare("c", ToolOSVScanner, commit0Analyzer, osv)
+	b := Compare("c", ToolOSVScanner, commit0Analyzer, osv)
 	if len(a.Deltas) != len(b.Deltas) {
 		t.Fatalf("delta counts differ: %d vs %d", len(a.Deltas), len(b.Deltas))
 	}
