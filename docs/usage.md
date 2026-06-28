@@ -33,12 +33,15 @@ Scans a project for reachable dependency vulnerabilities. The path defaults to t
 
 **Pipeline:**
 1. Detect ecosystems at the project root (`--language` overrides auto-detect).
-2. Resolve dependencies per ecosystem (Go: `go list -m -json all`; JS/Rust/Python: parse lockfile; JVM/NuGet/Composer: parse lockfile or manifest).
-3. Fetch advisories from enabled sources (Go vuln DB, OSV.dev for npm/Rust/Python/Maven/NuGet/Packagist).
-4. Drive the appropriate analyzers: plugins (Go/JS/Rust/Python) via subprocess gRPC, or Lane-A lockfile resolvers (JVM/NuGet/Composer) host-side.
-5. Merge and sort findings deterministically.
-6. Render in the requested format.
-7. Evaluate the policy gate and exit with the appropriate code.
+2. **Install dependencies** with lifecycle/build scripts disabled (default; opt out with `--skip-deps-install`, skipped under `--offline` — see below).
+3. Resolve dependencies per ecosystem (Go: `go list -m -json all`; JS/Rust/Python: parse lockfile; JVM/NuGet/Composer: parse lockfile or manifest).
+4. Fetch advisories from enabled sources (Go vuln DB, OSV.dev for npm/Rust/Python/Maven/NuGet/Packagist).
+5. **Run reachability analysis** (default; the deepest-security default). Drive the appropriate analyzers: plugins (Go/JS/Rust/Python) via subprocess gRPC, or Lane-A lockfile resolvers (JVM/NuGet/Composer) host-side. With `--skip-reachability-analysis` the call-graph step is skipped and package-level advisory matches are reported at `UNKNOWN` confidence instead.
+6. Merge and sort findings deterministically.
+7. Render in the requested format.
+8. Evaluate the policy gate and exit with the appropriate code.
+
+**Defaults (deepest-security):** by default a scan both installs the project's dependencies (scripts disabled) and runs full call-graph reachability analysis. The two `--skip-*` flags below trade depth for speed; neither can make the scan report fewer vulnerabilities than the data supports (skipping only ever *widens* a finding to `UNKNOWN`, never narrows it to a clean pass).
 
 #### Flags
 
@@ -46,6 +49,8 @@ Scans a project for reachable dependency vulnerabilities. The path defaults to t
 |------|---------|-------------|
 | `--format` | `sarif` | Output format: `sarif`, `json`, or `table` |
 | `--language` | `auto` | Ecosystem: `auto`, `go`, `js`, `rust`, `python`, `java`, `dotnet`, `php`, `ruby`, `elixir`, `dart`, or `swift`; `auto` detects and runs all present ecosystems |
+| `--skip-deps-install` | `false` | Skip the default automatic dependency installation that runs before analysis (see "Automatic dependency installation" below) |
+| `--skip-reachability-analysis` | `false` | Report package-level advisory matches only; skip the call-graph reachability step. Findings are emitted at `UNKNOWN` confidence (see "Skipping reachability" below) |
 | `--symbols` | `false` | Resolve vulnerable-symbol data from advisory fix patches (network, cached) to enable symbol-level reachability; degrades to package-level when unavailable |
 | `--policy` | _(none)_ | Path to a YAML policy file |
 | `--gate-on` | _(none)_ | Confidence floor for gate failures: `reachable` (SYMBOL+PACKAGE only), `reachable+unknown` (gates UNKNOWN on runtime deps too), `all` (gate all non-NOT_REACHABLE findings). Overrides policy file if set. |
@@ -53,7 +58,7 @@ Scans a project for reachable dependency vulnerabilities. The path defaults to t
 | `--offline` | `false` | Disable network access; use existing writable cache or `--db-snapshot` |
 | `--update` | `false` | Force re-fetch of advisory data even when the cached version is current |
 | `--fail-on` | `high` | Minimum severity to fail: `low`, `medium`, `high`, `critical` |
-| `--source` | `go-vuln-db,osv,ghsa` | Comma-separated advisory sources: `go-vuln-db`, `osv`, `ghsa` (default). KEV + CWE enrichment is always on; opt-in: `epss`, `nvd`, `nvd-cpe` (see below) |
+| `--source` | `go-vuln-db,osv,ghsa,gitlab` | Comma-separated advisory sources: `go-vuln-db`, `osv`, `ghsa`, `gitlab` (default). KEV + CWE enrichment is always on; opt-in: `epss`, `nvd`, `nvd-cpe` (see below) |
 | `--vex` | _(off)_ | Emit a VEX document alongside the normal output: `openvex`, `cyclonedx`, `csaf`, or `all` (see below) |
 | `--vex-out` | _(stdout)_ | VEX output path; `-` or empty writes to stdout (single format only); with `--vex all` this must be a directory |
 | `--goos` | _(host GOOS)_ | GOOS override for Go build config |
@@ -65,6 +70,55 @@ The `--gate-on` flag also accepts opt-in, additive **risk predicates** appended 
 confidence tier (comma-separated): `kev`, `epss>=X` (`0 ≤ X ≤ 1`), and `risk>=Y` (`0 ≤ Y ≤ 100`).
 Predicates only *add* gating; they never relax the default gate. Example:
 `--gate-on reachable+unknown,kev,epss>=0.5`. See the Risk Prioritization section below.
+
+#### Automatic dependency installation
+
+By default `scan` materializes the project's dependency closure before analysis so that
+reachability sees the real installed graph. **Every installer runs with lifecycle/build
+scripts disabled** — a security scanner must never execute untrusted package
+install/postinstall code by default. This safety guarantee is non-negotiable and applies to
+every supported package manager.
+
+| Ecosystem | Action | Scripts disabled via |
+|---|---|---|
+| **JS** (`pnpm-lock.yaml`) | `pnpm install --frozen-lockfile --ignore-scripts` | `--ignore-scripts` |
+| **JS** (`yarn.lock`) | `yarn install --ignore-scripts` (classic flags) | `--ignore-scripts` |
+| **JS** (`package-lock.json`) | `npm ci --ignore-scripts` | `--ignore-scripts` |
+| **JS** (no lockfile) | `npm install --ignore-scripts` | `--ignore-scripts` |
+| **Rust** | `cargo fetch` | `cargo fetch` runs no `build.rs`/proc-macros |
+| **Go** | none — resolved statically from `go.mod`/`go.sum` | n/a |
+| **JVM / .NET / PHP / Ruby / Elixir / Dart / Swift** | none — resolved statically from the lockfile | n/a |
+| **Python** | none (deferred) — installing sdists runs `setup.py`/build backends, a code-execution risk; install your venv yourself and the plugin reads it | n/a |
+
+JS install is **skipped** when `node_modules` already exists (a CI-preinstalled tree is never
+clobbered). Installation is **best-effort**: if a package manager is missing from `PATH`, an
+install command fails, or the scan is `--offline`, a warning is printed to stderr and the scan
+continues with whatever dependencies are already present. If deps are still missing, the
+downstream "unknown ≠ safe" handling marks the scan incomplete (exit `3`) rather than passing
+clean. Use `--skip-deps-install` to opt out entirely; `--offline` never installs.
+
+#### Skipping reachability
+
+`--skip-reachability-analysis` reports **package-level advisory matches only** and skips the
+call-graph reachability step. Each matched advisory becomes a finding at `UNKNOWN` confidence
+(no reachability was computed, so the result cannot be narrowed — *unknown ≠ safe*). This is
+faster but noisier than the default; it is the right mode when you only need "which dependencies
+have known advisories" without call-path proofs.
+
+Invariants (this mode can never hide a vulnerability): it never drops a finding, never emits a
+`not_affected` / `NOT_REACHABLE` VEX statement (UNKNOWN maps to `under_investigation`), and never
+turns a real advisory match into a clean pass. A high/critical match still fails the gate
+(exit `1`); any other match that the severity gate does not catch forces exit `3` (a real match
+is never reported as exit `0`).
+
+**Per-ecosystem coverage in this mode:**
+- **Go, JS** — fully covered. Deps are enumerated without the reachability plugin (Go via
+  `go list`; JS via the plugin's fast local `--list-deps` project model, not the call graph).
+- **Rust, Python** — covered when the corresponding plugin binary is present (it is used to
+  enumerate/resolve the deps, not to compute reachability). When the binary is absent the deps
+  are not enumerated and the ecosystem is reported as incomplete (exit `3`) — never a clean pass.
+- **JVM / .NET / PHP / Ruby / Elixir / Dart / Swift** (Lane-A) — unaffected by this flag; they
+  are already lockfile-static package-level analyzers (no call graph exists to skip).
 
 #### Exit Codes
 
@@ -87,11 +141,12 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 | `go-vuln-db` | on | Go vulnerability database (`vuln.go.dev`). Symbol-level data; the primary source for Go modules. |
 | `osv` | on | OSV.dev offline bundle. Multiple ecosystems: Go, npm/JS, Rust (crates.io), Python (PyPI), Maven (JVM), NuGet (.NET), Packagist (PHP), RubyGems (Ruby), Hex (Elixir), Pub (Dart), SwiftURL (Swift). Package-level data (all ecosystems). |
 | `ghsa` | on | GitHub Security Advisory database. Hybrid: an OSV-format cached bundle is the offline floor; a live GraphQL layer adds freshness when `GITHUB_TOKEN` is set. With neither a bundle nor a token, GHSA is a no-op (returns no advisories without claiming clean), so enabling it is coverage-monotonic. |
+| `gitlab` | on | GitLab Advisory Database (gemnasium-db). One archive covering npm, Maven, PyPI, Go, NuGet, Packagist, RubyGems (`gem`), crates.io (`cargo`), and Pub; Hex/Swift are not served. Package-level data. Defaults to the **MIT-licensed community mirror** `gitlab-org/advisories-community`, which is time-delayed (~30 days) but carries no GitLab usage restrictions (the primary gemnasium-db does), so it is the correct default for this AGPL tool. Refreshed once per scan (single tarball, not per-ecosystem); a missing cache makes it a no-op (no advisories without claiming clean), so enabling it is coverage-monotonic. |
 | `epss` | opt-in | FIRST EPSS exploit-prediction **enricher**. It augments already-matched advisories with each CVE's exploitation probability/percentile; it is **not** a package→advisory matcher. Opt-in because the feeds (query API + daily CSV snapshot) are heavy enough to slow a default scan. |
 | `nvd` | opt-in | NVD CVE-keyed **enricher** (NIST NVD API 2.0). It augments already-matched advisories with CVSS vectors/base scores and CWE ids keyed by CVE; it is **not** a package→advisory matcher. Opt-in because the public API is rate-limited (5 requests / 30 s without a key). |
 | `nvd-cpe` | opt-in | NVD **CPE-breadth** source. Explicitly lower-confidence, non-gating CPE-based matches. NVD is CPE-keyed, not package-coordinate-keyed, so these matches never claim symbol/package reachability precision. |
 
-**Default: `go-vuln-db`, `osv`, and `ghsa` on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For Rust-only, Python-only, JVM-only, .NET-only, or PHP-only scans, `--source osv` is automatically used. The `epss`, `nvd`, and `nvd-cpe` tokens are opt-in; add them explicitly, e.g. `--source go-vuln-db,osv,ghsa,nvd,epss`.
+**Default: `go-vuln-db`, `osv`, `ghsa`, and `gitlab` on.** Use `--source go-vuln-db` to query only the Go vuln DB (e.g. for reproducible CI with a pinned snapshot). For Rust-only, Python-only, JVM-only, .NET-only, or PHP-only scans, `--source osv` is automatically used. The `epss`, `nvd`, and `nvd-cpe` tokens are opt-in; add them explicitly, e.g. `--source go-vuln-db,osv,ghsa,gitlab,nvd,epss`.
 
 **Always-on enrichment (not `--source` tokens):** the local **CWE** weakness normalizer and the **CISA KEV** catalog join run on every scan. They add no package→advisory edges and are cheap (CWE is local; KEV is a single small catalog). A degraded enricher (e.g. KEV catalog unreachable) warns and is skipped — enrichment is prioritization metadata, not coverage, so it never marks the scan incomplete or changes the exit code. The heavier EPSS and rate-limited NVD enrichers are gated behind their `--source` tokens.
 
@@ -100,11 +155,13 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 - The NVD API 2.0 endpoint is used over its public (no-key) rate limits; `ANST_NVD_API_URL` overrides the endpoint (primarily a test seam).
 - `ANST_KEV_URL` overrides the CISA KEV catalog URL (primarily a test seam).
 - `ANST_EPSS_API_URL` and `ANST_EPSS_CSV_URL` override the FIRST EPSS query API and daily-snapshot CSV endpoints respectively (primarily test seams).
+- `ANST_GITLAB_DB_URL` overrides the GitLab base URL used to resolve the default branch and download the gemnasium-db archive (a test seam; also lets advanced users retarget the primary `gemnasium-db` host instead of the community mirror).
 
 **Honest coverage notes:**
 - For Go modules, OSV.dev's "Go" dataset is the same underlying data as `vuln.go.dev` (OSV feeds the Go vuln DB). For Go, OSV adds near-zero additional advisory coverage — the merge layer dedup collapses OSV entries back onto existing Go-DB symbol-level advisories. The value is architectural: multi-source merge and multi-ecosystem support.
 - GHSA is package-level (no symbol data); the merge layer dedups GHSA against OSV/Go-DB by alias intersection so a CVE present in multiple sources collapses to one finding with all contributing sources attributed. **Measured caveat:** the parity harness (corpus run, no `GITHUB_TOKEN`) recorded **zero new findings** from adding GHSA to the `go-vuln-db,osv` baseline across Go, Python, and npm corpus entries — the OSV.dev offline bundle already aggregates GHSA advisories, so GHSA's *offline* floor overlaps OSV almost entirely. GHSA's incremental value is the live GraphQL **freshness** layer (active only when `GITHUB_TOKEN` is set) plus per-source provenance attribution, not additional offline coverage. See `internal/advisory/parity/reports/` and `docs/soundness-limits.md` for the measured numbers.
 - NVD (`nvd`) does not add new package matches — it is CVE-keyed CVSS/CWE enrichment on advisories already matched by the other sources. The CPE-breadth source (`nvd-cpe`) can add matches but is explicitly lower-confidence and non-gating: NVD is CPE-keyed, not package-coordinate-keyed, so a CPE match is never upgraded to a reachability claim.
+- GitLab (`gitlab`, gemnasium-db) is package-level (no symbol data); the merge layer dedups it against OSV/GHSA/Go-DB by alias intersection so a CVE present in multiple sources collapses to one finding with all contributing sources attributed. Its incremental value is the curated advisories GitLab maintains that OSV/GHSA may not carry (it shares OSV's trust tier as a vendor-neutral package-level aggregator). The default community mirror is time-delayed (~30 days), so the freshest entries lag the upstream gemnasium-db; an advisory whose `affected_range` cannot be parsed into a comparable range is forwarded as UNKNOWN (incomplete), never silently dropped or treated as not-affected.
 - For JS/TS, OSV.dev's npm bundle is the **only** supported advisory source. It is package-level (no symbol-level data). The JS plugin uses import-graph reachability to reduce install-scope noise.
 - For Rust, OSV.dev includes crates.io advisories plus RustSec advisory data (OSV curates RustSec feeds). Rust reachability is package-level (no static call graph available).
 - For Python, OSV.dev includes PyPI advisories. Python reachability is based on positive import-and-call-graph analysis (lockfile-static, no code execution required). Dynamic languages yield UNKNOWN by design when the app's importlib behavior cannot be statically determined.
@@ -119,6 +176,7 @@ Code `2` is intentionally unused (reserved by Go's runtime panic exit and govuln
 **Cache directories:**
 - Go vuln DB writable cache: `$XDG_CACHE_HOME/anst-analyzer/vuln-db` (Linux) / `~/Library/Caches/anst-analyzer/vuln-db` (macOS).
 - OSV bundle cache: `$XDG_CACHE_HOME/anst-analyzer/osv/Go/`, `osv/npm/`, `osv/crates-io/`, `osv/PyPI/`, `osv/Maven/`, `osv/NuGet/`, `osv/Packagist/`, `osv/RubyGems/`, `osv/Hex/`, `osv/Pub/`, `osv/SwiftURL/` on Linux; same structure under `~/Library/Caches/anst-analyzer/osv/` on macOS.
+- GitLab (gemnasium-db) cache: `$XDG_CACHE_HOME/anst-analyzer/gitlab/` (Linux) / `~/Library/Caches/anst-analyzer/gitlab/` (macOS). One extracted tree (`<package_type>/<package_slug>/<id>.yml`) shared across all ecosystems, re-downloaded at most once per day.
 
 #### Enrichment Columns
 

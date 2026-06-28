@@ -62,13 +62,14 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 
 ## Advisory Data Scope
 
-`anst-analyzer` queries three advisory sources by default, plus two opt-in NVD modes (configurable via `--source`):
+`anst-analyzer` queries four advisory sources by default, plus two opt-in NVD modes (configurable via `--source`):
 
 | Source | Default | Coverage | Symbol-level data |
 |---|---|---|---|
 | `go-vuln-db` (`vuln.go.dev`) | on | Go modules | Yes — the primary source for symbol-level precision. |
 | `osv` (`osv.dev` offline bundle) | on | Go, npm/JS, Rust (crates.io), Python (PyPI), Maven (JVM), NuGet (.NET), Packagist (PHP), RubyGems (Ruby), Hex (Elixir), Pub (Dart), SwiftURL (Swift) | No — package-level only (all ecosystems). |
 | `ghsa` (GitHub Security Advisory) | on | npm, PyPI, Maven, NuGet, RubyGems, Composer, and more (cross-ecosystem). Hybrid: OSV-format cached bundle (offline floor) + live GraphQL freshness when `GITHUB_TOKEN` is set. | No — package-level. |
+| `gitlab` (GitLab Advisory DB / gemnasium-db) | on | npm, Maven, PyPI, Go, NuGet, Packagist, RubyGems, crates.io, Pub (Hex/Swift not served). One archive, refreshed once per scan. Defaults to the MIT-licensed community mirror `gitlab-org/advisories-community` (time-delayed ~30 days; the primary gemnasium-db has usage restrictions). An unparseable `affected_range` is forwarded as UNKNOWN, never dropped. | No — package-level. |
 | `nvd` (NIST NVD API 2.0) | opt-in | CVE-keyed CVSS/CWE **enrichment** on already-matched advisories. Not a package matcher. | n/a (enricher). |
 | `nvd-cpe` (NVD CPE breadth) | opt-in | CPE-keyed breadth matches, explicitly **lower-confidence** and non-gating. | No — CPE-based, never upgraded to reachability. |
 
@@ -80,10 +81,10 @@ The Go vulnerability database sometimes records symbols that do not exist in the
 
 **Only the Go vuln DB carries symbol-level data.** OSV Go entries are package-level (`SymbolLevel=false`). When the same advisory appears in both sources, the Go-DB (symbol-level) representative is kept and OSV is attributed in `Sources`. No precision is ever invented: merging never fabricates symbol data from a package-level entry.
 
-**Multi-source dedup:** The same CVE appearing from multiple sources (Go-DB, OSV, GHSA) collapses to one merged advisory via alias matching (`{ID} ∪ Aliases` set intersection). The merged advisory carries every contributing source (e.g. `Sources: ["go-vuln-db", "osv.dev", "ghsa"]`) for auditability. Output is deterministic (stable-sorted by advisory ID).
+**Multi-source dedup:** The same CVE appearing from multiple sources (Go-DB, OSV, GHSA, GitLab) collapses to one merged advisory via alias matching (`{ID} ∪ Aliases` set intersection). The merged advisory carries every contributing source (e.g. `Sources: ["go-vuln-db", "osv.dev", "ghsa", "gitlab"]`) for auditability. Output is deterministic (stable-sorted by advisory ID).
 
 **Cross-source conflict resolution (fail-safe rules).** When sources disagree about an advisory (severity, version range, withdrawn status), the merge layer resolves by a documented, deterministic trust policy and records full provenance — a disagreement never silently drops coverage:
-- **Representative selection** prefers, in order: a symbol-level entry over package-level, then a wider/more-conservative affected range, then a higher source trust tier (`go-vuln-db` > `ghsa` > `osv` > `nvd-cpe`). The trust tier is only a final tie-break, never a reason to discard another source's match.
+- **Representative selection** prefers, in order: a symbol-level entry over package-level, then a wider/more-conservative affected range, then a higher source trust tier (`go-vuln-db` > `ghsa` > `osv` = `gitlab` > `nvd-cpe`). The trust tier is only a final tie-break, never a reason to discard another source's match.
 - **Severity** takes the highest reported across sources (conservative); each source's reported severity is retained in per-source provenance.
 - **Withdrawn** is honored only by unanimous agreement: a merged advisory is treated as withdrawn ONLY when every contributing source withdrew it. A single still-live source keeps the advisory surfaced (a retraction in one DB never silently erases an active match in another).
 - **NVD's CPE caveat:** NVD is CPE-keyed, not package-coordinate-keyed. `nvd` is therefore an enricher (CVSS/CWE by CVE) and `nvd-cpe` matches are tagged lower-confidence and **non-gating**. A CPE-breadth match is never promoted to package- or symbol-level reachability — no precision is invented.
