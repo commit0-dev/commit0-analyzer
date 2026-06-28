@@ -49,6 +49,14 @@ type scanFlags struct {
 	symbols         bool   // resolve vulnerable-symbol data from advisory fix patches
 	vexFormat       string // VEX output format(s): openvex|cyclonedx|csaf|all; "" = off
 	vexOut          string // VEX output path; "" or "-" = stdout (single format only)
+
+	// skipDepsInstall opts out of the default automatic dependency installation
+	// (scripts-disabled) that runs before analysis.
+	skipDepsInstall bool
+	// skipReachabilityAnalysis reports package-level advisory matches only and
+	// skips the call-graph reachability plugin step for plugin ecosystems
+	// (Go/JS/Rust/Python). Findings are emitted at CONFIDENCE_UNKNOWN.
+	skipReachabilityAnalysis bool
 }
 
 // ecosystems records which ecosystem marker files were detected in a module root.
@@ -235,27 +243,32 @@ var sourceAliases = map[string]string{
 	"osv":        advisory.SourceOSV,      // short alias for "osv.dev"
 	"osv.dev":    advisory.SourceOSV,      // SourceOSV = "osv.dev" (full canonical)
 	"ghsa":       advisory.SourceGHSA,     // GitHub Security Advisory (default-on)
+	"gitlab":     advisory.SourceGitLab,   // GitLab Advisory Database / gemnasium-db (default-on)
 	"nvd":        advisory.SourceNVD,      // NVD CVE-keyed enricher (opt-in)
 	"nvd-cpe":    advisory.SourceNVDCPE,   // NVD CPE-breadth source (opt-in, lower-confidence)
 	"epss":       advisory.SourceEPSS,     // EPSS exploit-prediction enricher (opt-in)
 }
 
-// defaultSourceFlag is the default --source value. GHSA joins go-vuln-db and OSV
-// as a real source; NVD enrichment (nvd) and CPE breadth (nvd-cpe) are opt-in.
-// Migration note: a default scan now also attaches GHSA. With no GHSA bundle or
-// GITHUB_TOKEN present GHSA is a no-op (returns no advisories without claiming
-// clean), so the change is coverage-monotonic and gate-compatible.
-const defaultSourceFlag = "go-vuln-db,osv,ghsa"
+// defaultSourceFlag is the default --source value. GHSA and GitLab join
+// go-vuln-db and OSV as real sources; NVD enrichment (nvd) and CPE breadth
+// (nvd-cpe) are opt-in. Migration note: a default scan also attaches GHSA and
+// GitLab. With no cache or token present each is a no-op (returns no advisories
+// without claiming clean), so the change is coverage-monotonic and gate-
+// compatible. GitLab (gemnasium-db) aggregates package-level advisories OSV/GHSA
+// can miss, so it adds real breadth.
+const defaultSourceFlag = "go-vuln-db,osv,ghsa,gitlab"
 
 // Source trust tiers feed advisory.NamedSource.Trust, the merge representative
 // tie-break that engages only after the symbol-level and range-width rules.
 // Higher wins; the symbol-curated Go vuln DB outranks GHSA, which outranks the
-// OSV bundle; the opt-in NVD-CPE breadth source is lowest. 0 is reserved for
-// "unset" so an unranked source never wins a tie by accident.
+// vendor-neutral package-level aggregators (OSV and GitLab share the same tier);
+// the opt-in NVD-CPE breadth source is lowest. 0 is reserved for "unset" so an
+// unranked source never wins a tie by accident.
 const (
 	trustGoVulnDB = 4
 	trustGHSA     = 3
 	trustOSV      = 2
+	trustGitLab   = 2
 	trustNVDCPE   = 1
 )
 
@@ -322,7 +335,7 @@ Exit codes:
 	fs.StringVar(&flags.rustPluginBin, "rust-plugin-binary", "", "path to pre-built rust-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.pythonPluginBin, "python-plugin-binary", "", "path to pre-built python-reachability plugin binary (skip build)")
 	fs.StringVar(&flags.source, "source", defaultSourceFlag,
-		"comma-separated advisory sources: go-vuln-db, osv, ghsa (default). KEV + CWE enrichment always on; opt-in: epss, nvd (CVE enrichers), nvd-cpe (CPE breadth)")
+		"comma-separated advisory sources: go-vuln-db, osv, ghsa, gitlab (default). KEV + CWE enrichment always on; opt-in: epss, nvd (CVE enrichers), nvd-cpe (CPE breadth)")
 	fs.StringVar(&flags.language, "language", "auto",
 		"ecosystem to scan: auto|go|js|rust|python|java (default: auto — detected from manifest files; auto runs ALL detected ecosystems)")
 	fs.BoolVar(&flags.symbols, "symbols", false,
@@ -335,6 +348,10 @@ Exit codes:
 			"NOT_REACHABLE→not_affected, reachable→affected, UNKNOWN/incomplete→under_investigation (never not_affected)")
 	fs.StringVar(&flags.vexOut, "vex-out", "",
 		"VEX output path; '-' or empty writes to stdout (single format only). With --vex all, this must be a directory")
+	fs.BoolVar(&flags.skipDepsInstall, "skip-deps-install", false,
+		"skip automatic dependency installation before analysis")
+	fs.BoolVar(&flags.skipReachabilityAnalysis, "skip-reachability-analysis", false,
+		"report package-level advisory matches only; skip call-graph reachability")
 
 	return cmd
 }
@@ -393,6 +410,17 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 		}
 	}
 
+	// ── 1b. Auto-install dependencies (deepest-security default) ──────────────
+	// Materialize the scanned project's dependency closure before analysis so that
+	// reachability sees the real installed graph. Every installer runs with
+	// lifecycle/build scripts DISABLED (a security scanner must never execute
+	// untrusted package code by default). Best-effort: failures warn and continue
+	// (the downstream "unknown ≠ safe" handling marks the scan incomplete if deps
+	// remain missing). Opt out with --skip-deps-install; --offline never installs.
+	if !flags.skipDepsInstall && !flags.offline {
+		installDependencies(ctx, eco, moduleRoot, flags.offline)
+	}
+
 	// ── 2. Validate --source flag ─────────────────────────────────────────────
 	selectedSources, sourceErr := parseSourceFlag(flags.source)
 	if sourceErr != nil {
@@ -447,6 +475,31 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	// Non-Python ecosystems do not populate this map; their findings get no
 	// dep_type property (treated as runtime by the gate — conservative default).
 	depTypeByAdvID := map[string]string{}
+
+	// pkgLevelFindings accumulates package-level advisory findings for the plugin
+	// ecosystems (Go/JS/Rust/Python) when --skip-reachability-analysis is set. In
+	// that mode the call-graph plugin step is skipped, so each matched advisory is
+	// emitted directly as a CONFIDENCE_UNKNOWN finding (no reachability was
+	// computed → we cannot narrow → unknown ≠ safe). These are unused when the
+	// flag is off. Lane-A ecosystems are unaffected: they never run a call-graph
+	// plugin and already emit package-level findings in step 5e.
+	var pkgLevelFindings []*anstv1.Finding
+
+	// ── 4d. GitLab advisory archive (one tarball for every ecosystem) ─────────
+	// GitLab (gemnasium-db) serves many ecosystems from a single archive, so it is
+	// refreshed exactly once per scan here — not per-ecosystem like the OSV bundles.
+	// appendSecondarySources attaches the query-time source within each ecosystem
+	// block (Go/npm/Rust/Python/Lane-A); this step only ensures the shared cache is
+	// populated. A refresh failure degrades to the existing cache and marks the scan
+	// incomplete (unknown ≠ safe), never aborts; --offline skips the fetch.
+	if selectedSources[advisory.SourceGitLab] {
+		if cd, cacheErr := os.UserCacheDir(); cacheErr == nil {
+			gitlabDir := filepath.Join(cd, "anst-analyzer", "gitlab")
+			if refreshGitLabArchive(ctx, gitlabDir, flags) {
+				incomplete = true
+			}
+		}
+	}
 
 	if eco.hasGo {
 		cacheDir, cacheErr := os.UserCacheDir()
@@ -612,6 +665,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 					if advs[i].Severity != advisory.SeverityUnspecified {
 						severityByID[advs[i].ID] = advs[i].Severity
 					}
+				}
+				// --skip-reachability-analysis: emit a package-level UNKNOWN finding
+				// instead of running the call-graph plugin (see step 7).
+				if flags.skipReachabilityAnalysis && advs[i].ID != "" {
+					pkgLevelFindings = append(pkgLevelFindings, packageLevelFinding(&advs[i], dep.Path, "go"))
 				}
 			}
 		}
@@ -788,6 +846,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							incomplete = true
 						}
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						// --skip-reachability-analysis: emit a package-level UNKNOWN finding
+						// instead of running the call-graph plugin (see step 7).
+						if flags.skipReachabilityAnalysis && advs[i].ID != "" {
+							pkgLevelFindings = append(pkgLevelFindings, packageLevelFinding(&advs[i], dep.Name, "js"))
+						}
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
 							advByID[advs[i].ID] = &advs[i]
@@ -936,6 +999,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							incomplete = true
 						}
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						// --skip-reachability-analysis: emit a package-level UNKNOWN finding
+						// instead of running the call-graph plugin (see step 7).
+						if flags.skipReachabilityAnalysis && advs[i].ID != "" {
+							pkgLevelFindings = append(pkgLevelFindings, packageLevelFinding(&advs[i], dep.Name, "rust"))
+						}
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
 							advByID[advs[i].ID] = &advs[i]
@@ -1090,6 +1158,11 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 							incomplete = true
 						}
 						protoAdvs = append(protoAdvs, advs[i].ToProto())
+						// --skip-reachability-analysis: emit a package-level UNKNOWN finding
+						// instead of running the call-graph plugin (see step 7).
+						if flags.skipReachabilityAnalysis && advs[i].ID != "" {
+							pkgLevelFindings = append(pkgLevelFindings, packageLevelFinding(&advs[i], dep.Name, "python"))
+						}
 						if advs[i].ID != "" {
 							sourcesByID[advs[i].ID] = advs[i].Sources
 							advByID[advs[i].ID] = &advs[i]
@@ -1405,121 +1478,140 @@ func runScan(ctx context.Context, moduleRoot string, flags scanFlags) int {
 	}
 
 	// ── 7. Locate / build plugins and register ────────────────────────────────
-	reg := host.NewRegistry()
+	//
+	// --skip-reachability-analysis short-circuits the entire call-graph plugin
+	// step for the plugin ecosystems (Go/JS/Rust/Python). The matched advisories
+	// were already converted to package-level CONFIDENCE_UNKNOWN findings during
+	// the per-ecosystem advisory loops (pkgLevelFindings). Because the plugin
+	// never runs, no NOT_REACHABLE verdict is ever produced — skipping
+	// reachability can only widen a finding to UNKNOWN, never narrow it to a
+	// false-clean. Lane-A findings (step 5e) are unaffected either way.
+	var findings []*anstv1.Finding
+	if flags.skipReachabilityAnalysis {
+		findings = append(findings, pkgLevelFindings...)
+		// A real advisory match must never read as a clean pass when reachability
+		// was not computed. Marking the scan incomplete guarantees a non-zero exit
+		// for any match the severity gate does not already fail on (a high/critical
+		// match still exits 1 — gate failure takes precedence over incompleteness).
+		if len(pkgLevelFindings) > 0 {
+			incomplete = true
+		}
+	} else {
+		reg := host.NewRegistry()
 
-	if eco.hasGo {
-		pluginBin := flags.pluginBin
-		if pluginBin == "" {
-			var buildErr error
-			pluginBin, buildErr = buildPlugin(ctx)
-			if buildErr != nil {
-				fmt.Fprintf(os.Stderr, "anst-analyzer scan: build plugin: %v\n", buildErr)
+		if eco.hasGo {
+			pluginBin := flags.pluginBin
+			if pluginBin == "" {
+				var buildErr error
+				pluginBin, buildErr = buildPlugin(ctx)
+				if buildErr != nil {
+					fmt.Fprintf(os.Stderr, "anst-analyzer scan: build plugin: %v\n", buildErr)
+					return policy.ExitOperationalError
+				}
+			}
+			var absErr error
+			pluginBin, absErr = filepath.Abs(pluginBin)
+			if absErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve plugin binary path: %v\n", absErr)
+				return policy.ExitOperationalError
+			}
+
+			pluginHash, hashErr := host.SHA256OfFile(pluginBin)
+			if hashErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: hash plugin binary: %v\n", hashErr)
+				return policy.ExitOperationalError
+			}
+
+			if addErr := reg.Add(&host.Manifest{
+				Name:      "go-reachability",
+				ExecPath:  pluginBin,
+				Pillar:    "sca",
+				Languages: []string{"go"},
+				SHA256:    pluginHash,
+			}); addErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register go plugin: %v\n", addErr)
 				return policy.ExitOperationalError
 			}
 		}
-		var absErr error
-		pluginBin, absErr = filepath.Abs(pluginBin)
-		if absErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: resolve plugin binary path: %v\n", absErr)
+
+		if eco.hasJS {
+			m, buildErr := buildJSPluginManifest(flags.jsPluginBin)
+			if buildErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available: %v\n", buildErr)
+				return policy.ExitOperationalError
+			}
+			if addErr := reg.Add(m); addErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register js plugin: %v\n", addErr)
+				return policy.ExitOperationalError
+			}
+		}
+
+		// Register the Rust plugin when its manifest was successfully built in step 5c.
+		// rustManifest is non-nil only when eco.hasRust && the binary is present.
+		if rustManifest != nil {
+			if addErr := reg.Add(rustManifest); addErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register rust plugin: %v\n", addErr)
+				return policy.ExitOperationalError
+			}
+		}
+
+		// Register the Python plugin when its manifest was successfully built in step 5d.
+		// pythonManifest is non-nil only when eco.hasPython && the binary is present.
+		if pythonManifest != nil {
+			if addErr := reg.Add(pythonManifest); addErr != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: register python plugin: %v\n", addErr)
+				return policy.ExitOperationalError
+			}
+		}
+
+		// Signal offline mode to child plugins via environment. The Rust plugin reads
+		// ANST_CARGO_OFFLINE to decide whether to pass --offline to cargo metadata.
+		// Plugin subprocesses inherit the host process environment (go-plugin uses
+		// exec.CommandContext with no explicit cmd.Env override), and the plugin's
+		// sanitized cargo env allowlists ANST_CARGO_OFFLINE so it flows through to
+		// the cargo subprocess. We unset it when not in offline mode so a stale env
+		// var from a parent process cannot accidentally trigger offline mode.
+		if flags.offline {
+			_ = os.Setenv("ANST_CARGO_OFFLINE", "1")
+		} else {
+			_ = os.Unsetenv("ANST_CARGO_OFFLINE")
+		}
+
+		stopPluginRun := telemetry.Span("scan.plugin.run")
+		results, runErr := host.Run(ctx, reg, req, host.RunOptions{})
+		stopPluginRun()
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "anst-analyzer scan: host.Run: %v\n", runErr)
 			return policy.ExitOperationalError
 		}
 
-		pluginHash, hashErr := host.SHA256OfFile(pluginBin)
-		if hashErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: hash plugin binary: %v\n", hashErr)
-			return policy.ExitOperationalError
+		// Collect all findings and detect plugin errors.
+		//
+		// Lane-agnostic incomplete signal: a plugin may signal partial analysis by
+		// emitting a synthetic UNKNOWN finding with Properties["synthetic"]="true".
+		// This is the same marker that host.Run appends on crash (see run.go:syntheticUnknown);
+		// a clean plugin that detects its own partiality (e.g. partial resolve, no-venv,
+		// missing environment) MUST emit the same shape to propagate incomplete=true here.
+		//
+		// Wire contract (plugin author-facing):
+		//   1. For each advisory the plugin cannot decide (partial resolve, killed analysis,
+		//      dynamic dispatch, missing environment, unparseable version), emit:
+		//        Finding{Confidence: CONFIDENCE_UNKNOWN, Properties: {"synthetic": "true"}}
+		//   2. Return from the Analyze stream without error (normal EOF).
+		//   The host reads Properties["synthetic"]=="true" on CONFIDENCE_UNKNOWN findings
+		//   and sets incomplete=true at the policy gate, ensuring the scan exits 3 (not 0).
+		//
+		// This generalises the JS modelIncomplete→incomplete path (listNPMDeps returns a
+		// bool that callers must forward) into a single, language-agnostic detection pass
+		// that every ecosystem plugin can use without any per-language host-side wiring.
+		for _, pr := range results {
+			if pr.Err != nil {
+				fmt.Fprintf(os.Stderr, "anst-analyzer scan: plugin %s error: %v\n",
+					pr.Manifest.Name, pr.Err)
+				incomplete = true
+			}
+			findings = append(findings, pr.Findings...)
 		}
-
-		if addErr := reg.Add(&host.Manifest{
-			Name:      "go-reachability",
-			ExecPath:  pluginBin,
-			Pillar:    "sca",
-			Languages: []string{"go"},
-			SHA256:    pluginHash,
-		}); addErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register go plugin: %v\n", addErr)
-			return policy.ExitOperationalError
-		}
-	}
-
-	if eco.hasJS {
-		m, buildErr := buildJSPluginManifest(flags.jsPluginBin)
-		if buildErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: js plugin not available: %v\n", buildErr)
-			return policy.ExitOperationalError
-		}
-		if addErr := reg.Add(m); addErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register js plugin: %v\n", addErr)
-			return policy.ExitOperationalError
-		}
-	}
-
-	// Register the Rust plugin when its manifest was successfully built in step 5c.
-	// rustManifest is non-nil only when eco.hasRust && the binary is present.
-	if rustManifest != nil {
-		if addErr := reg.Add(rustManifest); addErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register rust plugin: %v\n", addErr)
-			return policy.ExitOperationalError
-		}
-	}
-
-	// Register the Python plugin when its manifest was successfully built in step 5d.
-	// pythonManifest is non-nil only when eco.hasPython && the binary is present.
-	if pythonManifest != nil {
-		if addErr := reg.Add(pythonManifest); addErr != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: register python plugin: %v\n", addErr)
-			return policy.ExitOperationalError
-		}
-	}
-
-	// Signal offline mode to child plugins via environment. The Rust plugin reads
-	// ANST_CARGO_OFFLINE to decide whether to pass --offline to cargo metadata.
-	// Plugin subprocesses inherit the host process environment (go-plugin uses
-	// exec.CommandContext with no explicit cmd.Env override), and the plugin's
-	// sanitized cargo env allowlists ANST_CARGO_OFFLINE so it flows through to
-	// the cargo subprocess. We unset it when not in offline mode so a stale env
-	// var from a parent process cannot accidentally trigger offline mode.
-	if flags.offline {
-		_ = os.Setenv("ANST_CARGO_OFFLINE", "1")
-	} else {
-		_ = os.Unsetenv("ANST_CARGO_OFFLINE")
-	}
-
-	stopPluginRun := telemetry.Span("scan.plugin.run")
-	results, runErr := host.Run(ctx, reg, req, host.RunOptions{})
-	stopPluginRun()
-	if runErr != nil {
-		fmt.Fprintf(os.Stderr, "anst-analyzer scan: host.Run: %v\n", runErr)
-		return policy.ExitOperationalError
-	}
-
-	// Collect all findings and detect plugin errors.
-	//
-	// Lane-agnostic incomplete signal: a plugin may signal partial analysis by
-	// emitting a synthetic UNKNOWN finding with Properties["synthetic"]="true".
-	// This is the same marker that host.Run appends on crash (see run.go:syntheticUnknown);
-	// a clean plugin that detects its own partiality (e.g. partial resolve, no-venv,
-	// missing environment) MUST emit the same shape to propagate incomplete=true here.
-	//
-	// Wire contract (plugin author-facing):
-	//   1. For each advisory the plugin cannot decide (partial resolve, killed analysis,
-	//      dynamic dispatch, missing environment, unparseable version), emit:
-	//        Finding{Confidence: CONFIDENCE_UNKNOWN, Properties: {"synthetic": "true"}}
-	//   2. Return from the Analyze stream without error (normal EOF).
-	//   The host reads Properties["synthetic"]=="true" on CONFIDENCE_UNKNOWN findings
-	//   and sets incomplete=true at the policy gate, ensuring the scan exits 3 (not 0).
-	//
-	// This generalises the JS modelIncomplete→incomplete path (listNPMDeps returns a
-	// bool that callers must forward) into a single, language-agnostic detection pass
-	// that every ecosystem plugin can use without any per-language host-side wiring.
-	var findings []*anstv1.Finding
-	for _, pr := range results {
-		if pr.Err != nil {
-			fmt.Fprintf(os.Stderr, "anst-analyzer scan: plugin %s error: %v\n",
-				pr.Manifest.Name, pr.Err)
-			incomplete = true
-		}
-		findings = append(findings, pr.Findings...)
 	}
 	// Merge Lane-A findings generated in step 5e. These were produced directly
 	// from OSV advisory matches without a plugin; stampAdvisorySeverity,
@@ -1634,6 +1726,27 @@ func hasPartialityMarker(findings []*anstv1.Finding) bool {
 		}
 	}
 	return false
+}
+
+// packageLevelFinding builds a CONFIDENCE_UNKNOWN finding directly from a matched
+// advisory for the --skip-reachability-analysis path. No call-graph reachability
+// was computed, so the confidence is UNKNOWN (we cannot narrow to NOT_REACHABLE —
+// unknown ≠ safe). The per-finding Incomplete flag mirrors the advisory's own
+// undecidability (e.g. an unparseable version); the scan-level incomplete signal
+// for "reachability was skipped" is set by the caller so a real advisory match
+// can never read as a clean pass.
+func packageLevelFinding(adv *advisory.Advisory, module, language string) *anstv1.Finding {
+	return &anstv1.Finding{
+		Advisory: &anstv1.AdvisoryRef{
+			Id:      adv.ID,
+			Aliases: append([]string(nil), adv.Aliases...),
+		},
+		Module:     module,
+		Confidence: anstv1.Confidence_CONFIDENCE_UNKNOWN,
+		Incomplete: adv.Incomplete,
+		Pillar:     "sca",
+		Language:   language,
+	}
 }
 
 // advisorySeverityToProto maps the internal advisory.Severity to the wire
@@ -2414,7 +2527,7 @@ func parseSourceFlag(flag string) (map[string]bool, error) {
 		}
 		canonical, ok := sourceAliases[token]
 		if !ok {
-			return nil, fmt.Errorf("unknown source %q: must be one of go-vuln-db, osv, ghsa, nvd, nvd-cpe, epss", token)
+			return nil, fmt.Errorf("unknown source %q: must be one of go-vuln-db, osv, ghsa, gitlab, nvd, nvd-cpe, epss", token)
 		}
 		enabled[canonical] = true
 	}
@@ -2458,6 +2571,66 @@ func buildGHSASource(userCacheDir string, offline bool) advisory.Source {
 	return advisory.NewGHSASource(dir)
 }
 
+// buildGitLabSource constructs the GitLab Advisory Database (gemnasium-db)
+// source for the given user cache root. The extracted archive under
+// <cache>/anst-analyzer/gitlab is the offline floor; Query never touches the
+// network (it reads the already-extracted cache), so offline mode needs no
+// special handling here. ANST_GITLAB_DB_URL overrides the gitlab.com base URL
+// (test seam; also lets advanced users retarget the primary gemnasium-db host).
+// A missing cache directory makes Query a no-op (nil,nil), so attaching GitLab
+// never converts "no advisory" into a failure.
+func buildGitLabSource(userCacheDir string) advisory.Source {
+	dir := filepath.Join(userCacheDir, "anst-analyzer", "gitlab")
+	if override := os.Getenv("ANST_GITLAB_DB_URL"); override != "" {
+		return advisory.NewGitLabSource(dir, advisory.WithGitLabBaseURL(override))
+	}
+	return advisory.NewGitLabSource(dir)
+}
+
+// refreshGitLabArchive downloads and extracts the GitLab advisory archive once
+// for the whole scan (gemnasium-db is a single archive covering every ecosystem,
+// unlike the per-ecosystem OSV bundles). It returns incomplete=true when the
+// source was requested but could not be made available, so the scan exits 3
+// rather than passing false-clean (unknown ≠ safe). It never aborts: a refresh
+// failure degrades to whatever cache already exists.
+func refreshGitLabArchive(ctx context.Context, dir string, flags scanFlags) (incomplete bool) {
+	if flags.offline || flags.dbSnapshot != "" {
+		// Offline/snapshot: never fetch. A requested-but-empty cache is incomplete
+		// only when the user explicitly selected gitlab; the default-on source
+		// silently degrades to no advisories otherwise (backward compatible).
+		if !gitlabCacheExists(dir) && flags.sourceExplicit {
+			fmt.Fprintf(os.Stderr,
+				"warning: GitLab advisory cache not populated at %s (run without --offline to fetch); "+
+					"GitLab source skipped, scan marked incomplete\n", dir)
+			return true
+		}
+		return false
+	}
+
+	var src *advisory.GitLabSource
+	if override := os.Getenv("ANST_GITLAB_DB_URL"); override != "" {
+		src = advisory.NewGitLabSource(dir, advisory.WithGitLabBaseURL(override))
+	} else {
+		src = advisory.NewGitLabSource(dir)
+	}
+	src.ForceUpdate = flags.update
+
+	if err := src.Refresh(ctx); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"warning: GitLab advisory source refresh failed (%s): %v; scan marked incomplete\n",
+			advisory.SourceGitLab, err)
+		return true
+	}
+	return false
+}
+
+// gitlabCacheExists reports whether the GitLab archive has been extracted (its
+// manifest is present) under dir.
+func gitlabCacheExists(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, advisory.ManifestFilename))
+	return err == nil && !info.IsDir()
+}
+
 // buildNVDCPESource constructs the opt-in NVD CPE-breadth source for the given
 // user cache root. Online it uses the NVD API 2.0 endpoint (ANST_NVD_API_URL
 // override honored); offline it serves only the cached feed. A feed-load failure
@@ -2486,6 +2659,13 @@ func appendSecondarySources(named []advisory.NamedSource, selected map[string]bo
 			Name:  advisory.SourceGHSA,
 			S:     buildGHSASource(userCacheDir, offline),
 			Trust: trustGHSA,
+		})
+	}
+	if selected[advisory.SourceGitLab] {
+		named = append(named, advisory.NamedSource{
+			Name:  advisory.SourceGitLab,
+			S:     buildGitLabSource(userCacheDir),
+			Trust: trustGitLab,
 		})
 	}
 	if selected[advisory.SourceNVDCPE] {

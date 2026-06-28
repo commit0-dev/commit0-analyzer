@@ -43,6 +43,7 @@ func TestParseSourceFlag_KnownTokens(t *testing.T) {
 		{"osv", map[string]bool{advisory.SourceOSV: true}},
 		{"osv.dev", map[string]bool{advisory.SourceOSV: true}},
 		{"ghsa", map[string]bool{advisory.SourceGHSA: true}},
+		{"gitlab", map[string]bool{advisory.SourceGitLab: true}},
 		{"nvd", map[string]bool{advisory.SourceNVD: true}},
 		{"nvd-cpe", map[string]bool{advisory.SourceNVDCPE: true}},
 		{"epss", map[string]bool{advisory.SourceEPSS: true}},
@@ -52,6 +53,7 @@ func TestParseSourceFlag_KnownTokens(t *testing.T) {
 				advisory.SourceGoVulnDB: true,
 				advisory.SourceOSV:      true,
 				advisory.SourceGHSA:     true,
+				advisory.SourceGitLab:   true,
 			},
 		},
 		{
@@ -75,13 +77,14 @@ func TestParseSourceFlag_KnownTokens(t *testing.T) {
 	}
 }
 
-// TestParseSourceFlag_DefaultIncludesGHSA pins the new default source set so a
-// regression that drops GHSA from the default is caught.
+// TestParseSourceFlag_DefaultIncludesGHSA pins the default source set so a
+// regression that drops GHSA or GitLab from the default is caught.
 func TestParseSourceFlag_DefaultIncludesGHSA(t *testing.T) {
-	assert.Equal(t, "go-vuln-db,osv,ghsa", defaultSourceFlag)
+	assert.Equal(t, "go-vuln-db,osv,ghsa,gitlab", defaultSourceFlag)
 	got, err := parseSourceFlag(defaultSourceFlag)
 	require.NoError(t, err)
 	assert.True(t, got[advisory.SourceGHSA], "GHSA must be in the default source set")
+	assert.True(t, got[advisory.SourceGitLab], "GitLab must be in the default source set")
 	assert.False(t, got[advisory.SourceNVD], "NVD enrichment must be opt-in, not default")
 	assert.False(t, got[advisory.SourceNVDCPE], "NVD-CPE must be opt-in, not default")
 	assert.False(t, got[advisory.SourceEPSS], "EPSS enrichment must be opt-in, not default")
