@@ -145,6 +145,21 @@ For the full soundness model, coverage measurements, and known limits, see [`doc
 
 ---
 
+## Documentation
+
+| Doc | Covers |
+|---|---|
+| [`docs/usage.md`](docs/usage.md) | Every CLI flag, environment variable, and policy-file field. |
+| [`docs/soundness-limits.md`](docs/soundness-limits.md) | The full soundness model, per-ecosystem reachability ceilings, and measured coverage numbers. |
+| [`docs/project-overview-pdr.md`](docs/project-overview-pdr.md) | Problem, persona, product requirements, non-goals, and success criteria. |
+| [`docs/system-architecture.md`](docs/system-architecture.md) | Scan pipeline, plugin host trust boundary, confidence tiers, exit codes. |
+| [`docs/codebase-summary.md`](docs/codebase-summary.md) | Directory-by-directory map of the codebase. |
+| [`docs/code-standards.md`](docs/code-standards.md) | Naming, testing, determinism, and soundness rules for contributors. |
+| [`docs/deployment-guide.md`](docs/deployment-guide.md) | Install, build from source, CI integration, offline operation. |
+| [`docs/project-roadmap.md`](docs/project-roadmap.md) | Shipped milestones and honest status of planned/deferred/out-of-scope work. |
+
+---
+
 ## Project status
 
 commit0-analyzer is under active development; the plugin protocol is `v0-PROVISIONAL`. Architecture, the plugin contract (`proto/commit0/v1/plugin.proto`), and contribution guidelines live in [`docs/`](docs/). Issues and PRs welcome.
