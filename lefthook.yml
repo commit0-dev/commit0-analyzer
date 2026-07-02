@@ -9,9 +9,28 @@
 #
 # Bypass in an emergency: git commit --no-verify  /  git push --no-verify
 
-# Enforce Conventional Commits on the commit message subject line.
+# Auto-append the DCO Signed-off-by trailer so every commit is signed
+# without having to remember `git commit -s`. Idempotent: adds nothing
+# when the trailer is already present.
+prepare-commit-msg:
+  commands:
+    sign-off:
+      run: |
+        name="$(git config user.name)"
+        email="$(git config user.email)"
+        git interpret-trailers --if-exists doNothing \
+          --trailer "Signed-off-by: $name <$email>" --in-place "{1}"
+
+# Enforce Conventional Commits on the commit message subject line,
+# and require the DCO Signed-off-by trailer (normally auto-added above).
 commit-msg:
   commands:
+    sign-off:
+      run: |
+        if grep -q '^Signed-off-by: ' "{1}"; then exit 0; fi
+        echo "✗ Commit must carry a Signed-off-by trailer (DCO)."
+        echo "  Use: git commit -s  (or reinstall hooks: make hooks)"
+        exit 1
     conventional:
       # {1} is the path to the commit message file passed by git.
       run: |
