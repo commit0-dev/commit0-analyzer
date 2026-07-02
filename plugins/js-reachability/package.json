@@ -18,7 +18,7 @@
     "@grpc/proto-loader": "^0.7.15",
     "oxc-parser": "0.72.3",
     "ts-morph": "24.0.0",
-    "yaml": "2.7.1"
+    "yaml": "2.8.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
